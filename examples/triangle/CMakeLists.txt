@@ -14,17 +14,33 @@ if(WIN32)
     )
 endif()
 
-# Set output directory
+# Set output directories
 set_target_properties(triangle PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
+# For multi-config generators (e.g. Visual Studio), ensure per-config subdirs
+if(MSVC)
+    set_target_properties(triangle PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin/Debug
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin/Release
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/bin/RelWithDebInfo
+        RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${CMAKE_BINARY_DIR}/bin/MinSizeRel
+    )
+endif()
+
+# Ensure VS runs from the target's output directory so relative paths work
+if(MSVC)
+    set_property(TARGET triangle PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:triangle>)
+endif()
+
 # Copy shaders to output directory (if they exist)
 if(EXISTS ${CMAKE_SOURCE_DIR}/shaders/compiled)
     add_custom_command(TARGET triangle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:triangle>/shaders/compiled
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/shaders/compiled 
-        ${CMAKE_BINARY_DIR}/bin/shaders/compiled
+        ${CMAKE_SOURCE_DIR}/shaders/compiled
+        $<TARGET_FILE_DIR:triangle>/shaders/compiled
         COMMENT "Copying compiled shaders to output directory"
     )
 endif()
