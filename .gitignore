@@ -43,7 +43,8 @@
 # build directory
 build/
 
-# AI/IDE generated files
+# AI/IDE generated directories/files
 .claude/
+CLAUDE.md
 .cursor/
 .vscode/
