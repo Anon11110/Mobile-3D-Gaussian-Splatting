@@ -39,3 +39,11 @@
 
 # debug information files
 *.dwo
+
+# build directory
+build/
+
+# AI/IDE generated files
+.claude/
+.cursor/
+.vscode/
