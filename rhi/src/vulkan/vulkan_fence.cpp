@@ -1,5 +1,6 @@
-#include "vulkan_backend.h"
 #include <stdexcept>
+
+#include "vulkan_backend.h"
 
 namespace RHI {
 
@@ -9,7 +10,7 @@ VulkanFence::VulkanFence(VkDevice device, bool signaled) : device(device), fence
     if (signaled) {
         createInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     }
-    
+
     if (vkCreateFence(device, &createInfo, nullptr, &fence) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create Vulkan fence");
     }
@@ -41,4 +42,4 @@ bool VulkanFence::IsSignaled() const {
     return result == VK_SUCCESS;
 }
 
-} // namespace RHI
+}  // namespace RHI

@@ -1,13 +1,16 @@
-#include "vulkan_backend.h"
 #include <GLFW/glfw3.h>
-#include <stdexcept>
+
 #include <algorithm>
+#include <stdexcept>
+
+#include "vulkan_backend.h"
 
 namespace RHI {
 
-VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkQueue graphicsQueue, const SwapchainDesc& desc)
-    : device(device), physicalDevice(physicalDevice), surface(surface), graphicsQueue(graphicsQueue), swapchain(VK_NULL_HANDLE) {
-    
+VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface,
+                                 VkQueue graphicsQueue, const SwapchainDesc& desc)
+    : device(device), physicalDevice(physicalDevice), surface(surface), graphicsQueue(graphicsQueue),
+      swapchain(VK_NULL_HANDLE) {
     // Query surface capabilities
     VkSurfaceCapabilitiesKHR capabilities;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
@@ -33,7 +36,7 @@ VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevic
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
     vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data());
 
-    VkPresentModeKHR chosenPresentMode = VK_PRESENT_MODE_FIFO_KHR; // Always available
+    VkPresentModeKHR chosenPresentMode = VK_PRESENT_MODE_FIFO_KHR;  // Always available
     if (!desc.vsync) {
         for (const auto& mode : presentModes) {
             if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
@@ -51,8 +54,7 @@ VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevic
     } else {
         swapchainExtent = {
             std::clamp(desc.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
-            std::clamp(desc.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
-        };
+            std::clamp(desc.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)};
     }
 
     // Choose image count
@@ -91,16 +93,14 @@ VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevic
     // Create back buffer textures
     backBuffers.reserve(actualImageCount);
     for (uint32_t i = 0; i < actualImageCount; i++) {
-        backBuffers.push_back(std::make_unique<VulkanTexture>(
-            device, swapchainImages[i], swapchainFormat, 
-            swapchainExtent.width, swapchainExtent.height, true
-        ));
+        backBuffers.push_back(std::make_unique<VulkanTexture>(device, swapchainImages[i], swapchainFormat,
+                                                              swapchainExtent.width, swapchainExtent.height, true));
     }
 }
 
 VulkanSwapchain::~VulkanSwapchain() {
     backBuffers.clear();
-    
+
     if (swapchain != VK_NULL_HANDLE) {
         vkDestroySwapchainKHR(device, swapchain, nullptr);
     }
@@ -108,7 +108,7 @@ VulkanSwapchain::~VulkanSwapchain() {
 
 uint32_t VulkanSwapchain::AcquireNextImage(IRHISemaphore* signalSemaphore) {
     uint32_t imageIndex;
-    
+
     VkSemaphore semaphore = VK_NULL_HANDLE;
     if (signalSemaphore) {
         auto* vkSemaphore = static_cast<VulkanSemaphore*>(signalSemaphore);
@@ -116,7 +116,7 @@ uint32_t VulkanSwapchain::AcquireNextImage(IRHISemaphore* signalSemaphore) {
     }
 
     VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, semaphore, VK_NULL_HANDLE, &imageIndex);
-    
+
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("Swapchain out of date - resize needed");
     } else if (result != VK_SUCCESS) {
@@ -143,7 +143,7 @@ void VulkanSwapchain::Present(uint32_t imageIndex, IRHISemaphore* waitSemaphore)
     presentInfo.pImageIndices = &imageIndex;
 
     VkResult result = vkQueuePresentKHR(graphicsQueue, &presentInfo);
-    
+
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("Swapchain out of date - resize needed");
     } else if (result != VK_SUCCESS) {
@@ -164,4 +164,4 @@ void VulkanSwapchain::Resize(uint32_t width, uint32_t height) {
     throw std::runtime_error("Swapchain resize not implemented");
 }
 
-} // namespace RHI
+}  // namespace RHI

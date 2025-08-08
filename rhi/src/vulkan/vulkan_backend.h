@@ -1,9 +1,11 @@
 #pragma once
 
-#include "rhi.h"
 #include <vulkan/vulkan.h>
+
 #include <memory>
 #include <vector>
+
+#include "rhi.h"
 
 namespace RHI {
 
@@ -20,27 +22,27 @@ class VulkanFence;
 
 // Vulkan Buffer implementation
 class VulkanBuffer : public IRHIBuffer {
-private:
+  private:
     VkDevice device;
     VkBuffer buffer;
     VkDeviceMemory memory;
     size_t size;
     void* mappedData;
 
-public:
+  public:
     VulkanBuffer(VkDevice device, VkPhysicalDevice physicalDevice, const BufferDesc& desc);
     ~VulkanBuffer() override;
 
     void* Map() override;
     void Unmap() override;
     size_t GetSize() const override;
-    
+
     VkBuffer GetHandle() const { return buffer; }
 };
 
 // Vulkan Texture implementation
 class VulkanTexture : public IRHITexture {
-private:
+  private:
     VkDevice device;
     VkImage image;
     VkImageView imageView;
@@ -50,26 +52,27 @@ private:
     TextureFormat format;
     bool ownedBySwapchain;
 
-public:
-    VulkanTexture(VkDevice device, VkImage image, VkFormat format, uint32_t width, uint32_t height, bool ownedBySwapchain = false);
+  public:
+    VulkanTexture(VkDevice device, VkImage image, VkFormat format, uint32_t width, uint32_t height,
+                  bool ownedBySwapchain = false);
     ~VulkanTexture() override;
 
     uint32_t GetWidth() const override { return width; }
     uint32_t GetHeight() const override { return height; }
     TextureFormat GetFormat() const override { return format; }
-    
+
     VkImage GetHandle() const { return image; }
     VkImageView GetImageView() const { return imageView; }
 };
 
-// Vulkan Shader implementation  
+// Vulkan Shader implementation
 class VulkanShader : public IRHIShader {
-private:
+  private:
     VkDevice device;
     VkShaderModule shaderModule;
     ShaderStage stage;
 
-public:
+  public:
     VulkanShader(VkDevice device, const ShaderDesc& desc);
     ~VulkanShader() override;
 
@@ -79,16 +82,16 @@ public:
 
 // Vulkan Pipeline implementation
 class VulkanPipeline : public IRHIPipeline {
-private:
+  private:
     VkDevice device;
     VkPipeline pipeline;
     VkPipelineLayout pipelineLayout;
     VkRenderPass renderPass;
 
-public:
+  public:
     VulkanPipeline(VkDevice device, const GraphicsPipelineDesc& desc);
     ~VulkanPipeline() override;
-    
+
     VkPipeline GetHandle() const { return pipeline; }
     VkPipelineLayout GetLayout() const { return pipelineLayout; }
     VkRenderPass GetRenderPass() const { return renderPass; }
@@ -96,14 +99,14 @@ public:
 
 // Vulkan Command List implementation
 class VulkanCommandList : public IRHICommandList {
-private:
+  private:
     VkDevice device;
     VkCommandBuffer commandBuffer;
     VkRenderPass currentRenderPass;
     VkFramebuffer currentFramebuffer;
     bool inRenderPass;
 
-public:
+  public:
     VulkanCommandList(VkDevice device, VkCommandPool commandPool);
     ~VulkanCommandList() override;
 
@@ -120,13 +123,13 @@ public:
     void SetScissor(int32_t x, int32_t y, uint32_t width, uint32_t height) override;
 
     void Draw(uint32_t vertexCount, uint32_t firstVertex = 0) override;
-    
+
     VkCommandBuffer GetHandle() const { return commandBuffer; }
 };
 
 // Vulkan Swapchain implementation
 class VulkanSwapchain : public IRHISwapchain {
-private:
+  private:
     VkDevice device;
     VkPhysicalDevice physicalDevice;
     VkSurfaceKHR surface;
@@ -137,8 +140,9 @@ private:
     VkFormat swapchainFormat;
     VkExtent2D swapchainExtent;
 
-public:
-    VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkQueue graphicsQueue, const SwapchainDesc& desc);
+  public:
+    VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkQueue graphicsQueue,
+                    const SwapchainDesc& desc);
     ~VulkanSwapchain() override;
 
     uint32_t AcquireNextImage(IRHISemaphore* signalSemaphore = nullptr) override;
@@ -150,31 +154,31 @@ public:
 
 // Vulkan Semaphore implementation
 class VulkanSemaphore : public IRHISemaphore {
-private:
+  private:
     VkDevice device;
     VkSemaphore semaphore;
 
-public:
+  public:
     VulkanSemaphore(VkDevice device);
     ~VulkanSemaphore() override;
-    
+
     VkSemaphore GetHandle() const { return semaphore; }
 };
 
 // Vulkan Fence implementation
 class VulkanFence : public IRHIFence {
-private:
+  private:
     VkDevice device;
     VkFence fence;
 
-public:
+  public:
     VulkanFence(VkDevice device, bool signaled = false);
     ~VulkanFence() override;
 
     void Wait(uint64_t timeout = UINT64_MAX) override;
     void Reset() override;
     bool IsSignaled() const override;
-    
+
     VkFence GetHandle() const { return fence; }
 };
 
@@ -184,4 +188,4 @@ TextureFormat VulkanFormatToTexture(VkFormat format);
 VkBufferUsageFlags BufferUsageToVulkan(BufferUsage usage);
 uint32_t FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
-} // namespace RHI
+}  // namespace RHI

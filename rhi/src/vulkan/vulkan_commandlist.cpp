@@ -1,12 +1,12 @@
-#include "vulkan_backend.h"
 #include <stdexcept>
+
+#include "vulkan_backend.h"
 
 namespace RHI {
 
 VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool)
-    : device(device), commandBuffer(VK_NULL_HANDLE), currentRenderPass(VK_NULL_HANDLE), 
+    : device(device), commandBuffer(VK_NULL_HANDLE), currentRenderPass(VK_NULL_HANDLE),
       currentFramebuffer(VK_NULL_HANDLE), inRenderPass(false) {
-    
     // Allocate command buffer
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -100,7 +100,7 @@ void VulkanCommandList::BeginRenderPass(const RenderPassBeginInfo& info) {
 
     // Create framebuffer on-demand
     if (currentFramebuffer == VK_NULL_HANDLE) {
-        VkImageView attachments[] = { colorTexture->GetImageView() };
+        VkImageView attachments[] = {colorTexture->GetImageView()};
 
         VkFramebufferCreateInfo framebufferInfo{};
         framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -125,7 +125,8 @@ void VulkanCommandList::BeginRenderPass(const RenderPassBeginInfo& info) {
     renderPassBegin.renderArea.extent = {info.width, info.height};
 
     VkClearValue clearColor = {};
-    clearColor.color = {{info.clearColor.color[0], info.clearColor.color[1], info.clearColor.color[2], info.clearColor.color[3]}};
+    clearColor.color = {
+        {info.clearColor.color[0], info.clearColor.color[1], info.clearColor.color[2], info.clearColor.color[3]}};
     renderPassBegin.clearValueCount = 1;
     renderPassBegin.pClearValues = &clearColor;
 
@@ -138,7 +139,7 @@ void VulkanCommandList::EndRenderPass() {
         vkCmdEndRenderPass(commandBuffer);
         inRenderPass = false;
     }
-    
+
     // Clean up framebuffer (recreate each frame)
     if (currentFramebuffer != VK_NULL_HANDLE) {
         vkDestroyFramebuffer(device, currentFramebuffer, nullptr);
@@ -153,8 +154,8 @@ void VulkanCommandList::SetPipeline(IRHIPipeline* pipeline) {
 
 void VulkanCommandList::SetVertexBuffer(uint32_t binding, IRHIBuffer* buffer, size_t offset) {
     auto* vkBuffer = static_cast<VulkanBuffer*>(buffer);
-    VkBuffer vertexBuffers[] = { vkBuffer->GetHandle() };
-    VkDeviceSize offsets[] = { static_cast<VkDeviceSize>(offset) };
+    VkBuffer vertexBuffers[] = {vkBuffer->GetHandle()};
+    VkDeviceSize offsets[] = {static_cast<VkDeviceSize>(offset)};
     vkCmdBindVertexBuffers(commandBuffer, binding, 1, vertexBuffers, offsets);
 }
 
@@ -180,4 +181,4 @@ void VulkanCommandList::Draw(uint32_t vertexCount, uint32_t firstVertex) {
     vkCmdDraw(commandBuffer, vertexCount, 1, firstVertex, 0);
 }
 
-} // namespace RHI
+}  // namespace RHI

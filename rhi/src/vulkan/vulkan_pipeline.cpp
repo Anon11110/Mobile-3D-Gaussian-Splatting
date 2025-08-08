@@ -1,12 +1,12 @@
-#include "vulkan_backend.h"
 #include <stdexcept>
 #include <vector>
+
+#include "vulkan_backend.h"
 
 namespace RHI {
 
 VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc& desc)
     : device(device), pipeline(VK_NULL_HANDLE), pipelineLayout(VK_NULL_HANDLE), renderPass(VK_NULL_HANDLE) {
-    
     auto* vertexShader = static_cast<VulkanShader*>(desc.vertexShader);
     auto* fragmentShader = static_cast<VulkanShader*>(desc.fragmentShader);
 
@@ -53,7 +53,7 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc& desc
 
     // Shader stages
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
-    
+
     VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
     vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -99,7 +99,7 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc& desc
     // Input assembly
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; // Simplified
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;  // Simplified
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
     // Viewport state (dynamic)
@@ -127,7 +127,8 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc& desc
 
     // Color blending
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     colorBlendAttachment.blendEnable = VK_FALSE;
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
@@ -137,7 +138,7 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc& desc
     colorBlending.pAttachments = &colorBlendAttachment;
 
     // Dynamic state
-    VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dynamicState{};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     dynamicState.dynamicStateCount = 2;
@@ -146,8 +147,8 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc& desc
     // Pipeline layout
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 0; // No descriptor sets for triangle
-    pipelineLayoutInfo.pushConstantRangeCount = 0; // No push constants
+    pipelineLayoutInfo.setLayoutCount = 0;          // No descriptor sets for triangle
+    pipelineLayoutInfo.pushConstantRangeCount = 0;  // No push constants
 
     if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create pipeline layout");
@@ -178,14 +179,14 @@ VulkanPipeline::~VulkanPipeline() {
     if (pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, pipeline, nullptr);
     }
-    
+
     if (pipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     }
-    
+
     if (renderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(device, renderPass, nullptr);
     }
 }
 
-} // namespace RHI
+}  // namespace RHI

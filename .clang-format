@@ -5,7 +5,7 @@ BasedOnStyle: LLVM
 IndentWidth: 4
 TabWidth: 4
 UseTab: Never
-ColumnLimit: 100
+ColumnLimit: 120
 
 # Indentation
 IndentCaseLabels: true
@@ -74,7 +74,7 @@ IncludeCategories:
     Priority:        3
   - Regex:           '^<.*>'
     Priority:        4
-  - Regex:           '^"gal/.*\.h"'
+  - Regex:           '^"rhi/.*\.h"'
     Priority:        5
   - Regex:           '^".*\.h"'
     Priority:        6
@@ -89,7 +89,7 @@ KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
 ReflowComments: true
 SortUsingDeclarations: true
-Standard: c++17
+Standard: c++20
 
 # Penalties (for line breaking decisions)
 PenaltyBreakAssignment: 2

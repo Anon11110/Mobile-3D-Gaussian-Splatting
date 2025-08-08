@@ -1,11 +1,11 @@
-#include "vulkan_backend.h"
 #include <stdexcept>
+
+#include "vulkan_backend.h"
 
 namespace RHI {
 
 VulkanShader::VulkanShader(VkDevice device, const ShaderDesc& desc)
     : device(device), shaderModule(VK_NULL_HANDLE), stage(desc.stage) {
-    
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = desc.codeSize;
@@ -22,4 +22,4 @@ VulkanShader::~VulkanShader() {
     }
 }
 
-} // namespace RHI
+}  // namespace RHI

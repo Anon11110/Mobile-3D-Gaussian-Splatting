@@ -1,13 +1,15 @@
-#include "vulkan_backend.h"
 #include <GLFW/glfw3.h>
+
+#include <cstring>
 #include <stdexcept>
 #include <vector>
-#include <cstring>
+
+#include "vulkan_backend.h"
 
 namespace RHI {
 
 class VulkanDevice : public IRHIDevice {
-private:
+  private:
     VkInstance instance;
     VkPhysicalDevice physicalDevice;
     VkDevice device;
@@ -15,16 +17,16 @@ private:
     uint32_t graphicsQueueFamily;
     VkCommandPool commandPool;
 
-    #ifdef DEBUG
+#ifdef DEBUG
     VkDebugUtilsMessengerEXT debugMessenger;
-    #endif
+#endif
 
-public:
+  public:
     VulkanDevice() {
         if (!glfwInit()) {
             throw std::runtime_error("Failed to initialize GLFW");
         }
-        
+
         CreateInstance();
         SetupDebugMessenger();
         PickPhysicalDevice();
@@ -35,9 +37,9 @@ public:
     ~VulkanDevice() override {
         vkDestroyCommandPool(device, commandPool, nullptr);
         vkDestroyDevice(device, nullptr);
-        #ifdef DEBUG
+#ifdef DEBUG
         DestroyDebugMessenger();
-        #endif
+#endif
         vkDestroyInstance(instance, nullptr);
         glfwTerminate();
     }
@@ -68,21 +70,14 @@ public:
         return std::make_unique<VulkanSwapchain>(device, physicalDevice, surface, graphicsQueue, desc);
     }
 
-    std::unique_ptr<IRHISemaphore> CreateSemaphore() override {
-        return std::make_unique<VulkanSemaphore>(device);
-    }
+    std::unique_ptr<IRHISemaphore> CreateSemaphore() override { return std::make_unique<VulkanSemaphore>(device); }
 
     std::unique_ptr<IRHIFence> CreateFence(bool signaled = false) override {
         return std::make_unique<VulkanFence>(device, signaled);
     }
 
-    void SubmitCommandLists(
-        IRHICommandList** cmdLists,
-        uint32_t count,
-        IRHISemaphore* waitSemaphore,
-        IRHISemaphore* signalSemaphore,
-        IRHIFence* signalFence
-    ) override {
+    void SubmitCommandLists(IRHICommandList** cmdLists, uint32_t count, IRHISemaphore* waitSemaphore,
+                            IRHISemaphore* signalSemaphore, IRHIFence* signalFence) override {
         std::vector<VkCommandBuffer> commandBuffers(count);
         for (uint32_t i = 0; i < count; ++i) {
             auto* vkCmdList = static_cast<VulkanCommandList*>(cmdLists[i]);
@@ -123,11 +118,9 @@ public:
         }
     }
 
-    void WaitIdle() override {
-        vkDeviceWaitIdle(device);
-    }
+    void WaitIdle() override { vkDeviceWaitIdle(device); }
 
-private:
+  private:
     void CreateInstance() {
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -141,15 +134,26 @@ private:
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
 
+// Enable portability enumeration for MoltenVK
+#ifdef __APPLE__
+        createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
         // Get required extensions
         uint32_t glfwExtensionCount = 0;
         const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-        
+
         if (glfwExtensions == nullptr) {
             throw std::runtime_error("GLFW failed to get required Vulkan extensions");
         }
 
         std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+
+// Add MoltenVK required extension for macOS
+#ifdef __APPLE__
+        extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
+
         // Debug extension disabled for now
 
         createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
@@ -164,30 +168,38 @@ private:
     }
 
     void SetupDebugMessenger() {
-        #ifdef DEBUG
+#ifdef DEBUG
         VkDebugUtilsMessengerCreateInfoEXT createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-        createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-        createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-        createInfo.pfnUserCallback = [](VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) -> VkBool32 {
+        createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                                     VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                     VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                                 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+        createInfo.pfnUserCallback =
+            [](VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType,
+               const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) -> VkBool32 {
             fprintf(stderr, "Validation layer: %s\n", pCallbackData->pMessage);
             return VK_FALSE;
         };
 
-        auto func = (PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+        auto func =
+            (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
         if (func != nullptr) {
             func(instance, &createInfo, nullptr, &debugMessenger);
         }
-        #endif
+#endif
     }
 
     void DestroyDebugMessenger() {
-        #ifdef DEBUG
-        auto func = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+#ifdef DEBUG
+        auto func =
+            (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
         if (func != nullptr) {
             func(instance, debugMessenger, nullptr);
         }
-        #endif
+#endif
     }
 
     void PickPhysicalDevice() {
@@ -268,4 +280,4 @@ std::unique_ptr<IRHIDevice> CreateRHIDevice() {
     return std::make_unique<VulkanDevice>();
 }
 
-} // namespace RHI
+}  // namespace RHI

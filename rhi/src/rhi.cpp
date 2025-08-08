@@ -8,4 +8,4 @@ namespace RHI {
 // Common utility functions can be added here
 // For now, the CreateRHIDevice() function is implemented in vulkan_device.cpp
 
-} // namespace RHI
+}  // namespace RHI

@@ -1,9 +1,11 @@
 #include <GLFW/glfw3.h>
-#include "rhi.h"
-#include <iostream>
-#include <fstream>
-#include <vector>
+
 #include <chrono>
+#include <fstream>
+#include <iostream>
+#include <vector>
+
+#include "rhi.h"
 
 struct Vertex {
     float position[3];
@@ -48,14 +50,12 @@ int main() {
         swapchainDesc.windowHandle = window;
         swapchainDesc.width = 800;
         swapchainDesc.height = 600;
+        swapchainDesc.format = RHI::TextureFormat::R8G8B8A8_UNORM;
         auto swapchain = device->CreateSwapchain(swapchainDesc);
-
         // Create vertex buffer
-        Vertex vertices[] = {
-            {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-            {{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-            {{ 0.0f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}
-        };
+        Vertex vertices[] = {{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+                             {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+                             {{0.0f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}};
 
         RHI::BufferDesc vbDesc{};
         vbDesc.size = sizeof(vertices);
@@ -87,12 +87,10 @@ int main() {
 
         // Vertex layout
         pipelineDesc.vertexLayout.attributes = {
-            {0, 0, RHI::TextureFormat::R32G32B32_FLOAT, 0},     // position
-            {1, 0, RHI::TextureFormat::R32G32B32_FLOAT, 12}     // color
+            {0, 0, RHI::TextureFormat::R32G32B32_FLOAT, 0},  // position
+            {1, 0, RHI::TextureFormat::R32G32B32_FLOAT, 12}  // color
         };
-        pipelineDesc.vertexLayout.bindings = {
-            {0, sizeof(Vertex), false}
-        };
+        pipelineDesc.vertexLayout.bindings = {{0, sizeof(Vertex), false}};
 
         pipelineDesc.topology = RHI::PrimitiveTopology::TRIANGLE_LIST;
         pipelineDesc.colorFormat = swapchainDesc.format;
@@ -144,12 +142,8 @@ int main() {
 
             // Submit
             RHI::IRHICommandList* cmdListPtr = cmdList.get();
-            device->SubmitCommandLists(
-                &cmdListPtr, 1,
-                imageAvailableSemaphore.get(),
-                renderFinishedSemaphore.get(),
-                inFlightFence.get()
-            );
+            device->SubmitCommandLists(&cmdListPtr, 1, imageAvailableSemaphore.get(), renderFinishedSemaphore.get(),
+                                       inFlightFence.get());
 
             // Present
             swapchain->Present(imageIndex, renderFinishedSemaphore.get());

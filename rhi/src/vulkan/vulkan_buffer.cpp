@@ -1,12 +1,12 @@
-#include "vulkan_backend.h"
-#include <stdexcept>
 #include <cstring>
+#include <stdexcept>
+
+#include "vulkan_backend.h"
 
 namespace RHI {
 
 VulkanBuffer::VulkanBuffer(VkDevice device, VkPhysicalDevice physicalDevice, const BufferDesc& desc)
     : device(device), buffer(VK_NULL_HANDLE), memory(VK_NULL_HANDLE), size(desc.size), mappedData(nullptr) {
-    
     // Create buffer
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -67,11 +67,11 @@ VulkanBuffer::~VulkanBuffer() {
     if (mappedData != nullptr) {
         Unmap();
     }
-    
+
     if (memory != VK_NULL_HANDLE) {
         vkFreeMemory(device, memory, nullptr);
     }
-    
+
     if (buffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(device, buffer, nullptr);
     }
@@ -103,7 +103,7 @@ size_t VulkanBuffer::GetSize() const {
 // Utility function implementations
 VkBufferUsageFlags BufferUsageToVulkan(BufferUsage usage) {
     VkBufferUsageFlags result = 0;
-    
+
     if (static_cast<uint32_t>(usage) & static_cast<uint32_t>(BufferUsage::VERTEX)) {
         result |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     }
@@ -116,7 +116,7 @@ VkBufferUsageFlags BufferUsageToVulkan(BufferUsage usage) {
     if (static_cast<uint32_t>(usage) & static_cast<uint32_t>(BufferUsage::STORAGE)) {
         result |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     }
-    
+
     return result;
 }
 
@@ -133,4 +133,4 @@ uint32_t FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, Vk
     throw std::runtime_error("Failed to find suitable memory type");
 }
 
-} // namespace RHI
+}  // namespace RHI
