@@ -1,9 +1,9 @@
-#include <GLFW/glfw3.h>
-
 #include <algorithm>
 #include <stdexcept>
 
 #include "vulkan_backend.h"
+
+#include <GLFW/glfw3.h>
 
 namespace RHI {
 

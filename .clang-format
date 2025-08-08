@@ -63,23 +63,6 @@ SpacesInSquareBrackets: false
 PointerAlignment: Left
 ReferenceAlignment: Left
 
-# Include sorting
-IncludeBlocks: Regroup
-IncludeCategories:
-  - Regex:           '^<(vulkan|metal|d3d12|d3d11)/'
-    Priority:        1
-  - Regex:           '^<(GLFW|SDL)/'
-    Priority:        2
-  - Regex:           '^<.*\.h>'
-    Priority:        3
-  - Regex:           '^<.*>'
-    Priority:        4
-  - Regex:           '^"rhi/.*\.h"'
-    Priority:        5
-  - Regex:           '^".*\.h"'
-    Priority:        6
-SortIncludes: true
-
 # Other
 CompactNamespaces: false
 Cpp11BracedListStyle: true

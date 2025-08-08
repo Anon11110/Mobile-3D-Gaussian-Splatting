@@ -1,10 +1,10 @@
-#include <GLFW/glfw3.h>
-
 #include <cstring>
 #include <stdexcept>
 #include <vector>
 
 #include "vulkan_backend.h"
+
+#include <GLFW/glfw3.h>
 
 namespace RHI {
 
