@@ -5,7 +5,7 @@ add_executable(triangle main.cpp)
 target_link_libraries(triangle PRIVATE RHI)
 
 # Set C++ standard
-target_compile_features(triangle PRIVATE cxx_std_17)
+target_compile_features(triangle PRIVATE cxx_std_20)
 
 # Platform-specific settings
 if(WIN32)

@@ -90,8 +90,8 @@ class VulkanDevice : public IRHIDevice {
         submitInfo.pCommandBuffers = commandBuffers.data();
 
         VkSemaphore waitSem = VK_NULL_HANDLE;
+        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
         if (waitSemaphore) {
-            VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
             auto* vkSemaphore = static_cast<VulkanSemaphore*>(waitSemaphore);
             waitSem = vkSemaphore->GetHandle();
             submitInfo.waitSemaphoreCount = 1;

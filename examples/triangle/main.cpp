@@ -100,6 +100,12 @@ int main() {
         auto imageAvailableSemaphore = device->CreateSemaphore();
         auto renderFinishedSemaphore = device->CreateSemaphore();
         auto inFlightFence = device->CreateFence(true);
+        
+        // Create command lists for each swapchain image
+        std::vector<std::unique_ptr<RHI::IRHICommandList>> commandLists;
+        for (uint32_t i = 0; i < swapchain->GetImageCount(); i++) {
+            commandLists.push_back(device->CreateCommandList());
+        }
 
         // Main loop
         auto startTime = std::chrono::high_resolution_clock::now();
@@ -116,7 +122,8 @@ int main() {
             uint32_t imageIndex = swapchain->AcquireNextImage(imageAvailableSemaphore.get());
 
             // Record commands
-            auto cmdList = device->CreateCommandList();
+            auto& cmdList = commandLists[imageIndex];
+            cmdList->Reset();
             cmdList->Begin();
 
             // Begin render pass

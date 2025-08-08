@@ -104,6 +104,7 @@ class VulkanCommandList : public IRHICommandList {
     VkCommandBuffer commandBuffer;
     VkRenderPass currentRenderPass;
     VkFramebuffer currentFramebuffer;
+    VulkanPipeline* currentPipeline;
     bool inRenderPass;
 
   public:
@@ -137,6 +138,8 @@ class VulkanSwapchain : public IRHISwapchain {
     VkSwapchainKHR swapchain;
     std::vector<VkImage> swapchainImages;
     std::vector<std::unique_ptr<VulkanTexture>> backBuffers;
+    std::vector<VkFramebuffer> framebuffers;
+    VkRenderPass renderPass;
     VkFormat swapchainFormat;
     VkExtent2D swapchainExtent;
 
@@ -150,6 +153,8 @@ class VulkanSwapchain : public IRHISwapchain {
     IRHITexture* GetBackBuffer(uint32_t index) override;
     uint32_t GetImageCount() const override;
     void Resize(uint32_t width, uint32_t height) override;
+    
+    VkFramebuffer GetFramebuffer(uint32_t index, VkRenderPass renderPass);
 };
 
 // Vulkan Semaphore implementation

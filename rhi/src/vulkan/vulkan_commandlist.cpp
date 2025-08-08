@@ -6,7 +6,7 @@ namespace RHI {
 
 VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool)
     : device(device), commandBuffer(VK_NULL_HANDLE), currentRenderPass(VK_NULL_HANDLE),
-      currentFramebuffer(VK_NULL_HANDLE), inRenderPass(false) {
+      currentFramebuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRenderPass(false) {
     // Allocate command buffer
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -20,6 +20,14 @@ VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool)
 }
 
 VulkanCommandList::~VulkanCommandList() {
+    // Clean up framebuffer if it exists
+    if (currentFramebuffer != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(device, currentFramebuffer, nullptr);
+    }
+    // Only destroy render pass if we created it (not from pipeline)
+    if (currentRenderPass != VK_NULL_HANDLE && currentPipeline == nullptr) {
+        vkDestroyRenderPass(device, currentRenderPass, nullptr);
+    }
     // Command buffers are automatically freed when command pool is destroyed
 }
 
@@ -44,19 +52,33 @@ void VulkanCommandList::End() {
 }
 
 void VulkanCommandList::Reset() {
+    // Clean up old framebuffer before reset
+    if (currentFramebuffer != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(device, currentFramebuffer, nullptr);
+        currentFramebuffer = VK_NULL_HANDLE;
+    }
+    // Don't destroy render pass if it belongs to a pipeline
+    if (currentRenderPass != VK_NULL_HANDLE && currentPipeline == nullptr) {
+        vkDestroyRenderPass(device, currentRenderPass, nullptr);
+        currentRenderPass = VK_NULL_HANDLE;
+    }
+    
     if (vkResetCommandBuffer(commandBuffer, 0) != VK_SUCCESS) {
         throw std::runtime_error("Failed to reset command buffer");
     }
     inRenderPass = false;
+    currentPipeline = nullptr;
     currentRenderPass = VK_NULL_HANDLE;
-    currentFramebuffer = VK_NULL_HANDLE;
 }
 
 void VulkanCommandList::BeginRenderPass(const RenderPassBeginInfo& info) {
     auto* colorTexture = static_cast<VulkanTexture*>(info.colorTarget);
 
-    // Create render pass on-demand (simplified for triangle example)
-    if (currentRenderPass == VK_NULL_HANDLE) {
+    // Use the render pass from the current pipeline if set, otherwise create a default one
+    if (currentPipeline) {
+        currentRenderPass = currentPipeline->GetRenderPass();
+    } else if (currentRenderPass == VK_NULL_HANDLE) {
+        // Fallback: create a default render pass (this shouldn't happen in normal usage)
         VkAttachmentDescription colorAttachment{};
         colorAttachment.format = TextureFormatToVulkan(colorTexture->GetFormat());
         colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -139,16 +161,12 @@ void VulkanCommandList::EndRenderPass() {
         vkCmdEndRenderPass(commandBuffer);
         inRenderPass = false;
     }
-
-    // Clean up framebuffer (recreate each frame)
-    if (currentFramebuffer != VK_NULL_HANDLE) {
-        vkDestroyFramebuffer(device, currentFramebuffer, nullptr);
-        currentFramebuffer = VK_NULL_HANDLE;
-    }
+    // Don't destroy framebuffer here - it needs to stay alive until GPU finishes
 }
 
 void VulkanCommandList::SetPipeline(IRHIPipeline* pipeline) {
     auto* vkPipeline = static_cast<VulkanPipeline*>(pipeline);
+    currentPipeline = vkPipeline;
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipeline->GetHandle());
 }
 

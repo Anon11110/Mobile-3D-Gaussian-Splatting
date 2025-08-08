@@ -10,7 +10,7 @@ namespace RHI {
 VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface,
                                  VkQueue graphicsQueue, const SwapchainDesc& desc)
     : device(device), physicalDevice(physicalDevice), surface(surface), graphicsQueue(graphicsQueue),
-      swapchain(VK_NULL_HANDLE) {
+      swapchain(VK_NULL_HANDLE), renderPass(VK_NULL_HANDLE) {
     // Query surface capabilities
     VkSurfaceCapabilitiesKHR capabilities;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
@@ -99,6 +99,13 @@ VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevic
 }
 
 VulkanSwapchain::~VulkanSwapchain() {
+    // Destroy framebuffers
+    for (auto framebuffer : framebuffers) {
+        if (framebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(device, framebuffer, nullptr);
+        }
+    }
+    
     backBuffers.clear();
 
     if (swapchain != VK_NULL_HANDLE) {
@@ -162,6 +169,39 @@ uint32_t VulkanSwapchain::GetImageCount() const {
 void VulkanSwapchain::Resize(uint32_t width, uint32_t height) {
     // TODO: Implement swapchain recreation for resize
     throw std::runtime_error("Swapchain resize not implemented");
+}
+
+VkFramebuffer VulkanSwapchain::GetFramebuffer(uint32_t index, VkRenderPass renderPass) {
+    // Resize framebuffers vector if needed
+    if (framebuffers.size() != backBuffers.size()) {
+        // Clean up old framebuffers
+        for (auto framebuffer : framebuffers) {
+            if (framebuffer != VK_NULL_HANDLE) {
+                vkDestroyFramebuffer(device, framebuffer, nullptr);
+            }
+        }
+        framebuffers.resize(backBuffers.size(), VK_NULL_HANDLE);
+    }
+    
+    // Create framebuffer for this image if it doesn't exist
+    if (framebuffers[index] == VK_NULL_HANDLE) {
+        VkImageView attachments[] = {backBuffers[index]->GetImageView()};
+        
+        VkFramebufferCreateInfo framebufferInfo{};
+        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferInfo.renderPass = renderPass;
+        framebufferInfo.attachmentCount = 1;
+        framebufferInfo.pAttachments = attachments;
+        framebufferInfo.width = swapchainExtent.width;
+        framebufferInfo.height = swapchainExtent.height;
+        framebufferInfo.layers = 1;
+        
+        if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &framebuffers[index]) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create framebuffer");
+        }
+    }
+    
+    return framebuffers[index];
 }
 
 }  // namespace RHI
