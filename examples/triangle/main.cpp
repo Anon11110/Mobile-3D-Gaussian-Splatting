@@ -47,9 +47,11 @@ int main() {
 
         // Create swapchain
         RHI::SwapchainDesc swapchainDesc{};
+        int fbw, fbh;
+        glfwGetFramebufferSize(window, &fbw, &fbh);
         swapchainDesc.windowHandle = window;
-        swapchainDesc.width = 800;
-        swapchainDesc.height = 600;
+        swapchainDesc.width  = static_cast<uint32_t>(fbw);
+        swapchainDesc.height = static_cast<uint32_t>(fbh);
         swapchainDesc.format = RHI::TextureFormat::R8G8B8A8_UNORM;
         auto swapchain = device->CreateSwapchain(swapchainDesc);
         // Create vertex buffer
@@ -100,7 +102,7 @@ int main() {
         auto imageAvailableSemaphore = device->CreateSemaphore();
         auto renderFinishedSemaphore = device->CreateSemaphore();
         auto inFlightFence = device->CreateFence(true);
-        
+
         // Create command lists for each swapchain image
         std::vector<std::unique_ptr<RHI::IRHICommandList>> commandLists;
         for (uint32_t i = 0; i < swapchain->GetImageCount(); i++) {
@@ -126,18 +128,23 @@ int main() {
             cmdList->Reset();
             cmdList->Begin();
 
+            // Query back buffer size (matches swapchain extent)
+            auto* backBuffer = swapchain->GetBackBuffer(imageIndex);
+            uint32_t backBufferWidth = backBuffer->GetWidth();
+            uint32_t backBufferHeight = backBuffer->GetHeight();
+
             // Begin render pass
             RHI::RenderPassBeginInfo rpInfo{};
-            rpInfo.colorTarget = swapchain->GetBackBuffer(imageIndex);
-            rpInfo.width = 800;
-            rpInfo.height = 600;
+            rpInfo.colorTarget = backBuffer;
+            rpInfo.width  = backBufferWidth;
+            rpInfo.height = backBufferHeight;
             rpInfo.clearColor = {{0.1f, 0.1f, 0.1f, 1.0f}};
             rpInfo.shouldClearColor = true;
             cmdList->BeginRenderPass(rpInfo);
 
-            // Set viewport and scissor
-            cmdList->SetViewport(0, 0, 800, 600);
-            cmdList->SetScissor(0, 0, 800, 600);
+            // Viewport and scissor
+            cmdList->SetViewport(0, 0, float(backBufferWidth), float(backBufferHeight));
+            cmdList->SetScissor(0, 0, backBufferWidth, backBufferHeight);
 
             // Draw triangle
             cmdList->SetPipeline(pipeline.get());

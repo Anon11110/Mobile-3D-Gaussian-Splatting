@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <stdexcept>
+#include <iostream>
 
 #include "vulkan_backend.h"
 
@@ -105,7 +106,7 @@ VulkanSwapchain::~VulkanSwapchain() {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
         }
     }
-    
+
     backBuffers.clear();
 
     if (swapchain != VK_NULL_HANDLE) {
@@ -182,11 +183,11 @@ VkFramebuffer VulkanSwapchain::GetFramebuffer(uint32_t index, VkRenderPass rende
         }
         framebuffers.resize(backBuffers.size(), VK_NULL_HANDLE);
     }
-    
+
     // Create framebuffer for this image if it doesn't exist
     if (framebuffers[index] == VK_NULL_HANDLE) {
         VkImageView attachments[] = {backBuffers[index]->GetImageView()};
-        
+
         VkFramebufferCreateInfo framebufferInfo{};
         framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         framebufferInfo.renderPass = renderPass;
@@ -195,12 +196,12 @@ VkFramebuffer VulkanSwapchain::GetFramebuffer(uint32_t index, VkRenderPass rende
         framebufferInfo.width = swapchainExtent.width;
         framebufferInfo.height = swapchainExtent.height;
         framebufferInfo.layers = 1;
-        
+
         if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &framebuffers[index]) != VK_SUCCESS) {
             throw std::runtime_error("Failed to create framebuffer");
         }
     }
-    
+
     return framebuffers[index];
 }
 
