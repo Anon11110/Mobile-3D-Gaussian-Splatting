@@ -34,13 +34,6 @@ if(MSVC)
     set_property(TARGET triangle PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:triangle>)
 endif()
 
-# Copy shaders to output directory (if they exist)
-if(EXISTS ${CMAKE_SOURCE_DIR}/shaders/compiled)
-    add_custom_command(TARGET triangle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:triangle>/shaders/compiled
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/shaders/compiled
-        $<TARGET_FILE_DIR:triangle>/shaders/compiled
-        COMMENT "Copying compiled shaders to output directory"
-    )
-endif()
+# Use the improved shader compilation system
+include(${CMAKE_SOURCE_DIR}/cmake/compileshaders.cmake)
+add_shader_directory(triangle ${CMAKE_SOURCE_DIR}/shaders)

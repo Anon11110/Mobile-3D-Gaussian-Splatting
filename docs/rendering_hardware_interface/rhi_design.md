@@ -204,7 +204,7 @@ public:
     virtual void SetPipeline(IRHIPipeline* pipeline) = 0;
     virtual void SetVertexBuffer(IRHIBuffer* buffer, uint32_t offset = 0) = 0;
     virtual void SetIndexBuffer(IRHIBuffer* buffer, IndexType type) = 0;
-    virtual void SetDescriptorSet(uint32_t set, IRHIDescriptorSet* descriptors) = 0;
+    virtual void BindDescriptorSet(uint32_t set, IRHIDescriptorSet* descriptors) = 0;
     virtual void Draw(uint32_t vertexCount, uint32_t firstVertex = 0) = 0;
     virtual void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0) = 0;
     

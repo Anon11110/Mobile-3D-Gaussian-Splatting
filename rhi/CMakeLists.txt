@@ -36,6 +36,7 @@ target_sources(RHI PRIVATE
     src/vulkan/vulkan_pipeline.cpp
     src/vulkan/vulkan_swapchain.cpp
     src/vulkan/vulkan_commandlist.cpp
+    src/vulkan/vulkan_descriptorset.cpp
 )
 target_compile_definitions(RHI PUBLIC RHI_VULKAN=1)
 target_link_libraries(RHI PUBLIC Vulkan::Vulkan)
@@ -59,10 +60,3 @@ target_include_directories(RHI PRIVATE
 
 # Link libraries
 target_link_libraries(RHI PUBLIC glfw)
-
-# Shader compilation
-include(../cmake/compileshaders.cmake)
-compile_shaders(
-    ${CMAKE_CURRENT_SOURCE_DIR}/../shaders
-    ${CMAKE_CURRENT_BINARY_DIR}/shaders/compiled
-)

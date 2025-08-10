@@ -62,7 +62,7 @@ void VulkanCommandList::Reset() {
         vkDestroyRenderPass(device, currentRenderPass, nullptr);
         currentRenderPass = VK_NULL_HANDLE;
     }
-    
+
     if (vkResetCommandBuffer(commandBuffer, 0) != VK_SUCCESS) {
         throw std::runtime_error("Failed to reset command buffer");
     }
@@ -193,6 +193,28 @@ void VulkanCommandList::SetScissor(int32_t x, int32_t y, uint32_t width, uint32_
     scissor.offset = {x, y};
     scissor.extent = {width, height};
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+}
+
+void VulkanCommandList::BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet* descriptorSet,
+                                          const uint32_t* dynamicOffsets, uint32_t dynamicOffsetCount) {
+    auto* vkDescSet = static_cast<VulkanDescriptorSet*>(descriptorSet);
+
+    if (!currentPipeline) {
+        throw std::runtime_error("No pipeline bound - cannot bind descriptor set");
+    }
+
+    VkDescriptorSet descriptorSetHandle = vkDescSet->GetHandle();
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, currentPipeline->GetLayout(), setIndex, 1,
+                            &descriptorSetHandle, dynamicOffsetCount, dynamicOffsets);
+}
+
+void VulkanCommandList::PushConstants(ShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void* data) {
+    if (!currentPipeline) {
+        throw std::runtime_error("No pipeline bound - cannot push constants");
+    }
+
+    VkShaderStageFlags vkStageFlags = ShaderStageFlagsToVulkan(stageFlags);
+    vkCmdPushConstants(commandBuffer, currentPipeline->GetLayout(), vkStageFlags, offset, size, data);
 }
 
 void VulkanCommandList::Draw(uint32_t vertexCount, uint32_t firstVertex) {

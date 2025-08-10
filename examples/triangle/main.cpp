@@ -1,6 +1,8 @@
 #include <GLFW/glfw3.h>
 
 #include <chrono>
+#include <cmath>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <vector>
@@ -10,6 +12,12 @@
 struct Vertex {
     float position[3];
     float color[3];
+};
+
+struct UniformBufferObject {
+    float mvp[16];     // MVP matrix
+    float time;        // Animation time
+    float padding[3];  // Alignment padding
 };
 
 std::vector<uint8_t> LoadShaderCode(const std::string& filename) {
@@ -50,7 +58,7 @@ int main() {
         int fbw, fbh;
         glfwGetFramebufferSize(window, &fbw, &fbh);
         swapchainDesc.windowHandle = window;
-        swapchainDesc.width  = static_cast<uint32_t>(fbw);
+        swapchainDesc.width = static_cast<uint32_t>(fbw);
         swapchainDesc.height = static_cast<uint32_t>(fbh);
         swapchainDesc.format = RHI::TextureFormat::R8G8B8A8_UNORM;
         auto swapchain = device->CreateSwapchain(swapchainDesc);
@@ -65,6 +73,13 @@ int main() {
         vbDesc.memoryType = RHI::MemoryType::CPU_TO_GPU;
         vbDesc.initialData = vertices;
         auto vertexBuffer = device->CreateBuffer(vbDesc);
+
+        // Create uniform buffer for MVP matrix and animation
+        RHI::BufferDesc ubDesc{};
+        ubDesc.size = sizeof(UniformBufferObject);
+        ubDesc.usage = RHI::BufferUsage::UNIFORM;
+        ubDesc.memoryType = RHI::MemoryType::CPU_TO_GPU;
+        auto uniformBuffer = device->CreateBuffer(ubDesc);
 
         // Load and create shaders
         auto vertexCode = LoadShaderCode("shaders/compiled/triangle.vert.spv");
@@ -82,6 +97,21 @@ int main() {
         fsDesc.codeSize = fragmentCode.size();
         auto fragmentShader = device->CreateShader(fsDesc);
 
+        // Create descriptor set layout for uniform buffer
+        RHI::DescriptorSetLayoutDesc layoutDesc{};
+        layoutDesc.bindings = {{0, RHI::DescriptorType::UNIFORM_BUFFER, 1, RHI::ShaderStageFlags::VERTEX}};
+        auto descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
+
+        // Create descriptor set and bind uniform buffer
+        auto descriptorSet = device->CreateDescriptorSet(descriptorSetLayout.get(), RHI::QueueType::GRAPHICS);
+
+        RHI::BufferBinding bufferBinding{};
+        bufferBinding.buffer = uniformBuffer.get();
+        bufferBinding.offset = 0;
+        bufferBinding.range = 0;  // Whole buffer
+        bufferBinding.type = RHI::DescriptorType::UNIFORM_BUFFER;
+        descriptorSet->BindBuffer(0, bufferBinding);
+
         // Create pipeline
         RHI::GraphicsPipelineDesc pipelineDesc{};
         pipelineDesc.vertexShader = vertexShader.get();
@@ -96,6 +126,15 @@ int main() {
 
         pipelineDesc.topology = RHI::PrimitiveTopology::TRIANGLE_LIST;
         pipelineDesc.colorFormat = swapchainDesc.format;
+
+        pipelineDesc.descriptorSetLayouts = {descriptorSetLayout.get()};
+
+        RHI::PushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = RHI::ShaderStageFlags::VERTEX;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = 16;  // 4 floats (scale, rotation, etc.)
+        pipelineDesc.pushConstantRanges = {pushConstantRange};
+
         auto pipeline = device->CreateGraphicsPipeline(pipelineDesc);
 
         // Create synchronization objects
@@ -110,7 +149,8 @@ int main() {
         }
 
         // Main loop
-        auto startTime = std::chrono::high_resolution_clock::now();
+        auto applicationStartTime = std::chrono::high_resolution_clock::now();
+        auto fpsStartTime = std::chrono::high_resolution_clock::now();
         uint32_t frameCount = 0;
 
         while (!glfwWindowShouldClose(window)) {
@@ -119,6 +159,23 @@ int main() {
             // Wait for previous frame
             inFlightFence->Wait();
             inFlightFence->Reset();
+
+            // Update uniform buffer with animation
+            auto currentTime = std::chrono::high_resolution_clock::now();
+            float time = std::chrono::duration<float>(currentTime - applicationStartTime).count();
+
+            UniformBufferObject ubo{};
+            // Simple identity matrix for MVP (no transformation)
+            ubo.mvp[0] = 1.0f;
+            ubo.mvp[5] = 1.0f;
+            ubo.mvp[10] = 1.0f;
+            ubo.mvp[15] = 1.0f;
+            ubo.time = time;
+
+            // Update uniform buffer
+            void* uniformData = uniformBuffer->Map();
+            memcpy(uniformData, &ubo, sizeof(UniformBufferObject));
+            uniformBuffer->Unmap();
 
             // Acquire next image
             uint32_t imageIndex = swapchain->AcquireNextImage(imageAvailableSemaphore.get());
@@ -136,7 +193,7 @@ int main() {
             // Begin render pass
             RHI::RenderPassBeginInfo rpInfo{};
             rpInfo.colorTarget = backBuffer;
-            rpInfo.width  = backBufferWidth;
+            rpInfo.width = backBufferWidth;
             rpInfo.height = backBufferHeight;
             rpInfo.clearColor = {{0.1f, 0.1f, 0.1f, 1.0f}};
             rpInfo.shouldClearColor = true;
@@ -146,9 +203,50 @@ int main() {
             cmdList->SetViewport(0, 0, float(backBufferWidth), float(backBufferHeight));
             cmdList->SetScissor(0, 0, backBufferWidth, backBufferHeight);
 
-            // Draw triangle
             cmdList->SetPipeline(pipeline.get());
             cmdList->SetVertexBuffer(0, vertexBuffer.get());
+
+            cmdList->BindDescriptorSet(0, descriptorSet.get());
+
+            // Calculate projected NDC centroid of the triangle vertices
+            // Triangle vertices in object space
+            float vertices_obj[3][3] = {{-0.5f, -0.5f, 0.0f}, {0.5f, -0.5f, 0.0f}, {0.0f, 0.5f, 0.0f}};
+
+            // Per-vertex accumulated NDC
+            float ndc_sum_x = 0.0f;
+            float ndc_sum_y = 0.0f;
+
+            for (int i = 0; i < 3; i++) {
+                const float x = vertices_obj[i][0];
+                const float y = vertices_obj[i][1];
+                const float z = vertices_obj[i][2];
+
+                // clip = MVP * [x y z 1]^T
+                float clip_x = ubo.mvp[0] * x + ubo.mvp[4] * y + ubo.mvp[8] * z + ubo.mvp[12];
+                float clip_y = ubo.mvp[1] * x + ubo.mvp[5] * y + ubo.mvp[9] * z + ubo.mvp[13];
+                float clip_w = ubo.mvp[3] * x + ubo.mvp[7] * y + ubo.mvp[11] * z + ubo.mvp[15];
+
+                // NDC per-vertex
+                ndc_sum_x += clip_x / clip_w;
+                ndc_sum_y += clip_y / clip_w;
+            }
+
+            // Average NDC = true screen-space centroid under perspective
+            float center_ndc[2] = {ndc_sum_x / 3.0f, ndc_sum_y / 3.0f};
+
+            // Calculate aspect ratio from back buffer dimensions
+            float aspect = static_cast<float>(backBufferWidth) / static_cast<float>(backBufferHeight);
+
+            // Push constants: centerNdc.x, centerNdc.y, rotation, aspect
+            float pushData[4] = {
+                center_ndc[0],  // centerNdc.x
+                center_ndc[1],  // centerNdc.y
+                time * 0.5f,    // rotation in radians
+                aspect          // aspect ratio
+            };
+            cmdList->PushConstants(RHI::ShaderStageFlags::VERTEX, 0, sizeof(pushData), pushData);
+
+            // Draw triangle
             cmdList->Draw(3);
 
             cmdList->EndRenderPass();
@@ -164,12 +262,12 @@ int main() {
 
             // FPS counter
             frameCount++;
-            auto currentTime = std::chrono::high_resolution_clock::now();
-            float elapsed = std::chrono::duration<float>(currentTime - startTime).count();
-            if (elapsed >= 1.0f) {
-                std::cout << "FPS: " << frameCount << std::endl;
+            currentTime = std::chrono::high_resolution_clock::now();
+            float fpsElapsed = std::chrono::duration<float>(currentTime - fpsStartTime).count();
+            if (fpsElapsed >= 1.0f) {
+                std::cout << "FPS: " << std::fixed << std::setprecision(1) << frameCount / fpsElapsed << std::endl;
                 frameCount = 0;
-                startTime = currentTime;
+                fpsStartTime = currentTime;
             }
         }
 

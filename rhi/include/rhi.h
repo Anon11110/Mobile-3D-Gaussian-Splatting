@@ -5,7 +5,7 @@ namespace RHI {
 
 // Main device interface
 class IRHIDevice {
-public:
+  public:
     virtual ~IRHIDevice() = default;
 
     // Resource creation
@@ -16,22 +16,20 @@ public:
     virtual std::unique_ptr<IRHISwapchain> CreateSwapchain(const SwapchainDesc& desc) = 0;
     virtual std::unique_ptr<IRHISemaphore> CreateSemaphore() = 0;
     virtual std::unique_ptr<IRHIFence> CreateFence(bool signaled = false) = 0;
+    virtual std::unique_ptr<IRHIDescriptorSetLayout> CreateDescriptorSetLayout(const DescriptorSetLayoutDesc& desc) = 0;
+    virtual std::unique_ptr<IRHIDescriptorSet> CreateDescriptorSet(IRHIDescriptorSetLayout* layout,
+                                                                   QueueType queueType = QueueType::GRAPHICS) = 0;
 
     // Queue operations
-    virtual void SubmitCommandLists(
-        IRHICommandList** cmdLists,
-        uint32_t count,
-        IRHISemaphore* waitSemaphore = nullptr,
-        IRHISemaphore* signalSemaphore = nullptr,
-        IRHIFence* signalFence = nullptr
-    ) = 0;
+    virtual void SubmitCommandLists(IRHICommandList** cmdLists, uint32_t count, IRHISemaphore* waitSemaphore = nullptr,
+                                    IRHISemaphore* signalSemaphore = nullptr, IRHIFence* signalFence = nullptr) = 0;
 
     virtual void WaitIdle() = 0;
 };
 
 // Buffer interface
 class IRHIBuffer {
-public:
+  public:
     virtual ~IRHIBuffer() = default;
     virtual void* Map() = 0;
     virtual void Unmap() = 0;
@@ -40,7 +38,7 @@ public:
 
 // Texture interface
 class IRHITexture {
-public:
+  public:
     virtual ~IRHITexture() = default;
     virtual uint32_t GetWidth() const = 0;
     virtual uint32_t GetHeight() const = 0;
@@ -49,20 +47,20 @@ public:
 
 // Shader interface
 class IRHIShader {
-public:
+  public:
     virtual ~IRHIShader() = default;
     virtual ShaderStage GetStage() const = 0;
 };
 
 // Pipeline interface
 class IRHIPipeline {
-public:
+  public:
     virtual ~IRHIPipeline() = default;
 };
 
 // Command list interface
 class IRHICommandList {
-public:
+  public:
     virtual ~IRHICommandList() = default;
 
     virtual void Begin() = 0;
@@ -74,6 +72,9 @@ public:
 
     virtual void SetPipeline(IRHIPipeline* pipeline) = 0;
     virtual void SetVertexBuffer(uint32_t binding, IRHIBuffer* buffer, size_t offset = 0) = 0;
+    virtual void BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet* descriptorSet,
+                                   const uint32_t* dynamicOffsets = nullptr, uint32_t dynamicOffsetCount = 0) = 0;
+    virtual void PushConstants(ShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void* data) = 0;
     virtual void SetViewport(float x, float y, float width, float height) = 0;
     virtual void SetScissor(int32_t x, int32_t y, uint32_t width, uint32_t height) = 0;
 
@@ -82,7 +83,7 @@ public:
 
 // Swapchain interface
 class IRHISwapchain {
-public:
+  public:
     virtual ~IRHISwapchain() = default;
 
     virtual uint32_t AcquireNextImage(IRHISemaphore* signalSemaphore = nullptr) = 0;
@@ -94,19 +95,39 @@ public:
 
 // Synchronization primitives
 class IRHISemaphore {
-public:
+  public:
     virtual ~IRHISemaphore() = default;
 };
 
 class IRHIFence {
-public:
+  public:
     virtual ~IRHIFence() = default;
     virtual void Wait(uint64_t timeout = UINT64_MAX) = 0;
     virtual void Reset() = 0;
     virtual bool IsSignaled() const = 0;
 };
 
+// Descriptor set layout interface
+class IRHIDescriptorSetLayout {
+  public:
+    virtual ~IRHIDescriptorSetLayout() = default;
+};
+
+// Sampler interface
+class IRHISampler {
+  public:
+    virtual ~IRHISampler() = default;
+};
+
+// Descriptor set interface
+class IRHIDescriptorSet {
+  public:
+    virtual ~IRHIDescriptorSet() = default;
+    virtual void BindBuffer(uint32_t binding, const BufferBinding& bufferBinding) = 0;
+    virtual void BindTexture(uint32_t binding, const TextureBinding& textureBinding) = 0;
+};
+
 // Device creation function
 std::unique_ptr<IRHIDevice> CreateRHIDevice();
 
-} // namespace RHI
+}  // namespace RHI

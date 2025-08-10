@@ -19,6 +19,9 @@ class VulkanCommandList;
 class VulkanSwapchain;
 class VulkanSemaphore;
 class VulkanFence;
+class VulkanDescriptorSetLayout;
+class VulkanDescriptorSet;
+class VulkanSampler;
 
 // Vulkan Buffer implementation
 class VulkanBuffer : public IRHIBuffer {
@@ -120,6 +123,9 @@ class VulkanCommandList : public IRHICommandList {
 
     void SetPipeline(IRHIPipeline* pipeline) override;
     void SetVertexBuffer(uint32_t binding, IRHIBuffer* buffer, size_t offset = 0) override;
+    void BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet* descriptorSet,
+                           const uint32_t* dynamicOffsets = nullptr, uint32_t dynamicOffsetCount = 0) override;
+    void PushConstants(ShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void* data) override;
     void SetViewport(float x, float y, float width, float height) override;
     void SetScissor(int32_t x, int32_t y, uint32_t width, uint32_t height) override;
 
@@ -153,7 +159,7 @@ class VulkanSwapchain : public IRHISwapchain {
     IRHITexture* GetBackBuffer(uint32_t index) override;
     uint32_t GetImageCount() const override;
     void Resize(uint32_t width, uint32_t height) override;
-    
+
     VkFramebuffer GetFramebuffer(uint32_t index, VkRenderPass renderPass);
 };
 
@@ -187,10 +193,59 @@ class VulkanFence : public IRHIFence {
     VkFence GetHandle() const { return fence; }
 };
 
+// Vulkan DescriptorSetLayout implementation
+class VulkanDescriptorSetLayout : public IRHIDescriptorSetLayout {
+  private:
+    VkDevice device;
+    VkDescriptorSetLayout layout;
+    std::vector<VkDescriptorPoolSize> poolSizes;
+
+  public:
+    VulkanDescriptorSetLayout(VkDevice device, const DescriptorSetLayoutDesc& desc);
+    ~VulkanDescriptorSetLayout() override;
+
+    VkDescriptorSetLayout GetHandle() const { return layout; }
+    const std::vector<VkDescriptorPoolSize>& GetPoolSizes() const { return poolSizes; }
+};
+
+// Vulkan DescriptorSet implementation
+class VulkanDescriptorSet : public IRHIDescriptorSet {
+  private:
+    VkDevice device;
+    VkDescriptorSet descriptorSet;
+    VkDescriptorPool sourcePool;
+    VulkanDescriptorSetLayout* layout;
+
+  public:
+    VulkanDescriptorSet(VkDevice device, VulkanDescriptorSetLayout* layout, VkDescriptorPool pool, VkDescriptorSet set);
+    ~VulkanDescriptorSet() override;
+
+    void BindBuffer(uint32_t binding, const BufferBinding& bufferBinding) override;
+    void BindTexture(uint32_t binding, const TextureBinding& textureBinding) override;
+
+    VkDescriptorSet GetHandle() const { return descriptorSet; }
+};
+
+// Vulkan Sampler implementation
+class VulkanSampler : public IRHISampler {
+  private:
+    VkDevice device;
+    VkSampler sampler;
+
+  public:
+    VulkanSampler(VkDevice device);
+    ~VulkanSampler() override;
+
+    VkSampler GetHandle() const { return sampler; }
+};
+
 // Utility functions
 VkFormat TextureFormatToVulkan(TextureFormat format);
 TextureFormat VulkanFormatToTexture(VkFormat format);
 VkBufferUsageFlags BufferUsageToVulkan(BufferUsage usage);
+VkDescriptorType DescriptorTypeToVulkan(DescriptorType type);
+VkShaderStageFlags ShaderStageFlagsToVulkan(ShaderStageFlags flags);
+VkImageLayout ImageLayoutToVulkan(ImageLayout layout);
 uint32_t FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
 }  // namespace RHI

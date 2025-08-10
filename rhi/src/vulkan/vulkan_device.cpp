@@ -17,6 +17,10 @@ class VulkanDevice : public IRHIDevice {
     uint32_t graphicsQueueFamily;
     VkCommandPool commandPool;
 
+    VkDescriptorPool graphicsDescriptorPool;
+    VkDescriptorPool computeDescriptorPool;
+    VkDescriptorPool transferDescriptorPool;
+
 #ifdef DEBUG
     VkDebugUtilsMessengerEXT debugMessenger;
 #endif
@@ -32,9 +36,13 @@ class VulkanDevice : public IRHIDevice {
         PickPhysicalDevice();
         CreateLogicalDevice();
         CreateCommandPool();
+        CreateDescriptorPools();
     }
 
     ~VulkanDevice() override {
+        vkDestroyDescriptorPool(device, graphicsDescriptorPool, nullptr);
+        vkDestroyDescriptorPool(device, computeDescriptorPool, nullptr);
+        vkDestroyDescriptorPool(device, transferDescriptorPool, nullptr);
         vkDestroyCommandPool(device, commandPool, nullptr);
         vkDestroyDevice(device, nullptr);
 #ifdef DEBUG
@@ -74,6 +82,31 @@ class VulkanDevice : public IRHIDevice {
 
     std::unique_ptr<IRHIFence> CreateFence(bool signaled = false) override {
         return std::make_unique<VulkanFence>(device, signaled);
+    }
+
+    std::unique_ptr<IRHIDescriptorSetLayout> CreateDescriptorSetLayout(const DescriptorSetLayoutDesc& desc) override {
+        return std::make_unique<VulkanDescriptorSetLayout>(device, desc);
+    }
+
+    std::unique_ptr<IRHIDescriptorSet> CreateDescriptorSet(IRHIDescriptorSetLayout* layout,
+                                                           QueueType queueType) override {
+        auto* vkLayout = static_cast<VulkanDescriptorSetLayout*>(layout);
+        VkDescriptorPool pool = GetDescriptorPool(queueType);
+
+        // Allocate descriptor set from appropriate pool
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = pool;
+        allocInfo.descriptorSetCount = 1;
+        auto layoutHandle = vkLayout->GetHandle();
+        allocInfo.pSetLayouts = &layoutHandle;
+
+        VkDescriptorSet descriptorSet;
+        if (vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate descriptor set");
+        }
+
+        return std::make_unique<VulkanDescriptorSet>(device, vkLayout, pool, descriptorSet);
     }
 
     void SubmitCommandLists(IRHICommandList** cmdLists, uint32_t count, IRHISemaphore* waitSemaphore,
@@ -121,6 +154,19 @@ class VulkanDevice : public IRHIDevice {
     void WaitIdle() override { vkDeviceWaitIdle(device); }
 
   private:
+    VkDescriptorPool GetDescriptorPool(QueueType queueType) {
+        switch (queueType) {
+            case QueueType::GRAPHICS:
+                return graphicsDescriptorPool;
+            case QueueType::COMPUTE:
+                return computeDescriptorPool;
+            case QueueType::TRANSFER:
+                return transferDescriptorPool;
+            default:
+                return graphicsDescriptorPool;
+        }
+    }
+
     void CreateInstance() {
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -271,6 +317,53 @@ class VulkanDevice : public IRHIDevice {
 
         if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
             throw std::runtime_error("Failed to create command pool");
+        }
+    }
+
+    void CreateDescriptorPools() {
+        // Create pools with generous sizes for different queue types
+        std::vector<VkDescriptorPoolSize> graphicsPoolSizes = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+                                                               {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+                                                               {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 500},
+                                                               {VK_DESCRIPTOR_TYPE_SAMPLER, 500},
+                                                               {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 200}};
+
+        std::vector<VkDescriptorPoolSize> computePoolSizes = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2000},
+                                                              {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 500},
+                                                              {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 500},
+                                                              {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 200}};
+
+        std::vector<VkDescriptorPoolSize> transferPoolSizes = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 100},
+                                                               {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 100}};
+
+        // Create graphics descriptor pool
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        poolInfo.maxSets = 1000;
+        poolInfo.poolSizeCount = static_cast<uint32_t>(graphicsPoolSizes.size());
+        poolInfo.pPoolSizes = graphicsPoolSizes.data();
+
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &graphicsDescriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create graphics descriptor pool");
+        }
+
+        // Create compute descriptor pool
+        poolInfo.maxSets = 500;
+        poolInfo.poolSizeCount = static_cast<uint32_t>(computePoolSizes.size());
+        poolInfo.pPoolSizes = computePoolSizes.data();
+
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &computeDescriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create compute descriptor pool");
+        }
+
+        // Create transfer descriptor pool
+        poolInfo.maxSets = 100;
+        poolInfo.poolSizeCount = static_cast<uint32_t>(transferPoolSizes.size());
+        poolInfo.pPoolSizes = transferPoolSizes.data();
+
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &transferDescriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create transfer descriptor pool");
         }
     }
 };

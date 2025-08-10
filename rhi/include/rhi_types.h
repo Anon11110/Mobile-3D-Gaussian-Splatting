@@ -1,8 +1,8 @@
 #pragma once
 #include <cstdint>
-#include <vector>
-#include <memory>
 #include <functional>
+#include <memory>
+#include <vector>
 
 namespace RHI {
 
@@ -16,34 +16,18 @@ class IRHICommandList;
 class IRHISwapchain;
 class IRHISemaphore;
 class IRHIFence;
+class IRHIDescriptorSetLayout;
+class IRHIDescriptorSet;
+class IRHISampler;
 
 // Enumerations
-enum class BufferUsage : uint32_t {
-    VERTEX   = 1 << 0,
-    INDEX    = 1 << 1,
-    UNIFORM  = 1 << 2,
-    STORAGE  = 1 << 3
-};
+enum class BufferUsage : uint32_t { VERTEX = 1 << 0, INDEX = 1 << 1, UNIFORM = 1 << 2, STORAGE = 1 << 3 };
 
-enum class MemoryType {
-    GPU_ONLY,
-    CPU_TO_GPU,
-    GPU_TO_CPU
-};
+enum class MemoryType { GPU_ONLY, CPU_TO_GPU, GPU_TO_CPU };
 
-enum class ShaderStage {
-    VERTEX,
-    FRAGMENT,
-    COMPUTE
-};
+enum class ShaderStage { VERTEX, FRAGMENT, COMPUTE };
 
-enum class PrimitiveTopology {
-    POINT_LIST,
-    LINE_LIST,
-    LINE_STRIP,
-    TRIANGLE_LIST,
-    TRIANGLE_STRIP
-};
+enum class PrimitiveTopology { POINT_LIST, LINE_LIST, LINE_STRIP, TRIANGLE_LIST, TRIANGLE_STRIP };
 
 enum class TextureFormat {
     UNDEFINED,
@@ -54,6 +38,29 @@ enum class TextureFormat {
     R32G32B32_FLOAT,
     D32_FLOAT,
     D24_UNORM_S8_UINT
+};
+
+enum class DescriptorType { UNIFORM_BUFFER, STORAGE_BUFFER, SAMPLER, TEXTURE, COMBINED_IMAGE_SAMPLER };
+
+enum class ShaderStageFlags : uint32_t {
+    VERTEX = 1 << 0,
+    FRAGMENT = 1 << 1,
+    COMPUTE = 1 << 2,
+    ALL_GRAPHICS = VERTEX | FRAGMENT
+};
+
+enum class QueueType { GRAPHICS, COMPUTE, TRANSFER };
+
+enum class ImageLayout {
+    UNDEFINED,
+    GENERAL,
+    COLOR_ATTACHMENT,
+    DEPTH_STENCIL_ATTACHMENT,
+    DEPTH_STENCIL_READ_ONLY,
+    SHADER_READ_ONLY,
+    TRANSFER_SRC,
+    TRANSFER_DST,
+    PRESENT_SRC
 };
 
 // Structures
@@ -89,6 +96,37 @@ struct VertexLayout {
     std::vector<VertexBinding> bindings;
 };
 
+struct DescriptorBinding {
+    uint32_t binding;
+    DescriptorType type;
+    uint32_t count = 1;
+    ShaderStageFlags stageFlags;
+};
+
+struct DescriptorSetLayoutDesc {
+    std::vector<DescriptorBinding> bindings;
+};
+
+struct PushConstantRange {
+    ShaderStageFlags stageFlags;
+    uint32_t offset;
+    uint32_t size;
+};
+
+struct BufferBinding {
+    IRHIBuffer* buffer;
+    size_t offset = 0;
+    size_t range = 0;
+    DescriptorType type = DescriptorType::UNIFORM_BUFFER;
+};
+
+struct TextureBinding {
+    IRHITexture* texture;
+    IRHISampler* sampler = nullptr;
+    ImageLayout layout = ImageLayout::SHADER_READ_ONLY;
+    DescriptorType type = DescriptorType::COMBINED_IMAGE_SAMPLER;
+};
+
 struct GraphicsPipelineDesc {
     IRHIShader* vertexShader;
     IRHIShader* fragmentShader;
@@ -98,6 +136,8 @@ struct GraphicsPipelineDesc {
     TextureFormat depthFormat = TextureFormat::UNDEFINED;
     bool depthTestEnable = false;
     bool depthWriteEnable = false;
+    std::vector<IRHIDescriptorSetLayout*> descriptorSetLayouts;
+    std::vector<PushConstantRange> pushConstantRanges;
 };
 
 struct SwapchainDesc {
@@ -115,7 +155,7 @@ struct ClearValue {
         struct {
             float depth;
             uint32_t stencil;
-        };
+        } depthStencil;
     };
 };
 
@@ -125,9 +165,9 @@ struct RenderPassBeginInfo {
     uint32_t width;
     uint32_t height;
     ClearValue clearColor = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    ClearValue clearDepth = {.depth = 1.0f, .stencil = 0};
+    ClearValue clearDepth;
     bool shouldClearColor = true;
     bool shouldClearDepth = true;
 };
 
-} // namespace RHI
+}  // namespace RHI

@@ -1,41 +1,84 @@
-# Shader compilation function for GLSL to SPIR-V
-function(compile_shaders SHADER_SRC_DIR SHADER_OUT_DIR)
+# Shader compilation function for GLSL to SPIR-V with automatic copying
+function(compile_shaders SHADER_SRC_DIR TARGET_NAME)
     # Find glslc compiler
-    find_program(GLSLC_EXECUTABLE glslc REQUIRED)
-    
+    find_program(GLSLC_EXECUTABLE glslc)
+
     if(NOT GLSLC_EXECUTABLE)
-        message(FATAL_ERROR "glslc not found! Please install Vulkan SDK")
+        message(FATAL_ERROR "glslc not found! Please install Vulkan SDK and ensure it's in PATH")
     endif()
-    
-    # Create output directory
-    file(MAKE_DIRECTORY ${SHADER_OUT_DIR})
-    
+
+    # Set up shader directories
+    set(SHADER_COMPILED_DIR "${SHADER_SRC_DIR}/compiled")
+    # Use generator expression to get the correct output directory based on configuration
+    set(SHADER_BIN_DIR "$<TARGET_FILE_DIR:${TARGET_NAME}>/shaders/compiled")
+
+    # Create compiled directory
+    file(MAKE_DIRECTORY ${SHADER_COMPILED_DIR})
+
     # Find all shader files
-    file(GLOB_RECURSE SHADER_FILES
+    file(GLOB SHADER_FILES
         "${SHADER_SRC_DIR}/*.vert"
-        "${SHADER_SRC_DIR}/*.frag" 
+        "${SHADER_SRC_DIR}/*.frag"
         "${SHADER_SRC_DIR}/*.comp"
         "${SHADER_SRC_DIR}/*.geom"
         "${SHADER_SRC_DIR}/*.tesc"
         "${SHADER_SRC_DIR}/*.tese"
     )
-    
+
+    # Create a custom target for shader compilation
+    set(SHADER_TARGET_NAME "${TARGET_NAME}_shaders")
+    add_custom_target(${SHADER_TARGET_NAME} ALL)
+
+    # Keep track of all SPIRV files
+    set(ALL_SPIRV_FILES "")
+
     # Compile each shader file
     foreach(SHADER_FILE ${SHADER_FILES})
         get_filename_component(SHADER_NAME ${SHADER_FILE} NAME)
-        set(SPIRV_FILE "${SHADER_OUT_DIR}/${SHADER_NAME}.spv")
-        
+        set(SPIRV_FILE "${SHADER_COMPILED_DIR}/${SHADER_NAME}.spv")
+
+        # Add compilation command
         add_custom_command(
             OUTPUT ${SPIRV_FILE}
             COMMAND ${GLSLC_EXECUTABLE} ${SHADER_FILE} -o ${SPIRV_FILE}
             DEPENDS ${SHADER_FILE}
-            COMMENT "Compiling ${SHADER_NAME} to SPIR-V"
+            COMMENT "Compiling shader: ${SHADER_NAME} -> ${SHADER_NAME}.spv"
             VERBATIM
         )
-        
-        list(APPEND SPIRV_FILES ${SPIRV_FILE})
+
+        # Add to list of SPIRV files
+        list(APPEND ALL_SPIRV_FILES ${SPIRV_FILE})
     endforeach()
-    
-    # Create custom target for all shaders
-    add_custom_target(compile_shaders ALL DEPENDS ${SPIRV_FILES})
+
+    # Create a single target that depends on all SPIRV files
+    add_custom_target(${SHADER_TARGET_NAME}_compile DEPENDS ${ALL_SPIRV_FILES})
+    add_dependencies(${SHADER_TARGET_NAME} ${SHADER_TARGET_NAME}_compile)
+
+    # Copy all compiled shaders to the appropriate build configuration directory
+    # This uses a generator expression to resolve at build time
+    add_custom_command(
+        TARGET ${SHADER_TARGET_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_BIN_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${SHADER_COMPILED_DIR} ${SHADER_BIN_DIR}
+        COMMENT "Copying compiled shaders to $<CONFIG> output directory"
+        VERBATIM
+    )
+
+    # Make the main target depend on shader compilation
+    add_dependencies(${TARGET_NAME} ${SHADER_TARGET_NAME})
+
+    # Report configuration
+    message(STATUS "Shader compilation configured for ${TARGET_NAME}:")
+    message(STATUS "  Source directory: ${SHADER_SRC_DIR}")
+    message(STATUS "  Compiled directory: ${SHADER_COMPILED_DIR}")
+    message(STATUS "  Output will be copied to: build/bin/<CONFIG>/shaders/compiled")
+
+    # Count shaders
+    list(LENGTH SHADER_FILES SHADER_COUNT)
+    message(STATUS "  Found ${SHADER_COUNT} shader(s) to compile")
+endfunction()
+
+# Helper function to add a shader directory to a target
+function(add_shader_directory TARGET_NAME SHADER_DIR)
+    compile_shaders(${SHADER_DIR} ${TARGET_NAME})
 endfunction()
