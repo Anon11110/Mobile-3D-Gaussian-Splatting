@@ -40,6 +40,9 @@
 # debug information files
 *.dwo
 
+# python
+__pycache__/
+
 # build directory
 build/
 
