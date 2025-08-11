@@ -1,5 +1,3 @@
-#include <GLFW/glfw3.h>
-
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -9,280 +7,295 @@
 
 #include "rhi.h"
 
-struct Vertex {
-    float position[3];
-    float color[3];
+#include <GLFW/glfw3.h>
+
+struct Vertex
+{
+	float position[3];
+	float color[3];
 };
 
-struct UniformBufferObject {
-    float mvp[16];     // MVP matrix
-    float time;        // Animation time
-    float padding[3];  // Alignment padding
+struct UniformBufferObject
+{
+	float mvp[16];           // MVP matrix
+	float time;              // Animation time
+	float padding[3];        // Alignment padding
 };
 
-std::vector<uint8_t> LoadShaderCode(const std::string& filename) {
-    std::ifstream file(filename, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open shader file: " + filename);
-    }
+std::vector<uint8_t> LoadShaderCode(const std::string &filename)
+{
+	std::ifstream file(filename, std::ios::binary | std::ios::ate);
+	if (!file.is_open())
+	{
+		throw std::runtime_error("Failed to open shader file: " + filename);
+	}
 
-    size_t fileSize = file.tellg();
-    std::vector<uint8_t> code(fileSize);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(code.data()), fileSize);
-    return code;
+	size_t               fileSize = file.tellg();
+	std::vector<uint8_t> code(fileSize);
+	file.seekg(0);
+	file.read(reinterpret_cast<char *>(code.data()), fileSize);
+	return code;
 }
 
-int main() {
-    // Initialize GLFW
-    if (!glfwInit()) {
-        std::cerr << "Failed to initialize GLFW" << std::endl;
-        return -1;
-    }
+int main()
+{
+	// Initialize GLFW
+	if (!glfwInit())
+	{
+		std::cerr << "Failed to initialize GLFW" << std::endl;
+		return -1;
+	}
 
-    // Create window
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Simple Triangle", nullptr, nullptr);
-    if (!window) {
-        std::cerr << "Failed to create window" << std::endl;
-        glfwTerminate();
-        return -1;
-    }
+	// Create window
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+	GLFWwindow *window = glfwCreateWindow(800, 600, "Simple Triangle", nullptr, nullptr);
+	if (!window)
+	{
+		std::cerr << "Failed to create window" << std::endl;
+		glfwTerminate();
+		return -1;
+	}
 
-    try {
-        // Create RHI device
-        auto device = RHI::CreateRHIDevice();
+	try
+	{
+		// Create RHI device
+		auto device = RHI::CreateRHIDevice();
 
-        // Create swapchain
-        RHI::SwapchainDesc swapchainDesc{};
-        int fbw, fbh;
-        glfwGetFramebufferSize(window, &fbw, &fbh);
-        swapchainDesc.windowHandle = window;
-        swapchainDesc.width = static_cast<uint32_t>(fbw);
-        swapchainDesc.height = static_cast<uint32_t>(fbh);
-        swapchainDesc.format = RHI::TextureFormat::R8G8B8A8_UNORM;
-        auto swapchain = device->CreateSwapchain(swapchainDesc);
-        // Create vertex buffer
-        Vertex vertices[] = {{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-                             {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-                             {{0.0f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}};
+		// Create swapchain
+		RHI::SwapchainDesc swapchainDesc{};
+		int                fbw, fbh;
+		glfwGetFramebufferSize(window, &fbw, &fbh);
+		swapchainDesc.windowHandle = window;
+		swapchainDesc.width        = static_cast<uint32_t>(fbw);
+		swapchainDesc.height       = static_cast<uint32_t>(fbh);
+		swapchainDesc.format       = RHI::TextureFormat::R8G8B8A8_UNORM;
+		auto swapchain             = device->CreateSwapchain(swapchainDesc);
+		// Create vertex buffer
+		Vertex vertices[] = {{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+		                     {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+		                     {{0.0f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}};
 
-        RHI::BufferDesc vbDesc{};
-        vbDesc.size = sizeof(vertices);
-        vbDesc.usage = RHI::BufferUsage::VERTEX;
-        vbDesc.memoryType = RHI::MemoryType::CPU_TO_GPU;
-        vbDesc.initialData = vertices;
-        auto vertexBuffer = device->CreateBuffer(vbDesc);
+		RHI::BufferDesc vbDesc{};
+		vbDesc.size        = sizeof(vertices);
+		vbDesc.usage       = RHI::BufferUsage::VERTEX;
+		vbDesc.memoryType  = RHI::MemoryType::CPU_TO_GPU;
+		vbDesc.initialData = vertices;
+		auto vertexBuffer  = device->CreateBuffer(vbDesc);
 
-        // Create uniform buffer for MVP matrix and animation
-        RHI::BufferDesc ubDesc{};
-        ubDesc.size = sizeof(UniformBufferObject);
-        ubDesc.usage = RHI::BufferUsage::UNIFORM;
-        ubDesc.memoryType = RHI::MemoryType::CPU_TO_GPU;
-        auto uniformBuffer = device->CreateBuffer(ubDesc);
+		// Create uniform buffer for MVP matrix and animation
+		RHI::BufferDesc ubDesc{};
+		ubDesc.size        = sizeof(UniformBufferObject);
+		ubDesc.usage       = RHI::BufferUsage::UNIFORM;
+		ubDesc.memoryType  = RHI::MemoryType::CPU_TO_GPU;
+		auto uniformBuffer = device->CreateBuffer(ubDesc);
 
-        // Load and create shaders
-        auto vertexCode = LoadShaderCode("shaders/compiled/triangle.vert.spv");
-        auto fragmentCode = LoadShaderCode("shaders/compiled/triangle.frag.spv");
+		// Load and create shaders
+		auto vertexCode   = LoadShaderCode("shaders/compiled/triangle.vert.spv");
+		auto fragmentCode = LoadShaderCode("shaders/compiled/triangle.frag.spv");
 
-        RHI::ShaderDesc vsDesc{};
-        vsDesc.stage = RHI::ShaderStage::VERTEX;
-        vsDesc.code = vertexCode.data();
-        vsDesc.codeSize = vertexCode.size();
-        auto vertexShader = device->CreateShader(vsDesc);
+		RHI::ShaderDesc vsDesc{};
+		vsDesc.stage      = RHI::ShaderStage::VERTEX;
+		vsDesc.code       = vertexCode.data();
+		vsDesc.codeSize   = vertexCode.size();
+		auto vertexShader = device->CreateShader(vsDesc);
 
-        RHI::ShaderDesc fsDesc{};
-        fsDesc.stage = RHI::ShaderStage::FRAGMENT;
-        fsDesc.code = fragmentCode.data();
-        fsDesc.codeSize = fragmentCode.size();
-        auto fragmentShader = device->CreateShader(fsDesc);
+		RHI::ShaderDesc fsDesc{};
+		fsDesc.stage        = RHI::ShaderStage::FRAGMENT;
+		fsDesc.code         = fragmentCode.data();
+		fsDesc.codeSize     = fragmentCode.size();
+		auto fragmentShader = device->CreateShader(fsDesc);
 
-        // Create descriptor set layout for uniform buffer
-        RHI::DescriptorSetLayoutDesc layoutDesc{};
-        layoutDesc.bindings = {{0, RHI::DescriptorType::UNIFORM_BUFFER, 1, RHI::ShaderStageFlags::VERTEX}};
-        auto descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
+		// Create descriptor set layout for uniform buffer
+		RHI::DescriptorSetLayoutDesc layoutDesc{};
+		layoutDesc.bindings      = {{0, RHI::DescriptorType::UNIFORM_BUFFER, 1, RHI::ShaderStageFlags::VERTEX}};
+		auto descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 
-        // Create descriptor set and bind uniform buffer
-        auto descriptorSet = device->CreateDescriptorSet(descriptorSetLayout.get(), RHI::QueueType::GRAPHICS);
+		// Create descriptor set and bind uniform buffer
+		auto descriptorSet = device->CreateDescriptorSet(descriptorSetLayout.get(), RHI::QueueType::GRAPHICS);
 
-        RHI::BufferBinding bufferBinding{};
-        bufferBinding.buffer = uniformBuffer.get();
-        bufferBinding.offset = 0;
-        bufferBinding.range = 0;  // Whole buffer
-        bufferBinding.type = RHI::DescriptorType::UNIFORM_BUFFER;
-        descriptorSet->BindBuffer(0, bufferBinding);
+		RHI::BufferBinding bufferBinding{};
+		bufferBinding.buffer = uniformBuffer.get();
+		bufferBinding.offset = 0;
+		bufferBinding.range  = 0;        // Whole buffer
+		bufferBinding.type   = RHI::DescriptorType::UNIFORM_BUFFER;
+		descriptorSet->BindBuffer(0, bufferBinding);
 
-        // Create pipeline
-        RHI::GraphicsPipelineDesc pipelineDesc{};
-        pipelineDesc.vertexShader = vertexShader.get();
-        pipelineDesc.fragmentShader = fragmentShader.get();
+		// Create pipeline
+		RHI::GraphicsPipelineDesc pipelineDesc{};
+		pipelineDesc.vertexShader   = vertexShader.get();
+		pipelineDesc.fragmentShader = fragmentShader.get();
 
-        // Vertex layout
-        pipelineDesc.vertexLayout.attributes = {
-            {0, 0, RHI::TextureFormat::R32G32B32_FLOAT, 0},  // position
-            {1, 0, RHI::TextureFormat::R32G32B32_FLOAT, 12}  // color
-        };
-        pipelineDesc.vertexLayout.bindings = {{0, sizeof(Vertex), false}};
+		// Vertex layout
+		pipelineDesc.vertexLayout.attributes = {
+		    {0, 0, RHI::TextureFormat::R32G32B32_FLOAT, 0},        // position
+		    {1, 0, RHI::TextureFormat::R32G32B32_FLOAT, 12}        // color
+		};
+		pipelineDesc.vertexLayout.bindings = {{0, sizeof(Vertex), false}};
 
-        pipelineDesc.topology = RHI::PrimitiveTopology::TRIANGLE_LIST;
-        pipelineDesc.colorFormat = swapchainDesc.format;
+		pipelineDesc.topology    = RHI::PrimitiveTopology::TRIANGLE_LIST;
+		pipelineDesc.colorFormat = swapchainDesc.format;
 
-        pipelineDesc.descriptorSetLayouts = {descriptorSetLayout.get()};
+		pipelineDesc.descriptorSetLayouts = {descriptorSetLayout.get()};
 
-        RHI::PushConstantRange pushConstantRange{};
-        pushConstantRange.stageFlags = RHI::ShaderStageFlags::VERTEX;
-        pushConstantRange.offset = 0;
-        pushConstantRange.size = 16;  // 4 floats (scale, rotation, etc.)
-        pipelineDesc.pushConstantRanges = {pushConstantRange};
+		RHI::PushConstantRange pushConstantRange{};
+		pushConstantRange.stageFlags    = RHI::ShaderStageFlags::VERTEX;
+		pushConstantRange.offset        = 0;
+		pushConstantRange.size          = 16;        // 4 floats (scale, rotation, etc.)
+		pipelineDesc.pushConstantRanges = {pushConstantRange};
 
-        auto pipeline = device->CreateGraphicsPipeline(pipelineDesc);
+		auto pipeline = device->CreateGraphicsPipeline(pipelineDesc);
 
-        // Create synchronization objects
-        auto imageAvailableSemaphore = device->CreateSemaphore();
-        auto renderFinishedSemaphore = device->CreateSemaphore();
-        auto inFlightFence = device->CreateFence(true);
+		// Create synchronization objects
+		auto imageAvailableSemaphore = device->CreateSemaphore();
+		auto renderFinishedSemaphore = device->CreateSemaphore();
+		auto inFlightFence           = device->CreateFence(true);
 
-        // Create command lists for each swapchain image
-        std::vector<std::unique_ptr<RHI::IRHICommandList>> commandLists;
-        for (uint32_t i = 0; i < swapchain->GetImageCount(); i++) {
-            commandLists.push_back(device->CreateCommandList());
-        }
+		// Create command lists for each swapchain image
+		std::vector<std::unique_ptr<RHI::IRHICommandList>> commandLists;
+		for (uint32_t i = 0; i < swapchain->GetImageCount(); i++)
+		{
+			commandLists.push_back(device->CreateCommandList());
+		}
 
-        // Main loop
-        auto applicationStartTime = std::chrono::high_resolution_clock::now();
-        auto fpsStartTime = std::chrono::high_resolution_clock::now();
-        uint32_t frameCount = 0;
+		// Main loop
+		auto     applicationStartTime = std::chrono::high_resolution_clock::now();
+		auto     fpsStartTime         = std::chrono::high_resolution_clock::now();
+		uint32_t frameCount           = 0;
 
-        while (!glfwWindowShouldClose(window)) {
-            glfwPollEvents();
+		while (!glfwWindowShouldClose(window))
+		{
+			glfwPollEvents();
 
-            // Wait for previous frame
-            inFlightFence->Wait();
-            inFlightFence->Reset();
+			// Wait for previous frame
+			inFlightFence->Wait();
+			inFlightFence->Reset();
 
-            // Update uniform buffer with animation
-            auto currentTime = std::chrono::high_resolution_clock::now();
-            float time = std::chrono::duration<float>(currentTime - applicationStartTime).count();
+			// Update uniform buffer with animation
+			auto  currentTime = std::chrono::high_resolution_clock::now();
+			float time        = std::chrono::duration<float>(currentTime - applicationStartTime).count();
 
-            UniformBufferObject ubo{};
-            // Simple identity matrix for MVP (no transformation)
-            ubo.mvp[0] = 1.0f;
-            ubo.mvp[5] = 1.0f;
-            ubo.mvp[10] = 1.0f;
-            ubo.mvp[15] = 1.0f;
-            ubo.time = time;
+			UniformBufferObject ubo{};
+			// Simple identity matrix for MVP (no transformation)
+			ubo.mvp[0]  = 1.0f;
+			ubo.mvp[5]  = 1.0f;
+			ubo.mvp[10] = 1.0f;
+			ubo.mvp[15] = 1.0f;
+			ubo.time    = time;
 
-            // Update uniform buffer
-            void* uniformData = uniformBuffer->Map();
-            memcpy(uniformData, &ubo, sizeof(UniformBufferObject));
-            uniformBuffer->Unmap();
+			// Update uniform buffer
+			void *uniformData = uniformBuffer->Map();
+			memcpy(uniformData, &ubo, sizeof(UniformBufferObject));
+			uniformBuffer->Unmap();
 
-            // Acquire next image
-            uint32_t imageIndex = swapchain->AcquireNextImage(imageAvailableSemaphore.get());
+			// Acquire next image
+			uint32_t imageIndex = swapchain->AcquireNextImage(imageAvailableSemaphore.get());
 
-            // Record commands
-            auto& cmdList = commandLists[imageIndex];
-            cmdList->Reset();
-            cmdList->Begin();
+			// Record commands
+			auto &cmdList = commandLists[imageIndex];
+			cmdList->Reset();
+			cmdList->Begin();
 
-            // Query back buffer size (matches swapchain extent)
-            auto* backBuffer = swapchain->GetBackBuffer(imageIndex);
-            uint32_t backBufferWidth = backBuffer->GetWidth();
-            uint32_t backBufferHeight = backBuffer->GetHeight();
+			// Query back buffer size (matches swapchain extent)
+			auto    *backBuffer       = swapchain->GetBackBuffer(imageIndex);
+			uint32_t backBufferWidth  = backBuffer->GetWidth();
+			uint32_t backBufferHeight = backBuffer->GetHeight();
 
-            // Begin render pass
-            RHI::RenderPassBeginInfo rpInfo{};
-            rpInfo.colorTarget = backBuffer;
-            rpInfo.width = backBufferWidth;
-            rpInfo.height = backBufferHeight;
-            rpInfo.clearColor = {{0.1f, 0.1f, 0.1f, 1.0f}};
-            rpInfo.shouldClearColor = true;
-            cmdList->BeginRenderPass(rpInfo);
+			// Begin render pass
+			RHI::RenderPassBeginInfo rpInfo{};
+			rpInfo.colorTarget      = backBuffer;
+			rpInfo.width            = backBufferWidth;
+			rpInfo.height           = backBufferHeight;
+			rpInfo.clearColor       = {{0.1f, 0.1f, 0.1f, 1.0f}};
+			rpInfo.shouldClearColor = true;
+			cmdList->BeginRenderPass(rpInfo);
 
-            // Viewport and scissor
-            cmdList->SetViewport(0, 0, float(backBufferWidth), float(backBufferHeight));
-            cmdList->SetScissor(0, 0, backBufferWidth, backBufferHeight);
+			// Viewport and scissor
+			cmdList->SetViewport(0, 0, float(backBufferWidth), float(backBufferHeight));
+			cmdList->SetScissor(0, 0, backBufferWidth, backBufferHeight);
 
-            cmdList->SetPipeline(pipeline.get());
-            cmdList->SetVertexBuffer(0, vertexBuffer.get());
+			cmdList->SetPipeline(pipeline.get());
+			cmdList->SetVertexBuffer(0, vertexBuffer.get());
 
-            cmdList->BindDescriptorSet(0, descriptorSet.get());
+			cmdList->BindDescriptorSet(0, descriptorSet.get());
 
-            // Calculate projected NDC centroid of the triangle vertices
-            // Triangle vertices in object space
-            float vertices_obj[3][3] = {{-0.5f, -0.5f, 0.0f}, {0.5f, -0.5f, 0.0f}, {0.0f, 0.5f, 0.0f}};
+			// Calculate projected NDC centroid of the triangle vertices
+			// Triangle vertices in object space
+			float vertices_obj[3][3] = {{-0.5f, -0.5f, 0.0f}, {0.5f, -0.5f, 0.0f}, {0.0f, 0.5f, 0.0f}};
 
-            // Per-vertex accumulated NDC
-            float ndc_sum_x = 0.0f;
-            float ndc_sum_y = 0.0f;
+			// Per-vertex accumulated NDC
+			float ndc_sum_x = 0.0f;
+			float ndc_sum_y = 0.0f;
 
-            for (int i = 0; i < 3; i++) {
-                const float x = vertices_obj[i][0];
-                const float y = vertices_obj[i][1];
-                const float z = vertices_obj[i][2];
+			for (int i = 0; i < 3; i++)
+			{
+				const float x = vertices_obj[i][0];
+				const float y = vertices_obj[i][1];
+				const float z = vertices_obj[i][2];
 
-                // clip = MVP * [x y z 1]^T
-                float clip_x = ubo.mvp[0] * x + ubo.mvp[4] * y + ubo.mvp[8] * z + ubo.mvp[12];
-                float clip_y = ubo.mvp[1] * x + ubo.mvp[5] * y + ubo.mvp[9] * z + ubo.mvp[13];
-                float clip_w = ubo.mvp[3] * x + ubo.mvp[7] * y + ubo.mvp[11] * z + ubo.mvp[15];
+				// clip = MVP * [x y z 1]^T
+				float clip_x = ubo.mvp[0] * x + ubo.mvp[4] * y + ubo.mvp[8] * z + ubo.mvp[12];
+				float clip_y = ubo.mvp[1] * x + ubo.mvp[5] * y + ubo.mvp[9] * z + ubo.mvp[13];
+				float clip_w = ubo.mvp[3] * x + ubo.mvp[7] * y + ubo.mvp[11] * z + ubo.mvp[15];
 
-                // NDC per-vertex
-                ndc_sum_x += clip_x / clip_w;
-                ndc_sum_y += clip_y / clip_w;
-            }
+				// NDC per-vertex
+				ndc_sum_x += clip_x / clip_w;
+				ndc_sum_y += clip_y / clip_w;
+			}
 
-            // Average NDC = true screen-space centroid under perspective
-            float center_ndc[2] = {ndc_sum_x / 3.0f, ndc_sum_y / 3.0f};
+			// Average NDC = true screen-space centroid under perspective
+			float center_ndc[2] = {ndc_sum_x / 3.0f, ndc_sum_y / 3.0f};
 
-            // Calculate aspect ratio from back buffer dimensions
-            float aspect = static_cast<float>(backBufferWidth) / static_cast<float>(backBufferHeight);
+			// Calculate aspect ratio from back buffer dimensions
+			float aspect = static_cast<float>(backBufferWidth) / static_cast<float>(backBufferHeight);
 
-            // Push constants: centerNdc.x, centerNdc.y, rotation, aspect
-            float pushData[4] = {
-                center_ndc[0],  // centerNdc.x
-                center_ndc[1],  // centerNdc.y
-                time * 0.5f,    // rotation in radians
-                aspect          // aspect ratio
-            };
-            cmdList->PushConstants(RHI::ShaderStageFlags::VERTEX, 0, sizeof(pushData), pushData);
+			// Push constants: centerNdc.x, centerNdc.y, rotation, aspect
+			float pushData[4] = {
+			    center_ndc[0],        // centerNdc.x
+			    center_ndc[1],        // centerNdc.y
+			    time * 0.5f,          // rotation in radians
+			    aspect                // aspect ratio
+			};
+			cmdList->PushConstants(RHI::ShaderStageFlags::VERTEX, 0, sizeof(pushData), pushData);
 
-            // Draw triangle
-            cmdList->Draw(3);
+			// Draw triangle
+			cmdList->Draw(3);
 
-            cmdList->EndRenderPass();
-            cmdList->End();
+			cmdList->EndRenderPass();
+			cmdList->End();
 
-            // Submit
-            RHI::IRHICommandList* cmdListPtr = cmdList.get();
-            device->SubmitCommandLists(&cmdListPtr, 1, imageAvailableSemaphore.get(), renderFinishedSemaphore.get(),
-                                       inFlightFence.get());
+			// Submit
+			RHI::IRHICommandList *cmdListPtr = cmdList.get();
+			device->SubmitCommandLists(&cmdListPtr, 1, imageAvailableSemaphore.get(), renderFinishedSemaphore.get(),
+			                           inFlightFence.get());
 
-            // Present
-            swapchain->Present(imageIndex, renderFinishedSemaphore.get());
+			// Present
+			swapchain->Present(imageIndex, renderFinishedSemaphore.get());
 
-            // FPS counter
-            frameCount++;
-            currentTime = std::chrono::high_resolution_clock::now();
-            float fpsElapsed = std::chrono::duration<float>(currentTime - fpsStartTime).count();
-            if (fpsElapsed >= 1.0f) {
-                std::cout << "FPS: " << std::fixed << std::setprecision(1) << frameCount / fpsElapsed << std::endl;
-                frameCount = 0;
-                fpsStartTime = currentTime;
-            }
-        }
+			// FPS counter
+			frameCount++;
+			currentTime      = std::chrono::high_resolution_clock::now();
+			float fpsElapsed = std::chrono::duration<float>(currentTime - fpsStartTime).count();
+			if (fpsElapsed >= 1.0f)
+			{
+				std::cout << "FPS: " << std::fixed << std::setprecision(1) << frameCount / fpsElapsed << std::endl;
+				frameCount   = 0;
+				fpsStartTime = currentTime;
+			}
+		}
 
-        // Wait for GPU to finish
-        device->WaitIdle();
+		// Wait for GPU to finish
+		device->WaitIdle();
+	}
+	catch (const std::exception &e)
+	{
+		std::cerr << "Error: " << e.what() << std::endl;
+		glfwDestroyWindow(window);
+		glfwTerminate();
+		return -1;
+	}
 
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        return -1;
-    }
-
-    // Cleanup
-    glfwDestroyWindow(window);
-    glfwTerminate();
-    return 0;
+	// Cleanup
+	glfwDestroyWindow(window);
+	glfwTerminate();
+	return 0;
 }
