@@ -100,7 +100,7 @@ cmake --build . --config Release
 #### All Platforms
 - CMake 3.20+
 - Python 3.6+
-- C++17 compatible compiler
+- C++20 compatible compiler
 
 #### Windows
 - Visual Studio 2019+ (with C++ workload)

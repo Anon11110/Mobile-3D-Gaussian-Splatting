@@ -48,3 +48,4 @@ build/
 CLAUDE.md
 .cursor/
 .vscode/
+.mcp.json
