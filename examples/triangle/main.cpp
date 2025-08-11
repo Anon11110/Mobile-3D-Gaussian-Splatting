@@ -70,6 +70,7 @@ int main()
 		swapchainDesc.height       = static_cast<uint32_t>(fbh);
 		swapchainDesc.format       = RHI::TextureFormat::R8G8B8A8_UNORM;
 		auto swapchain             = device->CreateSwapchain(swapchainDesc);
+
 		// Create vertex buffer
 		Vertex vertices[] = {{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
 		                     {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
@@ -133,8 +134,9 @@ int main()
 		};
 		pipelineDesc.vertexLayout.bindings = {{0, sizeof(Vertex), false}};
 
-		pipelineDesc.topology    = RHI::PrimitiveTopology::TRIANGLE_LIST;
-		pipelineDesc.colorFormat = swapchainDesc.format;
+		pipelineDesc.topology = RHI::PrimitiveTopology::TRIANGLE_LIST;
+		// Get the actual format chosen by the swapchain
+		pipelineDesc.colorFormat = swapchain->GetBackBuffer(0)->GetFormat();
 
 		pipelineDesc.descriptorSetLayouts = {descriptorSetLayout.get()};
 

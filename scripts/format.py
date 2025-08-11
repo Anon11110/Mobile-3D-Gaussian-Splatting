@@ -9,8 +9,14 @@ from subprocess import CalledProcessError, check_output
 from utils import term
 
 
-ALLOWED_EXTENSIONS = {".h", ".hpp", ".cpp"}
-THIRDPARTY_DIR_NAMES = {"third-party"}
+ALLOWED_EXTENSIONS = {
+    ".h",
+    ".hpp",
+    ".cpp",
+}
+THIRDPARTY_DIR_NAMES = {
+    "third-party",
+}
 
 # Hardcoded whitelist of directories to format (relative to repo root).
 # Edit this list to add/remove directories.

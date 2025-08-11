@@ -23,15 +23,69 @@ VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevic
 	std::vector<VkSurfaceFormatKHR> formats(formatCount);
 	vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, formats.data());
 
-	VkSurfaceFormatKHR chosenFormat = formats[0];
+	// Convert requested format to Vulkan format
+	VkFormat requestedVkFormat = TextureFormatToVulkan(desc.format);
+
+	// Try to find the requested format
+	VkSurfaceFormatKHR chosenFormat         = formats[0];
+	bool               foundRequestedFormat = false;
+
 	for (const auto &format : formats)
 	{
-		if (format.format == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+		// First priority: exact match with requested format
+		if (format.format == requestedVkFormat)
 		{
-			chosenFormat = format;
+			chosenFormat         = format;
+			foundRequestedFormat = true;
 			break;
 		}
 	}
+
+	// If requested format not found, try compatible formats
+	if (!foundRequestedFormat)
+	{
+		// Map common format substitutions
+		if (requestedVkFormat == VK_FORMAT_R8G8B8A8_UNORM)
+		{
+			// Try BGRA8 UNORM as fallback
+			for (const auto &format : formats)
+			{
+				if (format.format == VK_FORMAT_B8G8R8A8_UNORM)
+				{
+					chosenFormat         = format;
+					foundRequestedFormat = true;
+					break;
+				}
+			}
+		}
+		else if (requestedVkFormat == VK_FORMAT_R8G8B8A8_SRGB)
+		{
+			// Try BGRA8 SRGB as fallback
+			for (const auto &format : formats)
+			{
+				if (format.format == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+				{
+					chosenFormat         = format;
+					foundRequestedFormat = true;
+					break;
+				}
+			}
+		}
+	}
+
+	// Final fallback: prefer BGRA8 SRGB (most compatible)
+	if (!foundRequestedFormat)
+	{
+		for (const auto &format : formats)
+		{
+			if (format.format == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+			{
+				chosenFormat = format;
+				break;
+			}
+		}
+	}
+
 	swapchainFormat = chosenFormat.format;
 
 	// Choose present mode
