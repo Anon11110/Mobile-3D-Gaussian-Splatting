@@ -76,18 +76,19 @@ int main()
 		                     {{0.0f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}};
 
 		RHI::BufferDesc vbDesc{};
-		vbDesc.size        = sizeof(vertices);
-		vbDesc.usage       = RHI::BufferUsage::VERTEX;
-		vbDesc.memoryType  = RHI::MemoryType::CPU_TO_GPU;
-		vbDesc.initialData = vertices;
-		auto vertexBuffer  = device->CreateBuffer(vbDesc);
+		vbDesc.size          = sizeof(vertices);
+		vbDesc.usage         = RHI::BufferUsage::VERTEX;
+		vbDesc.resourceUsage = RHI::ResourceUsage::Static;
+		vbDesc.initialData   = vertices;
+		auto vertexBuffer    = device->CreateBuffer(vbDesc);
 
 		// Create uniform buffer for MVP matrix and animation
 		RHI::BufferDesc ubDesc{};
-		ubDesc.size        = sizeof(UniformBufferObject);
-		ubDesc.usage       = RHI::BufferUsage::UNIFORM;
-		ubDesc.memoryType  = RHI::MemoryType::CPU_TO_GPU;
-		auto uniformBuffer = device->CreateBuffer(ubDesc);
+		ubDesc.size                      = sizeof(UniformBufferObject);
+		ubDesc.usage                     = RHI::BufferUsage::UNIFORM;
+		ubDesc.resourceUsage             = RHI::ResourceUsage::DynamicUpload;
+		ubDesc.hints.persistently_mapped = true;
+		auto uniformBuffer               = device->CreateBuffer(ubDesc);
 
 		// Load and create shaders
 		auto vertexCode   = LoadShaderCode("shaders/compiled/triangle.vert.spv");

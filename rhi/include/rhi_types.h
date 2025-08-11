@@ -30,11 +30,19 @@ enum class BufferUsage : uint32_t
 	STORAGE = 1 << 3
 };
 
-enum class MemoryType
+enum class ResourceUsage
 {
-	GPU_ONLY,
-	CPU_TO_GPU,
-	GPU_TO_CPU
+	Static,               // Immutable after initialization (textures, static meshes)
+	DynamicUpload,        // CPU->GPU frequent updates (uniform/vertex rings)
+	Readback,             // GPU->CPU transfers
+	Transient             // Per-frame scratch RT/UAV/temp buffers
+};
+
+struct AllocationHints
+{
+	bool prefer_device_local = true;         // for Static/Transient
+	bool persistently_mapped = false;        // for DynamicUpload/Readback
+	bool allow_dedicated     = false;        // let backend auto-decide for huge resources
 };
 
 enum class ShaderStage
@@ -105,10 +113,26 @@ enum class ImageLayout
 // Structures
 struct BufferDesc
 {
-	size_t      size;
-	BufferUsage usage;
-	MemoryType  memoryType;
-	const void *initialData = nullptr;
+	size_t          size;
+	BufferUsage     usage;
+	ResourceUsage   resourceUsage = ResourceUsage::Static;
+	AllocationHints hints         = {};
+	const void     *initialData   = nullptr;
+};
+
+struct TextureDesc
+{
+	uint32_t        width;
+	uint32_t        height;
+	uint32_t        depth     = 1;
+	uint32_t        mipLevels = 1;
+	TextureFormat   format;
+	ResourceUsage   resourceUsage   = ResourceUsage::Static;
+	AllocationHints hints           = {};
+	bool            isRenderTarget  = false;
+	bool            isDepthStencil  = false;
+	const void     *initialData     = nullptr;
+	size_t          initialDataSize = 0;
 };
 
 struct ShaderDesc

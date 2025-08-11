@@ -18,6 +18,7 @@ class VulkanDevice : public IRHIDevice
 	VkQueue          graphicsQueue;
 	uint32_t         graphicsQueueFamily;
 	VkCommandPool    commandPool;
+	VmaAllocator     allocator;
 
 	VkDescriptorPool graphicsDescriptorPool;
 	VkDescriptorPool computeDescriptorPool;
@@ -40,27 +41,101 @@ class VulkanDevice : public IRHIDevice
 		PickPhysicalDevice();
 		CreateLogicalDevice();
 		CreateCommandPool();
+		CreateVmaAllocator();
 		CreateDescriptorPools();
 	}
 
 	~VulkanDevice() override
 	{
-		vkDestroyDescriptorPool(device, graphicsDescriptorPool, nullptr);
-		vkDestroyDescriptorPool(device, computeDescriptorPool, nullptr);
-		vkDestroyDescriptorPool(device, transferDescriptorPool, nullptr);
-		vkDestroyCommandPool(device, commandPool, nullptr);
-		vkDestroyDevice(device, nullptr);
+		// Wait for all operations to complete before cleanup
+		if (device != VK_NULL_HANDLE)
+		{
+			vkDeviceWaitIdle(device);
+		}
+
+		// Destroy descriptor pools first
+		if (graphicsDescriptorPool != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorPool(device, graphicsDescriptorPool, nullptr);
+		}
+		if (computeDescriptorPool != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorPool(device, computeDescriptorPool, nullptr);
+		}
+		if (transferDescriptorPool != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorPool(device, transferDescriptorPool, nullptr);
+		}
+
+		// Destroy command pool
+		if (commandPool != VK_NULL_HANDLE)
+		{
+			vkDestroyCommandPool(device, commandPool, nullptr);
+		}
+
+		// IMPORTANT: VMA allocator must be destroyed AFTER all buffers/textures are destroyed
+		// but BEFORE the Vulkan device is destroyed
+		if (allocator != VK_NULL_HANDLE)
+		{
+			vmaDestroyAllocator(allocator);
+		}
+
+		// Destroy device
+		if (device != VK_NULL_HANDLE)
+		{
+			vkDestroyDevice(device, nullptr);
+		}
+
 #ifdef DEBUG
 		DestroyDebugMessenger();
 #endif
-		vkDestroyInstance(instance, nullptr);
+
+		if (instance != VK_NULL_HANDLE)
+		{
+			vkDestroyInstance(instance, nullptr);
+		}
+
 		glfwTerminate();
 	}
 
 	// IRHIDevice implementation
 	std::unique_ptr<IRHIBuffer> CreateBuffer(const BufferDesc &desc) override
 	{
-		return std::make_unique<VulkanBuffer>(device, physicalDevice, desc);
+		auto buffer = std::make_unique<VulkanBuffer>(allocator, desc);
+
+		if (desc.initialData != nullptr && desc.resourceUsage == ResourceUsage::Static)
+		{
+			// Handle initial data upload for static buffers using staging
+			UploadToStaticBuffer(buffer.get(), desc.initialData, desc.size);
+		}
+		else if (desc.initialData != nullptr && desc.resourceUsage != ResourceUsage::Static)
+		{
+			// For non-static buffers, upload directly (they're host-visible)
+			void *mapped = buffer->Map();
+			memcpy(mapped, desc.initialData, desc.size);
+			buffer->Unmap();
+		}
+
+		return buffer;
+	}
+
+	std::unique_ptr<IRHITexture> CreateTexture(const TextureDesc &desc) override
+	{
+		auto texture = std::make_unique<VulkanTexture>(device, allocator, desc);
+
+		if (desc.initialData != nullptr && desc.resourceUsage == ResourceUsage::Static)
+		{
+			// Handle initial data upload for static textures using staging
+			UploadToStaticTexture(texture.get(), desc);
+		}
+		else if (desc.initialData != nullptr && desc.resourceUsage != ResourceUsage::Static)
+		{
+			// For non-static textures, they should be mappable
+			// But this is rarely used in practice, so we'll skip it for now
+			throw std::runtime_error("Initial data upload for non-static textures not yet implemented");
+		}
+
+		return texture;
 	}
 
 	std::unique_ptr<IRHIShader> CreateShader(const ShaderDesc &desc) override
@@ -86,7 +161,7 @@ class VulkanDevice : public IRHIDevice
 		{
 			throw std::runtime_error("Failed to create window surface");
 		}
-		return std::make_unique<VulkanSwapchain>(device, physicalDevice, surface, graphicsQueue, desc);
+		return std::make_unique<VulkanSwapchain>(device, physicalDevice, allocator, surface, graphicsQueue, desc);
 	}
 
 	std::unique_ptr<IRHISemaphore> CreateSemaphore() override
@@ -340,9 +415,40 @@ class VulkanDevice : public IRHIDevice
 		createInfo.pQueueCreateInfos    = &queueCreateInfo;
 		createInfo.pEnabledFeatures     = &deviceFeatures;
 
-		const char *deviceExtensions[]     = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-		createInfo.enabledExtensionCount   = 1;
-		createInfo.ppEnabledExtensionNames = deviceExtensions;
+		// Check available device extensions
+		uint32_t deviceExtensionCount = 0;
+		vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtensionCount, nullptr);
+		std::vector<VkExtensionProperties> availableExtensions(deviceExtensionCount);
+		vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtensionCount,
+		                                     availableExtensions.data());
+
+		std::vector<const char *> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+
+		// Check for VMA-related extensions and enable them if available
+		for (const auto &ext : availableExtensions)
+		{
+			if (strcmp(ext.extensionName, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME) == 0)
+			{
+				deviceExtensions.push_back(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
+			}
+			else if (strcmp(ext.extensionName, VK_KHR_BIND_MEMORY_2_EXTENSION_NAME) == 0)
+			{
+				deviceExtensions.push_back(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME);
+			}
+			else if (strcmp(ext.extensionName, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME) == 0)
+			{
+				deviceExtensions.push_back(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME);
+			}
+#ifdef __APPLE__
+			else if (strcmp(ext.extensionName, "VK_KHR_portability_subset") == 0)
+			{
+				deviceExtensions.push_back("VK_KHR_portability_subset");
+			}
+#endif
+		}
+
+		createInfo.enabledExtensionCount   = static_cast<uint32_t>(deviceExtensions.size());
+		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
 		if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
 		{
@@ -362,6 +468,251 @@ class VulkanDevice : public IRHIDevice
 		if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create command pool");
+		}
+	}
+
+	void CreateVmaAllocator()
+	{
+		VmaAllocatorCreateInfo allocatorInfo{};
+		allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_0;
+		allocatorInfo.physicalDevice   = physicalDevice;
+		allocatorInfo.device           = device;
+		allocatorInfo.instance         = instance;
+
+		// Check if extensions are available before enabling them
+		uint32_t deviceExtensionCount = 0;
+		vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtensionCount, nullptr);
+		std::vector<VkExtensionProperties> deviceExtensions(deviceExtensionCount);
+		vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtensionCount, deviceExtensions.data());
+
+		bool hasGetMemoryRequirements2 = false;
+		bool hasBindMemory2            = false;
+		bool hasDedicatedAllocation    = false;
+
+		for (const auto &ext : deviceExtensions)
+		{
+			if (strcmp(ext.extensionName, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME) == 0)
+			{
+				hasGetMemoryRequirements2 = true;
+			}
+			else if (strcmp(ext.extensionName, VK_KHR_BIND_MEMORY_2_EXTENSION_NAME) == 0)
+			{
+				hasBindMemory2 = true;
+			}
+			else if (strcmp(ext.extensionName, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME) == 0)
+			{
+				hasDedicatedAllocation = true;
+			}
+		}
+
+		// Only enable extensions that are actually available
+		allocatorInfo.flags = 0;
+		if (hasDedicatedAllocation && hasGetMemoryRequirements2)
+		{
+			allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_DEDICATED_ALLOCATION_BIT;
+		}
+		if (hasBindMemory2)
+		{
+			allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_BIND_MEMORY2_BIT;
+		}
+
+		if (vmaCreateAllocator(&allocatorInfo, &allocator) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create VMA allocator");
+		}
+	}
+
+	void UploadToStaticBuffer(VulkanBuffer *dstBuffer, const void *data, size_t size)
+	{
+		// Create staging buffer in host-visible memory
+		VkBufferCreateInfo stagingInfo{};
+		stagingInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		stagingInfo.size        = size;
+		stagingInfo.usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		VmaAllocationCreateInfo stagingAllocInfo{};
+		stagingAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+		stagingAllocInfo.flags =
+		    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+		VkBuffer          stagingBuffer;
+		VmaAllocation     stagingAllocation;
+		VmaAllocationInfo stagingAllocResult;
+
+		if (vmaCreateBuffer(allocator, &stagingInfo, &stagingAllocInfo, &stagingBuffer, &stagingAllocation,
+		                    &stagingAllocResult) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create staging buffer");
+		}
+
+		// Copy data to staging buffer
+		memcpy(stagingAllocResult.pMappedData, data, size);
+		vmaFlushAllocation(allocator, stagingAllocation, 0, VK_WHOLE_SIZE);
+
+		// Create and record copy command
+		VkCommandBufferAllocateInfo cmdAllocInfo{};
+		cmdAllocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		cmdAllocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cmdAllocInfo.commandPool        = commandPool;
+		cmdAllocInfo.commandBufferCount = 1;
+
+		VkCommandBuffer copyCmd;
+		vkAllocateCommandBuffers(device, &cmdAllocInfo, &copyCmd);
+
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+		vkBeginCommandBuffer(copyCmd, &beginInfo);
+
+		VkBufferCopy copyRegion{};
+		copyRegion.srcOffset = 0;
+		copyRegion.dstOffset = 0;
+		copyRegion.size      = size;
+		vkCmdCopyBuffer(copyCmd, stagingBuffer, dstBuffer->GetHandle(), 1, &copyRegion);
+
+		vkEndCommandBuffer(copyCmd);
+
+		// Submit and wait
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers    = &copyCmd;
+
+		// TODO: Async transfer? Because this is a one-time setup cost that happens when the
+		// user is already waiting for buffer creation, using vkQueueWaitIdle may be acceptable
+		vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(graphicsQueue);
+
+		vkFreeCommandBuffers(device, commandPool, 1, &copyCmd);
+		vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+	}
+
+	void UploadToStaticTexture(VulkanTexture *dstTexture, const TextureDesc &desc)
+	{
+		// Calculate staging buffer size based on texture format and dimensions
+		size_t pixelSize   = GetPixelSize(desc.format);
+		size_t stagingSize = desc.width * desc.height * desc.depth * pixelSize;
+
+		// Create staging buffer in host-visible memory
+		VkBufferCreateInfo stagingInfo{};
+		stagingInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		stagingInfo.size        = stagingSize;
+		stagingInfo.usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		VmaAllocationCreateInfo stagingAllocInfo{};
+		stagingAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+		stagingAllocInfo.flags =
+		    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+		VkBuffer          stagingBuffer;
+		VmaAllocation     stagingAllocation;
+		VmaAllocationInfo stagingAllocResult;
+
+		if (vmaCreateBuffer(allocator, &stagingInfo, &stagingAllocInfo, &stagingBuffer, &stagingAllocation,
+		                    &stagingAllocResult) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create staging buffer for texture");
+		}
+
+		// Copy data to staging buffer
+		memcpy(stagingAllocResult.pMappedData, desc.initialData, std::min(stagingSize, desc.initialDataSize));
+		vmaFlushAllocation(allocator, stagingAllocation, 0, VK_WHOLE_SIZE);
+
+		VkCommandBufferAllocateInfo cmdAllocInfo{};
+		cmdAllocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		cmdAllocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cmdAllocInfo.commandPool        = commandPool;
+		cmdAllocInfo.commandBufferCount = 1;
+
+		VkCommandBuffer copyCmd;
+		vkAllocateCommandBuffers(device, &cmdAllocInfo, &copyCmd);
+
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+		vkBeginCommandBuffer(copyCmd, &beginInfo);
+
+		// Transition image from UNDEFINED to TRANSFER_DST_OPTIMAL
+		VkImageMemoryBarrier barrier{};
+		barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		barrier.oldLayout                       = VK_IMAGE_LAYOUT_UNDEFINED;
+		barrier.newLayout                       = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+		barrier.image                           = dstTexture->GetHandle();
+		barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+		barrier.subresourceRange.baseMipLevel   = 0;
+		barrier.subresourceRange.levelCount     = desc.mipLevels;
+		barrier.subresourceRange.baseArrayLayer = 0;
+		barrier.subresourceRange.layerCount     = 1;
+		barrier.srcAccessMask                   = 0;
+		barrier.dstAccessMask                   = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+		vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
+		                     0, nullptr, 1, &barrier);
+
+		// Copy buffer to image
+		VkBufferImageCopy region{};
+		region.bufferOffset                    = 0;
+		region.bufferRowLength                 = 0;
+		region.bufferImageHeight               = 0;
+		region.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+		region.imageSubresource.mipLevel       = 0;
+		region.imageSubresource.baseArrayLayer = 0;
+		region.imageSubresource.layerCount     = 1;
+		region.imageOffset                     = {0, 0, 0};
+		region.imageExtent                     = {desc.width, desc.height, desc.depth};
+
+		vkCmdCopyBufferToImage(copyCmd, stagingBuffer, dstTexture->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+		                       &region);
+
+		// Transition image from TRANSFER_DST_OPTIMAL to SHADER_READ_ONLY_OPTIMAL
+		barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+		vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+		                     nullptr, 0, nullptr, 1, &barrier);
+
+		vkEndCommandBuffer(copyCmd);
+
+		// Submit and wait
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers    = &copyCmd;
+
+		// TODO: Async transfer? Same as buffer, because this is a one-time setup cost that happens when
+		// the user is already waiting for buffer creation, using vkQueueWaitIdle may be acceptable
+		vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(graphicsQueue);
+
+		vkFreeCommandBuffers(device, commandPool, 1, &copyCmd);
+		vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+	}
+
+	size_t GetPixelSize(TextureFormat format) const
+	{
+		switch (format)
+		{
+			case TextureFormat::R8G8B8A8_UNORM:
+			case TextureFormat::R8G8B8A8_SRGB:
+			case TextureFormat::B8G8R8A8_UNORM:
+			case TextureFormat::B8G8R8A8_SRGB:
+				return 4;
+			case TextureFormat::R32G32B32_FLOAT:
+				return 12;
+			case TextureFormat::D32_FLOAT:
+				return 4;
+			case TextureFormat::D24_UNORM_S8_UINT:
+				return 4;
+			default:
+				return 4;
 		}
 	}
 

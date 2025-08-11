@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
 
 #include <memory>
@@ -28,14 +29,14 @@ class VulkanSampler;
 class VulkanBuffer : public IRHIBuffer
 {
   private:
-	VkDevice       device;
-	VkBuffer       buffer;
-	VkDeviceMemory memory;
-	size_t         size;
-	void          *mappedData;
+	VmaAllocator  allocator;
+	VkBuffer      buffer;
+	VmaAllocation allocation;
+	size_t        size;
+	void         *mappedData;
 
   public:
-	VulkanBuffer(VkDevice device, VkPhysicalDevice physicalDevice, const BufferDesc &desc);
+	VulkanBuffer(VmaAllocator allocator, const BufferDesc &desc);
 	~VulkanBuffer() override;
 
 	void  *Map() override;
@@ -52,18 +53,20 @@ class VulkanBuffer : public IRHIBuffer
 class VulkanTexture : public IRHITexture
 {
   private:
-	VkDevice       device;
-	VkImage        image;
-	VkImageView    imageView;
-	VkDeviceMemory memory;
-	uint32_t       width;
-	uint32_t       height;
-	TextureFormat  format;
-	bool           ownedBySwapchain;
+	VkDevice      device;
+	VmaAllocator  allocator;
+	VkImage       image;
+	VkImageView   imageView;
+	VmaAllocation allocation;
+	uint32_t      width;
+	uint32_t      height;
+	TextureFormat format;
+	bool          ownedBySwapchain;
 
   public:
-	VulkanTexture(VkDevice device, VkImage image, VkFormat format, uint32_t width, uint32_t height,
-	              bool ownedBySwapchain = false);
+	VulkanTexture(VkDevice device, VmaAllocator allocator, VkImage image, VkFormat format, uint32_t width,
+	              uint32_t height, bool ownedBySwapchain = false);
+	VulkanTexture(VkDevice device, VmaAllocator allocator, const TextureDesc &desc);
 	~VulkanTexture() override;
 
 	uint32_t GetWidth() const override
@@ -182,6 +185,7 @@ class VulkanSwapchain : public IRHISwapchain
   private:
 	VkDevice                                    device;
 	VkPhysicalDevice                            physicalDevice;
+	VmaAllocator                                allocator;
 	VkSurfaceKHR                                surface;
 	VkQueue                                     graphicsQueue;
 	VkSwapchainKHR                              swapchain;
@@ -193,8 +197,8 @@ class VulkanSwapchain : public IRHISwapchain
 	VkExtent2D                                  swapchainExtent;
 
   public:
-	VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkQueue graphicsQueue,
-	                const SwapchainDesc &desc);
+	VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator, VkSurfaceKHR surface,
+	                VkQueue graphicsQueue, const SwapchainDesc &desc);
 	~VulkanSwapchain() override;
 
 	uint32_t     AcquireNextImage(IRHISemaphore *signalSemaphore = nullptr) override;

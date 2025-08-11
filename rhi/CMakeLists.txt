@@ -37,6 +37,7 @@ target_sources(RHI PRIVATE
     src/vulkan/vulkan_swapchain.cpp
     src/vulkan/vulkan_commandlist.cpp
     src/vulkan/vulkan_descriptorset.cpp
+    src/vulkan/vma_implementation.cpp
 )
 target_compile_definitions(RHI PUBLIC RHI_VULKAN=1)
 target_link_libraries(RHI PUBLIC Vulkan::Vulkan)
@@ -51,6 +52,7 @@ target_include_directories(RHI PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third-party/Vulkan-Headers/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../third-party/glfw/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third-party/VMA/include
 )
 
 # Private include for Vulkan backend

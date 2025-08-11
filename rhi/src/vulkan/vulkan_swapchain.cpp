@@ -9,9 +9,9 @@
 namespace RHI
 {
 
-VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface,
-                                 VkQueue graphicsQueue, const SwapchainDesc &desc) :
-    device(device), physicalDevice(physicalDevice), surface(surface), graphicsQueue(graphicsQueue), swapchain(VK_NULL_HANDLE), renderPass(VK_NULL_HANDLE)
+VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator,
+                                 VkSurfaceKHR surface, VkQueue graphicsQueue, const SwapchainDesc &desc) :
+    device(device), physicalDevice(physicalDevice), allocator(allocator), surface(surface), graphicsQueue(graphicsQueue), swapchain(VK_NULL_HANDLE), renderPass(VK_NULL_HANDLE)
 {
 	// Query surface capabilities
 	VkSurfaceCapabilitiesKHR capabilities;
@@ -108,7 +108,7 @@ VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevic
 	backBuffers.reserve(actualImageCount);
 	for (uint32_t i = 0; i < actualImageCount; i++)
 	{
-		backBuffers.push_back(std::make_unique<VulkanTexture>(device, swapchainImages[i], swapchainFormat,
+		backBuffers.push_back(std::make_unique<VulkanTexture>(device, allocator, swapchainImages[i], swapchainFormat,
 		                                                      swapchainExtent.width, swapchainExtent.height, true));
 	}
 }

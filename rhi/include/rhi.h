@@ -12,6 +12,7 @@ class IRHIDevice
 
 	// Resource creation
 	virtual std::unique_ptr<IRHIBuffer>              CreateBuffer(const BufferDesc &desc)                           = 0;
+	virtual std::unique_ptr<IRHITexture>             CreateTexture(const TextureDesc &desc)                         = 0;
 	virtual std::unique_ptr<IRHIShader>              CreateShader(const ShaderDesc &desc)                           = 0;
 	virtual std::unique_ptr<IRHIPipeline>            CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)       = 0;
 	virtual std::unique_ptr<IRHICommandList>         CreateCommandList()                                            = 0;
