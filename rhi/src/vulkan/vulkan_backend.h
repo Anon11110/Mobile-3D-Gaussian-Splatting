@@ -316,13 +316,22 @@ class VulkanSampler : public IRHISampler
 };
 
 // Utility functions
-VkFormat           TextureFormatToVulkan(TextureFormat format);
-VkFormat           VertexFormatToVulkan(VertexFormat format);
-TextureFormat      VulkanFormatToTexture(VkFormat format);
-VkBufferUsageFlags BufferUsageToVulkan(BufferUsage usage);
-VkDescriptorType   DescriptorTypeToVulkan(DescriptorType type);
-VkShaderStageFlags ShaderStageFlagsToVulkan(ShaderStageFlags flags);
-VkImageLayout      ImageLayoutToVulkan(ImageLayout layout);
-uint32_t           FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
+VkFormat              TextureFormatToVulkan(TextureFormat format);
+VkFormat              VertexFormatToVulkan(VertexFormat format);
+TextureFormat         VulkanFormatToTexture(VkFormat format);
+VkBufferUsageFlags    BufferUsageToVulkan(BufferUsage usage);
+VkDescriptorType      DescriptorTypeToVulkan(DescriptorType type);
+VkShaderStageFlags    ShaderStageFlagsToVulkan(ShaderStageFlags flags);
+VkImageLayout         ImageLayoutToVulkan(ImageLayout layout);
+VkPrimitiveTopology   PrimitiveTopologyToVulkan(PrimitiveTopology topology);
+VkPolygonMode         PolygonModeToVulkan(PolygonMode mode);
+VkCullModeFlags       CullModeToVulkan(CullMode mode);
+VkFrontFace           FrontFaceToVulkan(FrontFace face);
+VkCompareOp           CompareOpToVulkan(CompareOp op);
+VkStencilOp           StencilOpToVulkan(StencilOp op);
+VkBlendFactor         BlendFactorToVulkan(BlendFactor factor);
+VkBlendOp             BlendOpToVulkan(BlendOp op);
+VkSampleCountFlagBits SampleCountToVulkan(SampleCount count);
+uint32_t              FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
 }        // namespace RHI

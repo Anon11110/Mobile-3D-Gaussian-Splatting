@@ -198,4 +198,193 @@ VkImageLayout ImageLayoutToVulkan(ImageLayout layout)
 	}
 }
 
+VkPrimitiveTopology PrimitiveTopologyToVulkan(PrimitiveTopology topology)
+{
+	switch (topology)
+	{
+		case PrimitiveTopology::POINT_LIST:
+			return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+		case PrimitiveTopology::LINE_LIST:
+			return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+		case PrimitiveTopology::LINE_STRIP:
+			return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+		case PrimitiveTopology::TRIANGLE_LIST:
+			return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		case PrimitiveTopology::TRIANGLE_STRIP:
+			return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+		default:
+			return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	}
+}
+
+VkPolygonMode PolygonModeToVulkan(PolygonMode mode)
+{
+	switch (mode)
+	{
+		case PolygonMode::FILL:
+			return VK_POLYGON_MODE_FILL;
+		default:
+			return VK_POLYGON_MODE_FILL;
+	}
+}
+
+VkCullModeFlags CullModeToVulkan(CullMode mode)
+{
+	switch (mode)
+	{
+		case CullMode::NONE:
+			return VK_CULL_MODE_NONE;
+		case CullMode::FRONT:
+			return VK_CULL_MODE_FRONT_BIT;
+		case CullMode::BACK:
+			return VK_CULL_MODE_BACK_BIT;
+		default:
+			return VK_CULL_MODE_BACK_BIT;
+	}
+}
+
+VkFrontFace FrontFaceToVulkan(FrontFace face)
+{
+	switch (face)
+	{
+		case FrontFace::COUNTER_CLOCKWISE:
+			return VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		case FrontFace::CLOCKWISE:
+			return VK_FRONT_FACE_CLOCKWISE;
+		default:
+			return VK_FRONT_FACE_CLOCKWISE;
+	}
+}
+
+VkCompareOp CompareOpToVulkan(CompareOp op)
+{
+	switch (op)
+	{
+		case CompareOp::NEVER:
+			return VK_COMPARE_OP_NEVER;
+		case CompareOp::LESS:
+			return VK_COMPARE_OP_LESS;
+		case CompareOp::EQUAL:
+			return VK_COMPARE_OP_EQUAL;
+		case CompareOp::LESS_OR_EQUAL:
+			return VK_COMPARE_OP_LESS_OR_EQUAL;
+		case CompareOp::GREATER:
+			return VK_COMPARE_OP_GREATER;
+		case CompareOp::NOT_EQUAL:
+			return VK_COMPARE_OP_NOT_EQUAL;
+		case CompareOp::GREATER_OR_EQUAL:
+			return VK_COMPARE_OP_GREATER_OR_EQUAL;
+		case CompareOp::ALWAYS:
+			return VK_COMPARE_OP_ALWAYS;
+		default:
+			return VK_COMPARE_OP_ALWAYS;
+	}
+}
+
+VkStencilOp StencilOpToVulkan(StencilOp op)
+{
+	switch (op)
+	{
+		case StencilOp::KEEP:
+			return VK_STENCIL_OP_KEEP;
+		case StencilOp::ZERO:
+			return VK_STENCIL_OP_ZERO;
+		case StencilOp::REPLACE:
+			return VK_STENCIL_OP_REPLACE;
+		case StencilOp::INCREMENT_AND_CLAMP:
+			return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+		case StencilOp::DECREMENT_AND_CLAMP:
+			return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+		case StencilOp::INVERT:
+			return VK_STENCIL_OP_INVERT;
+		case StencilOp::INCREMENT_AND_WRAP:
+			return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+		case StencilOp::DECREMENT_AND_WRAP:
+			return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+		default:
+			return VK_STENCIL_OP_KEEP;
+	}
+}
+
+VkBlendFactor BlendFactorToVulkan(BlendFactor factor)
+{
+	switch (factor)
+	{
+		case BlendFactor::ZERO:
+			return VK_BLEND_FACTOR_ZERO;
+		case BlendFactor::ONE:
+			return VK_BLEND_FACTOR_ONE;
+		case BlendFactor::SRC_COLOR:
+			return VK_BLEND_FACTOR_SRC_COLOR;
+		case BlendFactor::ONE_MINUS_SRC_COLOR:
+			return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+		case BlendFactor::DST_COLOR:
+			return VK_BLEND_FACTOR_DST_COLOR;
+		case BlendFactor::ONE_MINUS_DST_COLOR:
+			return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+		case BlendFactor::SRC_ALPHA:
+			return VK_BLEND_FACTOR_SRC_ALPHA;
+		case BlendFactor::ONE_MINUS_SRC_ALPHA:
+			return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		case BlendFactor::DST_ALPHA:
+			return VK_BLEND_FACTOR_DST_ALPHA;
+		case BlendFactor::ONE_MINUS_DST_ALPHA:
+			return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+		case BlendFactor::CONSTANT_COLOR:
+			return VK_BLEND_FACTOR_CONSTANT_COLOR;
+		case BlendFactor::ONE_MINUS_CONSTANT_COLOR:
+			return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+		case BlendFactor::CONSTANT_ALPHA:
+			return VK_BLEND_FACTOR_CONSTANT_ALPHA;
+		case BlendFactor::ONE_MINUS_CONSTANT_ALPHA:
+			return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+		case BlendFactor::SRC_ALPHA_SATURATE:
+			return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
+		default:
+			return VK_BLEND_FACTOR_ONE;
+	}
+}
+
+VkBlendOp BlendOpToVulkan(BlendOp op)
+{
+	switch (op)
+	{
+		case BlendOp::ADD:
+			return VK_BLEND_OP_ADD;
+		case BlendOp::SUBTRACT:
+			return VK_BLEND_OP_SUBTRACT;
+		case BlendOp::REVERSE_SUBTRACT:
+			return VK_BLEND_OP_REVERSE_SUBTRACT;
+		case BlendOp::MIN:
+			return VK_BLEND_OP_MIN;
+		case BlendOp::MAX:
+			return VK_BLEND_OP_MAX;
+		default:
+			return VK_BLEND_OP_ADD;
+	}
+}
+
+VkSampleCountFlagBits SampleCountToVulkan(SampleCount count)
+{
+	switch (count)
+	{
+		case SampleCount::COUNT_1:
+			return VK_SAMPLE_COUNT_1_BIT;
+		case SampleCount::COUNT_2:
+			return VK_SAMPLE_COUNT_2_BIT;
+		case SampleCount::COUNT_4:
+			return VK_SAMPLE_COUNT_4_BIT;
+		case SampleCount::COUNT_8:
+			return VK_SAMPLE_COUNT_8_BIT;
+		case SampleCount::COUNT_16:
+			return VK_SAMPLE_COUNT_16_BIT;
+		case SampleCount::COUNT_32:
+			return VK_SAMPLE_COUNT_32_BIT;
+		case SampleCount::COUNT_64:
+			return VK_SAMPLE_COUNT_64_BIT;
+		default:
+			return VK_SAMPLE_COUNT_1_BIT;
+	}
+}
+
 }        // namespace RHI

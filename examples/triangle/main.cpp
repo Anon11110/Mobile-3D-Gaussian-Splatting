@@ -135,8 +135,17 @@ int main()
 		pipelineDesc.vertexLayout.bindings = {{0, sizeof(Vertex), false}};
 
 		pipelineDesc.topology = RHI::PrimitiveTopology::TRIANGLE_LIST;
+
+		pipelineDesc.rasterizationState.cullMode    = RHI::CullMode::BACK;
+		pipelineDesc.rasterizationState.frontFace   = RHI::FrontFace::CLOCKWISE;
+		pipelineDesc.rasterizationState.polygonMode = RHI::PolygonMode::FILL;
+
+		pipelineDesc.colorBlendAttachments.resize(1);
+		pipelineDesc.colorBlendAttachments[0].blendEnable    = false;
+		pipelineDesc.colorBlendAttachments[0].colorWriteMask = 0xF;
+
 		// Get the actual format chosen by the swapchain
-		pipelineDesc.colorFormat = swapchain->GetBackBuffer(0)->GetFormat();
+		pipelineDesc.colorFormats = {swapchain->GetBackBuffer(0)->GetFormat()};
 
 		pipelineDesc.descriptorSetLayouts = {descriptorSetLayout.get()};
 

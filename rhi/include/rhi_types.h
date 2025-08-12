@@ -61,6 +61,87 @@ enum class PrimitiveTopology
 	TRIANGLE_STRIP
 };
 
+enum class PolygonMode
+{
+	FILL
+};
+
+enum class CullMode
+{
+	NONE,
+	FRONT,
+	BACK
+};
+
+enum class FrontFace
+{
+	COUNTER_CLOCKWISE,
+	CLOCKWISE
+};
+
+enum class CompareOp
+{
+	NEVER,
+	LESS,
+	EQUAL,
+	LESS_OR_EQUAL,
+	GREATER,
+	NOT_EQUAL,
+	GREATER_OR_EQUAL,
+	ALWAYS
+};
+
+enum class StencilOp
+{
+	KEEP,
+	ZERO,
+	REPLACE,
+	INCREMENT_AND_CLAMP,
+	DECREMENT_AND_CLAMP,
+	INVERT,
+	INCREMENT_AND_WRAP,
+	DECREMENT_AND_WRAP
+};
+
+enum class BlendFactor
+{
+	ZERO,
+	ONE,
+	SRC_COLOR,
+	ONE_MINUS_SRC_COLOR,
+	DST_COLOR,
+	ONE_MINUS_DST_COLOR,
+	SRC_ALPHA,
+	ONE_MINUS_SRC_ALPHA,
+	DST_ALPHA,
+	ONE_MINUS_DST_ALPHA,
+	CONSTANT_COLOR,
+	ONE_MINUS_CONSTANT_COLOR,
+	CONSTANT_ALPHA,
+	ONE_MINUS_CONSTANT_ALPHA,
+	SRC_ALPHA_SATURATE
+};
+
+enum class BlendOp
+{
+	ADD,
+	SUBTRACT,
+	REVERSE_SUBTRACT,
+	MIN,
+	MAX
+};
+
+enum class SampleCount
+{
+	COUNT_1  = 1,
+	COUNT_2  = 2,
+	COUNT_4  = 4,
+	COUNT_8  = 8,
+	COUNT_16 = 16,
+	COUNT_32 = 32,
+	COUNT_64 = 64
+};
+
 enum class TextureFormat
 {
 	UNDEFINED,
@@ -237,16 +318,75 @@ struct TextureBinding
 	DescriptorType type    = DescriptorType::COMBINED_IMAGE_SAMPLER;
 };
 
+struct RasterizationState
+{
+	bool        depthClampEnable        = false;
+	bool        rasterizerDiscardEnable = false;
+	PolygonMode polygonMode             = PolygonMode::FILL;
+	CullMode    cullMode                = CullMode::BACK;
+	FrontFace   frontFace               = FrontFace::CLOCKWISE;
+	bool        depthBiasEnable         = false;
+	float       depthBiasConstantFactor = 0.0f;
+	float       depthBiasClamp          = 0.0f;
+	float       depthBiasSlopeFactor    = 0.0f;
+};
+
+struct StencilOpState
+{
+	StencilOp failOp      = StencilOp::KEEP;
+	StencilOp passOp      = StencilOp::KEEP;
+	StencilOp depthFailOp = StencilOp::KEEP;
+	CompareOp compareOp   = CompareOp::ALWAYS;
+	uint32_t  compareMask = ~0U;
+	uint32_t  writeMask   = ~0U;
+	uint32_t  reference   = 0;
+};
+
+struct DepthStencilState
+{
+	bool           depthTestEnable   = false;
+	bool           depthWriteEnable  = false;
+	CompareOp      depthCompareOp    = CompareOp::LESS;
+	bool           stencilTestEnable = false;
+	StencilOpState front             = {};
+	StencilOpState back              = {};
+};
+
+struct ColorBlendAttachmentState
+{
+	bool        blendEnable         = false;
+	BlendFactor srcColorBlendFactor = BlendFactor::ONE;
+	BlendFactor dstColorBlendFactor = BlendFactor::ZERO;
+	BlendOp     colorBlendOp        = BlendOp::ADD;
+	BlendFactor srcAlphaBlendFactor = BlendFactor::ONE;
+	BlendFactor dstAlphaBlendFactor = BlendFactor::ZERO;
+	BlendOp     alphaBlendOp        = BlendOp::ADD;
+	uint32_t    colorWriteMask      = 0xF;        // R | G | B | A
+};
+
+struct MultisampleState
+{
+	SampleCount rasterizationSamples  = SampleCount::COUNT_1;
+	bool        sampleShadingEnable   = false;
+	float       minSampleShading      = 1.0f;
+	uint32_t    sampleMask            = ~0U;
+	bool        alphaToCoverageEnable = false;
+};
+
 struct GraphicsPipelineDesc
 {
 	IRHIShader                            *vertexShader;
 	IRHIShader                            *fragmentShader;
 	VertexLayout                           vertexLayout;
-	PrimitiveTopology                      topology         = PrimitiveTopology::TRIANGLE_LIST;
-	TextureFormat                          colorFormat      = TextureFormat::R8G8B8A8_UNORM;
-	TextureFormat                          depthFormat      = TextureFormat::UNDEFINED;
-	bool                                   depthTestEnable  = false;
-	bool                                   depthWriteEnable = false;
+	PrimitiveTopology                      topology               = PrimitiveTopology::TRIANGLE_LIST;
+	bool                                   primitiveRestartEnable = false;
+	RasterizationState                     rasterizationState     = {};
+	DepthStencilState                      depthStencilState      = {};
+	MultisampleState                       multisampleState       = {};
+	std::vector<ColorBlendAttachmentState> colorBlendAttachments  = {{}};
+	float                                  blendConstants[4]      = {0, 0, 0, 0};
+	std::vector<TextureFormat>             colorFormats           = {TextureFormat::R8G8B8A8_UNORM};
+	TextureFormat                          depthFormat            = TextureFormat::UNDEFINED;
 	std::vector<IRHIDescriptorSetLayout *> descriptorSetLayouts;
 	std::vector<PushConstantRange>         pushConstantRanges;
 };
