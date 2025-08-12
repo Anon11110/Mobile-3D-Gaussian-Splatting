@@ -129,8 +129,8 @@ int main()
 
 		// Vertex layout
 		pipelineDesc.vertexLayout.attributes = {
-		    {0, 0, RHI::TextureFormat::R32G32B32_FLOAT, 0},        // position
-		    {1, 0, RHI::TextureFormat::R32G32B32_FLOAT, 12}        // color
+		    {0, 0, RHI::VertexFormat::R32G32B32_SFLOAT, 0},        // position
+		    {1, 0, RHI::VertexFormat::R32G32B32_SFLOAT, 12}        // color
 		};
 		pipelineDesc.vertexLayout.bindings = {{0, sizeof(Vertex), false}};
 
@@ -191,7 +191,7 @@ int main()
 			uniformBuffer->Unmap();
 
 			// Acquire next image
-			uint32_t imageIndex;
+			uint32_t             imageIndex;
 			RHI::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, imageAvailableSemaphore.get());
 
 			if (acquireStatus == RHI::SwapchainStatus::OUT_OF_DATE)
@@ -245,7 +245,6 @@ int main()
 			// Triangle vertices in object space
 			float vertices_obj[3][3] = {{-0.5f, -0.5f, 0.0f}, {0.5f, -0.5f, 0.0f}, {0.0f, 0.5f, 0.0f}};
 
-			// Per-vertex accumulated NDC
 			float ndc_sum_x = 0.0f;
 			float ndc_sum_y = 0.0f;
 
@@ -268,10 +267,8 @@ int main()
 			// Average NDC = true screen-space centroid under perspective
 			float center_ndc[2] = {ndc_sum_x / 3.0f, ndc_sum_y / 3.0f};
 
-			// Calculate aspect ratio from back buffer dimensions
 			float aspect = static_cast<float>(backBufferWidth) / static_cast<float>(backBufferHeight);
 
-			// Push constants: centerNdc.x, centerNdc.y, rotation, aspect
 			float pushData[4] = {
 			    center_ndc[0],        // centerNdc.x
 			    center_ndc[1],        // centerNdc.y

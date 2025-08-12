@@ -89,7 +89,7 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc
 		VkVertexInputAttributeDescription attributeDesc{};
 		attributeDesc.binding  = attribute.binding;
 		attributeDesc.location = attribute.location;
-		attributeDesc.format   = TextureFormatToVulkan(attribute.format);
+		attributeDesc.format   = VertexFormatToVulkan(attribute.format);
 		attributeDesc.offset   = attribute.offset;
 		attributeDescriptions.push_back(attributeDesc);
 	}

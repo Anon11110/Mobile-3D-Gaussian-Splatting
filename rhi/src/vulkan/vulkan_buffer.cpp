@@ -130,32 +130,4 @@ size_t VulkanBuffer::GetSize() const
 	return size;
 }
 
-// Utility function implementations
-VkBufferUsageFlags BufferUsageToVulkan(BufferUsage usage)
-{
-	VkBufferUsageFlags result = 0;
-
-	if (static_cast<uint32_t>(usage) & static_cast<uint32_t>(BufferUsage::VERTEX))
-	{
-		result |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-	}
-	if (static_cast<uint32_t>(usage) & static_cast<uint32_t>(BufferUsage::INDEX))
-	{
-		result |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-	}
-	if (static_cast<uint32_t>(usage) & static_cast<uint32_t>(BufferUsage::UNIFORM))
-	{
-		result |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-	}
-	if (static_cast<uint32_t>(usage) & static_cast<uint32_t>(BufferUsage::STORAGE))
-	{
-		result |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-	}
-
-	// Always add transfer bits for staging operations
-	result |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-
-	return result;
-}
-
 }        // namespace RHI

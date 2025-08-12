@@ -209,9 +209,9 @@ class VulkanSwapchain : public IRHISwapchain
 
 	SwapchainStatus AcquireNextImage(uint32_t &imageIndex, IRHISemaphore *signalSemaphore = nullptr) override;
 	SwapchainStatus Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr) override;
-	IRHITexture *GetBackBuffer(uint32_t index) override;
-	uint32_t     GetImageCount() const override;
-	void         Resize(uint32_t width, uint32_t height) override;
+	IRHITexture    *GetBackBuffer(uint32_t index) override;
+	uint32_t        GetImageCount() const override;
+	void            Resize(uint32_t width, uint32_t height) override;
 
 	VkFramebuffer GetFramebuffer(uint32_t index, VkRenderPass renderPass);
 };
@@ -317,6 +317,7 @@ class VulkanSampler : public IRHISampler
 
 // Utility functions
 VkFormat           TextureFormatToVulkan(TextureFormat format);
+VkFormat           VertexFormatToVulkan(VertexFormat format);
 TextureFormat      VulkanFormatToTexture(VkFormat format);
 VkBufferUsageFlags BufferUsageToVulkan(BufferUsage usage);
 VkDescriptorType   DescriptorTypeToVulkan(DescriptorType type);

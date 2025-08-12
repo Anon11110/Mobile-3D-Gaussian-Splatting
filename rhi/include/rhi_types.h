@@ -73,6 +73,35 @@ enum class TextureFormat
 	D24_UNORM_S8_UINT
 };
 
+enum class VertexFormat
+{
+	UNDEFINED,
+	R32_SFLOAT,
+	R32G32_SFLOAT,
+	R32G32B32_SFLOAT,
+	R32G32B32A32_SFLOAT,
+	R16_SFLOAT,
+	R16G16_SFLOAT,
+	R16G16B16_SFLOAT,
+	R16G16B16A16_SFLOAT,
+	R8_UNORM,
+	R8G8_UNORM,
+	R8G8B8_UNORM,
+	R8G8B8A8_UNORM,
+	R8_UINT,
+	R8G8_UINT,
+	R8G8B8_UINT,
+	R8G8B8A32_UINT,
+	R16_UINT,
+	R16G16_UINT,
+	R16G16B16_UINT,
+	R16G16B16A16_UINT,
+	R32_UINT,
+	R32G32_UINT,
+	R32G32B32_UINT,
+	R32G32B32A32_UINT
+};
+
 enum class DescriptorType
 {
 	UNIFORM_BUFFER,
@@ -153,10 +182,10 @@ struct ShaderDesc
 
 struct VertexAttribute
 {
-	uint32_t      location;
-	uint32_t      binding;
-	TextureFormat format;
-	uint32_t      offset;
+	uint32_t     location;
+	uint32_t     binding;
+	VertexFormat format;
+	uint32_t     offset;
 };
 
 struct VertexBinding
