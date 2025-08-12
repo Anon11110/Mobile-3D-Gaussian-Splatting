@@ -191,7 +191,27 @@ int main()
 			uniformBuffer->Unmap();
 
 			// Acquire next image
-			uint32_t imageIndex = swapchain->AcquireNextImage(imageAvailableSemaphore.get());
+			uint32_t imageIndex;
+			RHI::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, imageAvailableSemaphore.get());
+
+			if (acquireStatus == RHI::SwapchainStatus::OUT_OF_DATE)
+			{
+				// Swapchain is out of date, need to recreate it
+				int width, height;
+				glfwGetFramebufferSize(window, &width, &height);
+				while (width == 0 || height == 0)
+				{
+					glfwGetFramebufferSize(window, &width, &height);
+					glfwWaitEvents();
+				}
+				swapchain->Resize(width, height);
+				continue;
+			}
+			else if (acquireStatus == RHI::SwapchainStatus::ERROR)
+			{
+				std::cerr << "Failed to acquire swapchain image" << std::endl;
+				break;
+			}
 
 			// Record commands
 			auto &cmdList = commandLists[imageIndex];
@@ -272,7 +292,25 @@ int main()
 			                           inFlightFence.get());
 
 			// Present
-			swapchain->Present(imageIndex, renderFinishedSemaphore.get());
+			RHI::SwapchainStatus presentStatus = swapchain->Present(imageIndex, renderFinishedSemaphore.get());
+
+			if (presentStatus == RHI::SwapchainStatus::OUT_OF_DATE || presentStatus == RHI::SwapchainStatus::SUBOPTIMAL)
+			{
+				// Swapchain needs recreation on next frame
+				int width, height;
+				glfwGetFramebufferSize(window, &width, &height);
+				while (width == 0 || height == 0)
+				{
+					glfwGetFramebufferSize(window, &width, &height);
+					glfwWaitEvents();
+				}
+				swapchain->Resize(width, height);
+			}
+			else if (presentStatus == RHI::SwapchainStatus::ERROR)
+			{
+				std::cerr << "Failed to present swapchain image" << std::endl;
+				break;
+			}
 
 			// FPS counter
 			frameCount++;

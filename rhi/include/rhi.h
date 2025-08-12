@@ -95,11 +95,11 @@ class IRHISwapchain
   public:
 	virtual ~IRHISwapchain() = default;
 
-	virtual uint32_t     AcquireNextImage(IRHISemaphore *signalSemaphore = nullptr)           = 0;
-	virtual void         Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr) = 0;
-	virtual IRHITexture *GetBackBuffer(uint32_t index)                                        = 0;
-	virtual uint32_t     GetImageCount() const                                                = 0;
-	virtual void         Resize(uint32_t width, uint32_t height)                              = 0;
+	virtual SwapchainStatus AcquireNextImage(uint32_t &imageIndex, IRHISemaphore *signalSemaphore = nullptr) = 0;
+	virtual SwapchainStatus Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr)            = 0;
+	virtual IRHITexture    *GetBackBuffer(uint32_t index)                                                   = 0;
+	virtual uint32_t        GetImageCount() const                                                           = 0;
+	virtual void            Resize(uint32_t width, uint32_t height)                                         = 0;
 };
 
 // Synchronization primitives

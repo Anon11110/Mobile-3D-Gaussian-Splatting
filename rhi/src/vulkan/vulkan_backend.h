@@ -195,14 +195,17 @@ class VulkanSwapchain : public IRHISwapchain
 	VkRenderPass                                renderPass;
 	VkFormat                                    swapchainFormat;
 	VkExtent2D                                  swapchainExtent;
+	VkSurfaceFormatKHR                          chosenSurfaceFormat;
+	VkPresentModeKHR                            chosenPresentMode;
+	uint32_t                                    requestedBufferCount;
 
   public:
 	VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator, VkSurfaceKHR surface,
 	                VkQueue graphicsQueue, const SwapchainDesc &desc);
 	~VulkanSwapchain() override;
 
-	uint32_t     AcquireNextImage(IRHISemaphore *signalSemaphore = nullptr) override;
-	void         Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr) override;
+	SwapchainStatus AcquireNextImage(uint32_t &imageIndex, IRHISemaphore *signalSemaphore = nullptr) override;
+	SwapchainStatus Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr) override;
 	IRHITexture *GetBackBuffer(uint32_t index) override;
 	uint32_t     GetImageCount() const override;
 	void         Resize(uint32_t width, uint32_t height) override;

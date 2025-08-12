@@ -97,6 +97,14 @@ enum class QueueType
 	TRANSFER
 };
 
+enum class SwapchainStatus
+{
+	SUCCESS,
+	OUT_OF_DATE,
+	SUBOPTIMAL,
+	ERROR
+};
+
 enum class ImageLayout
 {
 	UNDEFINED,
