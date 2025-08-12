@@ -80,13 +80,16 @@ class IRHICommandList
 
 	virtual void SetPipeline(IRHIPipeline *pipeline)                                                          = 0;
 	virtual void SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, size_t offset = 0)                     = 0;
+	virtual void BindIndexBuffer(IRHIBuffer *buffer, size_t offset = 0)                                       = 0;
 	virtual void BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *descriptorSet,
 	                               const uint32_t *dynamicOffsets = nullptr, uint32_t dynamicOffsetCount = 0) = 0;
 	virtual void PushConstants(ShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void *data) = 0;
 	virtual void SetViewport(float x, float y, float width, float height)                                     = 0;
 	virtual void SetScissor(int32_t x, int32_t y, uint32_t width, uint32_t height)                            = 0;
 
-	virtual void Draw(uint32_t vertexCount, uint32_t firstVertex = 0) = 0;
+	virtual void Draw(uint32_t vertexCount, uint32_t firstVertex = 0)                          = 0;
+	virtual void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0) = 0;
+	virtual void DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, uint32_t drawCount, uint32_t stride = sizeof(DrawIndexedIndirectCommand)) = 0;
 };
 
 // Swapchain interface

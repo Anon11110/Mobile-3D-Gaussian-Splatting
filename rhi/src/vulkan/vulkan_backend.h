@@ -165,6 +165,7 @@ class VulkanCommandList : public IRHICommandList
 
 	void SetPipeline(IRHIPipeline *pipeline) override;
 	void SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, size_t offset = 0) override;
+	void BindIndexBuffer(IRHIBuffer *buffer, size_t offset = 0) override;
 	void BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *descriptorSet,
 	                       const uint32_t *dynamicOffsets = nullptr, uint32_t dynamicOffsetCount = 0) override;
 	void PushConstants(ShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void *data) override;
@@ -172,6 +173,8 @@ class VulkanCommandList : public IRHICommandList
 	void SetScissor(int32_t x, int32_t y, uint32_t width, uint32_t height) override;
 
 	void Draw(uint32_t vertexCount, uint32_t firstVertex = 0) override;
+	void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0) override;
+	void DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, uint32_t drawCount, uint32_t stride = sizeof(DrawIndexedIndirectCommand)) override;
 
 	VkCommandBuffer GetHandle() const
 	{

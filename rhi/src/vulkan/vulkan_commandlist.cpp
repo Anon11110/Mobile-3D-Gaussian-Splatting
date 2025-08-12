@@ -248,9 +248,26 @@ void VulkanCommandList::PushConstants(ShaderStageFlags stageFlags, uint32_t offs
 	vkCmdPushConstants(commandBuffer, currentPipeline->GetLayout(), vkStageFlags, offset, size, data);
 }
 
+void VulkanCommandList::BindIndexBuffer(IRHIBuffer *buffer, size_t offset)
+{
+	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
+	vkCmdBindIndexBuffer(commandBuffer, vkBuffer->GetHandle(), static_cast<VkDeviceSize>(offset), VK_INDEX_TYPE_UINT32);
+}
+
 void VulkanCommandList::Draw(uint32_t vertexCount, uint32_t firstVertex)
 {
 	vkCmdDraw(commandBuffer, vertexCount, 1, firstVertex, 0);
+}
+
+void VulkanCommandList::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset)
+{
+	vkCmdDrawIndexed(commandBuffer, indexCount, 1, firstIndex, vertexOffset, 0);
+}
+
+void VulkanCommandList::DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, uint32_t drawCount, uint32_t stride)
+{
+	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
+	vkCmdDrawIndexedIndirect(commandBuffer, vkBuffer->GetHandle(), static_cast<VkDeviceSize>(offset), drawCount, stride);
 }
 
 }        // namespace RHI
