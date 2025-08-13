@@ -7,7 +7,7 @@ namespace RHI
 
 VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, VkImage image, VkFormat format, uint32_t width,
                              uint32_t height, bool ownedBySwapchain) :
-    device(device), allocator(allocator), image(image), imageView(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), width(width), height(height), format(VulkanFormatToTexture(format)), ownedBySwapchain(ownedBySwapchain)
+    device(device), allocator(allocator), image(image), imageView(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), width(width), height(height), depth(1), mipLevels(1), arrayLayers(1), format(VulkanFormatToTexture(format)), ownedBySwapchain(ownedBySwapchain)
 {
 	// Create image view
 	VkImageViewCreateInfo createInfo{};
@@ -36,7 +36,7 @@ VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, VkImage im
 }
 
 VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, const TextureDesc &desc) :
-    device(device), allocator(allocator), image(VK_NULL_HANDLE), imageView(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), width(desc.width), height(desc.height), format(desc.format), ownedBySwapchain(false)
+    device(device), allocator(allocator), image(VK_NULL_HANDLE), imageView(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), width(desc.width), height(desc.height), depth(desc.depth), mipLevels(desc.mipLevels), arrayLayers(desc.arrayLayers), format(desc.format), ownedBySwapchain(false)
 {
 	// Create image info
 	VkImageCreateInfo imageInfo{};
@@ -46,7 +46,7 @@ VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, const Text
 	imageInfo.extent.height = desc.height;
 	imageInfo.extent.depth  = desc.depth;
 	imageInfo.mipLevels     = desc.mipLevels;
-	imageInfo.arrayLayers   = 1;
+	imageInfo.arrayLayers   = desc.arrayLayers;
 	imageInfo.format        = TextureFormatToVulkan(desc.format);
 	imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
 	imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;

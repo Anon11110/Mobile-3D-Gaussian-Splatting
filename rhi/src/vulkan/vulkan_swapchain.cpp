@@ -86,7 +86,7 @@ VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevic
 		}
 	}
 
-	swapchainFormat = chosenFormat.format;
+	swapchainFormat     = chosenFormat.format;
 	chosenSurfaceFormat = chosenFormat;
 
 	// Choose present mode
@@ -126,7 +126,7 @@ VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevic
 
 	// Choose image count
 	requestedBufferCount = desc.bufferCount;
-	uint32_t imageCount = std::max(desc.bufferCount, capabilities.minImageCount);
+	uint32_t imageCount  = std::max(desc.bufferCount, capabilities.minImageCount);
 	if (capabilities.maxImageCount > 0)
 	{
 		imageCount = std::min(imageCount, capabilities.maxImageCount);
@@ -162,10 +162,16 @@ VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevic
 
 	// Create back buffer textures
 	backBuffers.reserve(actualImageCount);
+	backBufferViews.reserve(actualImageCount);
 	for (uint32_t i = 0; i < actualImageCount; i++)
 	{
 		backBuffers.push_back(std::make_unique<VulkanTexture>(device, allocator, swapchainImages[i], swapchainFormat,
 		                                                      swapchainExtent.width, swapchainExtent.height, true));
+
+		TextureViewDesc viewDesc{};
+		viewDesc.texture    = backBuffers[i].get();
+		viewDesc.aspectMask = TextureAspect::COLOR;
+		backBufferViews.push_back(std::make_unique<VulkanTextureView>(device, viewDesc));
 	}
 }
 
@@ -201,14 +207,14 @@ SwapchainStatus VulkanSwapchain::AcquireNextImage(uint32_t &imageIndex, IRHISema
 
 	switch (result)
 	{
-	case VK_SUCCESS:
-		return SwapchainStatus::SUCCESS;
-	case VK_ERROR_OUT_OF_DATE_KHR:
-		return SwapchainStatus::OUT_OF_DATE;
-	case VK_SUBOPTIMAL_KHR:
-		return SwapchainStatus::SUBOPTIMAL;
-	default:
-		return SwapchainStatus::ERROR;
+		case VK_SUCCESS:
+			return SwapchainStatus::SUCCESS;
+		case VK_ERROR_OUT_OF_DATE_KHR:
+			return SwapchainStatus::OUT_OF_DATE;
+		case VK_SUBOPTIMAL_KHR:
+			return SwapchainStatus::SUBOPTIMAL;
+		default:
+			return SwapchainStatus::ERROR;
 	}
 }
 
@@ -234,20 +240,25 @@ SwapchainStatus VulkanSwapchain::Present(uint32_t imageIndex, IRHISemaphore *wai
 
 	switch (result)
 	{
-	case VK_SUCCESS:
-		return SwapchainStatus::SUCCESS;
-	case VK_ERROR_OUT_OF_DATE_KHR:
-		return SwapchainStatus::OUT_OF_DATE;
-	case VK_SUBOPTIMAL_KHR:
-		return SwapchainStatus::SUBOPTIMAL;
-	default:
-		return SwapchainStatus::ERROR;
+		case VK_SUCCESS:
+			return SwapchainStatus::SUCCESS;
+		case VK_ERROR_OUT_OF_DATE_KHR:
+			return SwapchainStatus::OUT_OF_DATE;
+		case VK_SUBOPTIMAL_KHR:
+			return SwapchainStatus::SUBOPTIMAL;
+		default:
+			return SwapchainStatus::ERROR;
 	}
 }
 
 IRHITexture *VulkanSwapchain::GetBackBuffer(uint32_t index)
 {
 	return backBuffers[index].get();
+}
+
+IRHITextureView *VulkanSwapchain::GetBackBufferView(uint32_t index)
+{
+	return backBufferViews[index].get();
 }
 
 uint32_t VulkanSwapchain::GetImageCount() const
@@ -315,6 +326,7 @@ void VulkanSwapchain::Resize(uint32_t width, uint32_t height)
 	// Clear back buffers BEFORE destroying old swapchain
 	// This ensures image views are destroyed before the swapchain that owns the images
 	backBuffers.clear();
+	backBufferViews.clear();
 
 	if (oldSwapchain != VK_NULL_HANDLE)
 	{
@@ -329,11 +341,17 @@ void VulkanSwapchain::Resize(uint32_t width, uint32_t height)
 
 	// Create new back buffer textures
 	backBuffers.reserve(actualImageCount);
+	backBufferViews.reserve(actualImageCount);
 	for (uint32_t i = 0; i < actualImageCount; i++)
 	{
 		backBuffers.push_back(std::make_unique<VulkanTexture>(device, allocator, swapchainImages[i],
 		                                                      chosenSurfaceFormat.format,
 		                                                      swapchainExtent.width, swapchainExtent.height, true));
+
+		TextureViewDesc viewDesc{};
+		viewDesc.texture    = backBuffers[i].get();
+		viewDesc.aspectMask = TextureAspect::COLOR;
+		backBufferViews.push_back(std::make_unique<VulkanTextureView>(device, viewDesc));
 	}
 }
 

@@ -5,8 +5,10 @@
 namespace RHI
 {
 
-VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool) :
-    device(device), commandBuffer(VK_NULL_HANDLE), currentRenderPass(VK_NULL_HANDLE), currentFramebuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRenderPass(false)
+VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool,
+                                     PFN_vkCmdBeginRenderingKHR beginFunc,
+                                     PFN_vkCmdEndRenderingKHR   endFunc) :
+    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc)
 {
 	// Allocate command buffer
 	VkCommandBufferAllocateInfo allocInfo{};
@@ -23,16 +25,6 @@ VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool)
 
 VulkanCommandList::~VulkanCommandList()
 {
-	// Clean up framebuffer if it exists
-	if (currentFramebuffer != VK_NULL_HANDLE)
-	{
-		vkDestroyFramebuffer(device, currentFramebuffer, nullptr);
-	}
-	// Only destroy render pass if we created it (not from pipeline)
-	if (currentRenderPass != VK_NULL_HANDLE && currentPipeline == nullptr)
-	{
-		vkDestroyRenderPass(device, currentRenderPass, nullptr);
-	}
 	// Command buffers are automatically freed when command pool is destroyed
 }
 
@@ -50,9 +42,9 @@ void VulkanCommandList::Begin()
 
 void VulkanCommandList::End()
 {
-	if (inRenderPass)
+	if (inRendering)
 	{
-		EndRenderPass();
+		EndRendering();
 	}
 
 	if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
@@ -63,143 +55,219 @@ void VulkanCommandList::End()
 
 void VulkanCommandList::Reset()
 {
-	// Clean up old framebuffer before reset
-	if (currentFramebuffer != VK_NULL_HANDLE)
-	{
-		vkDestroyFramebuffer(device, currentFramebuffer, nullptr);
-		currentFramebuffer = VK_NULL_HANDLE;
-	}
-	// Don't destroy render pass if it belongs to a pipeline
-	if (currentRenderPass != VK_NULL_HANDLE && currentPipeline == nullptr)
-	{
-		vkDestroyRenderPass(device, currentRenderPass, nullptr);
-		currentRenderPass = VK_NULL_HANDLE;
-	}
-
 	if (vkResetCommandBuffer(commandBuffer, 0) != VK_SUCCESS)
 	{
 		throw std::runtime_error("Failed to reset command buffer");
 	}
-	inRenderPass      = false;
-	currentPipeline   = nullptr;
-	currentRenderPass = VK_NULL_HANDLE;
+	inRendering     = false;
+	currentPipeline = nullptr;
 }
 
-void VulkanCommandList::BeginRenderPass(const RenderPassBeginInfo &info)
+void VulkanCommandList::BeginRendering(const RenderingInfo &info)
 {
-	auto *colorTexture = static_cast<VulkanTexture *>(info.colorTarget);
-
-	// Use the render pass from the current pipeline if set, otherwise create a default one
-	if (currentPipeline)
+	// Copy info and auto-fill render area if necessary
+	RenderingInfo renderingInfo = info;
+	if (renderingInfo.renderAreaWidth == 0 || renderingInfo.renderAreaHeight == 0)
 	{
-		currentRenderPass = currentPipeline->GetRenderPass();
-	}
-	else if (currentRenderPass == VK_NULL_HANDLE)
-	{
-		// Fallback: create a default render pass (this shouldn't happen in normal usage)
-		VkAttachmentDescription colorAttachment{};
-		colorAttachment.format         = TextureFormatToVulkan(colorTexture->GetFormat());
-		colorAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
-		colorAttachment.loadOp         = info.shouldClearColor ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-		colorAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-		colorAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-		colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		colorAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-		colorAttachment.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-		VkAttachmentReference colorAttachmentRef{};
-		colorAttachmentRef.attachment = 0;
-		colorAttachmentRef.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-		VkSubpassDescription subpass{};
-		subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
-		subpass.colorAttachmentCount = 1;
-		subpass.pColorAttachments    = &colorAttachmentRef;
-
-		VkSubpassDependency dependency{};
-		dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
-		dependency.dstSubpass    = 0;
-		dependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		dependency.srcAccessMask = 0;
-		dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-		VkRenderPassCreateInfo renderPassInfo{};
-		renderPassInfo.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-		renderPassInfo.attachmentCount = 1;
-		renderPassInfo.pAttachments    = &colorAttachment;
-		renderPassInfo.subpassCount    = 1;
-		renderPassInfo.pSubpasses      = &subpass;
-		renderPassInfo.dependencyCount = 1;
-		renderPassInfo.pDependencies   = &dependency;
-
-		if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &currentRenderPass) != VK_SUCCESS)
+		// Infer from first color attachment, or depth attachment if no color
+		if (!renderingInfo.colorAttachments.empty() && renderingInfo.colorAttachments[0].view)
 		{
-			throw std::runtime_error("Failed to create render pass");
+			auto *view                     = renderingInfo.colorAttachments[0].view;
+			renderingInfo.renderAreaWidth  = view->GetWidth();
+			renderingInfo.renderAreaHeight = view->GetHeight();
+		}
+		else if (renderingInfo.depthStencilAttachment.view)
+		{
+			auto *view                     = renderingInfo.depthStencilAttachment.view;
+			renderingInfo.renderAreaWidth  = view->GetWidth();
+			renderingInfo.renderAreaHeight = view->GetHeight();
 		}
 	}
 
-	// Create framebuffer on-demand
-	if (currentFramebuffer == VK_NULL_HANDLE)
+	// Setup color attachments
+	std::vector<VkRenderingAttachmentInfoKHR> colorAttachments;
+	for (const auto &attachment : renderingInfo.colorAttachments)
 	{
-		VkImageView attachments[] = {colorTexture->GetImageView()};
+		VkRenderingAttachmentInfoKHR colorAttachment{};
+		colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
 
-		VkFramebufferCreateInfo framebufferInfo{};
-		framebufferInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-		framebufferInfo.renderPass      = currentRenderPass;
-		framebufferInfo.attachmentCount = 1;
-		framebufferInfo.pAttachments    = attachments;
-		framebufferInfo.width           = info.width;
-		framebufferInfo.height          = info.height;
-		framebufferInfo.layers          = 1;
-
-		if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &currentFramebuffer) != VK_SUCCESS)
+		if (attachment.view)
 		{
-			throw std::runtime_error("Failed to create framebuffer");
+			auto *vkView                = static_cast<VulkanTextureView *>(attachment.view);
+			colorAttachment.imageView   = vkView->GetHandle();
+			colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		}
+
+		if (attachment.resolveTarget)
+		{
+			auto *vkResolve                    = static_cast<VulkanTextureView *>(attachment.resolveTarget);
+			colorAttachment.resolveImageView   = vkResolve->GetHandle();
+			colorAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+			VkResolveModeFlagBits resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+			if (attachment.resolveMode != ResolveMode::NONE)
+			{
+				switch (attachment.resolveMode)
+				{
+					case ResolveMode::SAMPLE_ZERO:
+						resolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+						break;
+					case ResolveMode::AVERAGE:
+						resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+						break;
+				}
+			}
+			else
+			{
+				// Auto-select based on format
+				if (attachment.view)
+				{
+					auto         *vkView = static_cast<VulkanTextureView *>(attachment.view);
+					TextureFormat format = vkView->GetFormat();
+					if (format == TextureFormat::R8G8B8A8_UNORM || format == TextureFormat::B8G8R8A8_UNORM ||
+					    format == TextureFormat::R8G8B8A8_SRGB || format == TextureFormat::B8G8R8A8_SRGB ||
+					    format == TextureFormat::R32G32B32_FLOAT)
+					{
+						resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+					}
+					else
+					{
+						resolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+					}
+				}
+			}
+			colorAttachment.resolveMode = resolveMode;
+		}
+
+		colorAttachment.loadOp  = LoadOpToVulkan(attachment.loadOp);
+		colorAttachment.storeOp = StoreOpToVulkan(attachment.storeOp);
+
+		// Set clear value
+		VkClearValue clearValue{};
+		memcpy(clearValue.color.float32, attachment.clearValue.color, sizeof(float) * 4);
+		colorAttachment.clearValue = clearValue;
+
+		colorAttachments.push_back(colorAttachment);
 	}
 
-	// Begin render pass
-	VkRenderPassBeginInfo renderPassBegin{};
-	renderPassBegin.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-	renderPassBegin.renderPass        = currentRenderPass;
-	renderPassBegin.framebuffer       = currentFramebuffer;
-	renderPassBegin.renderArea.offset = {0, 0};
-	renderPassBegin.renderArea.extent = {info.width, info.height};
+	// Setup depth-stencil attachment (single attachment for combined depth/stencil)
+	VkRenderingAttachmentInfoKHR  depthStencilAttachment{};
+	VkRenderingAttachmentInfoKHR *pDepthAttachment   = nullptr;
+	VkRenderingAttachmentInfoKHR *pStencilAttachment = nullptr;
 
-	VkClearValue clearColor = {};
-	clearColor.color        = {
-        {info.clearColor.color[0], info.clearColor.color[1], info.clearColor.color[2], info.clearColor.color[3]}};
-	renderPassBegin.clearValueCount = 1;
-	renderPassBegin.pClearValues    = &clearColor;
+	if (renderingInfo.depthStencilAttachment.view)
+	{
+		auto *vkDepthView = static_cast<VulkanTextureView *>(renderingInfo.depthStencilAttachment.view);
 
-	vkCmdBeginRenderPass(commandBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
-	inRenderPass = true;
+		// Setup combined depth/stencil attachment
+		depthStencilAttachment.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
+		depthStencilAttachment.imageView   = vkDepthView->GetHandle();
+		depthStencilAttachment.imageLayout = renderingInfo.depthStencilAttachment.readOnly ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		VkClearValue depthClearValue{};
+		depthClearValue.depthStencil.depth   = renderingInfo.depthStencilAttachment.clearValue.depthStencil.depth;
+		depthClearValue.depthStencil.stencil = renderingInfo.depthStencilAttachment.clearValue.depthStencil.stencil;
+		depthStencilAttachment.clearValue    = depthClearValue;
+
+		VkFormat format = TextureFormatToVulkan(vkDepthView->GetFormat());
+		if (format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT)
+		{
+			// Use stencil ops for combined format
+			depthStencilAttachment.loadOp  = LoadOpToVulkan(renderingInfo.depthStencilAttachment.stencilLoadOp);
+			depthStencilAttachment.storeOp = StoreOpToVulkan(renderingInfo.depthStencilAttachment.stencilStoreOp);
+		}
+		else
+		{
+			// Use depth ops for depth-only format
+			depthStencilAttachment.loadOp  = LoadOpToVulkan(renderingInfo.depthStencilAttachment.depthLoadOp);
+			depthStencilAttachment.storeOp = StoreOpToVulkan(renderingInfo.depthStencilAttachment.depthStoreOp);
+		}
+
+		pDepthAttachment = &depthStencilAttachment;
+	}
+
+	// Begin dynamic rendering
+	VkRenderingInfoKHR vkRenderingInfo{};
+	vkRenderingInfo.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
+	vkRenderingInfo.flags                = 0;
+	vkRenderingInfo.renderArea.offset    = {static_cast<int32_t>(renderingInfo.renderAreaX), static_cast<int32_t>(renderingInfo.renderAreaY)};
+	vkRenderingInfo.renderArea.extent    = {renderingInfo.renderAreaWidth, renderingInfo.renderAreaHeight};
+	vkRenderingInfo.layerCount           = renderingInfo.layerCount;
+	vkRenderingInfo.viewMask             = 0;
+	vkRenderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
+	vkRenderingInfo.pColorAttachments    = colorAttachments.data();
+	vkRenderingInfo.pDepthAttachment     = pDepthAttachment;
+	vkRenderingInfo.pStencilAttachment   = pStencilAttachment;
+
+	if (!vkCmdBeginRenderingKHR)
+	{
+		throw std::runtime_error("Dynamic rendering not available - vkCmdBeginRenderingKHR is null");
+	}
+
+	vkCmdBeginRenderingKHR(commandBuffer, &vkRenderingInfo);
+	inRendering = true;
 }
 
-void VulkanCommandList::EndRenderPass()
+void VulkanCommandList::EndRendering()
 {
-	if (inRenderPass)
+	if (!inRendering)
 	{
-		vkCmdEndRenderPass(commandBuffer);
-		inRenderPass = false;
+		return;
 	}
-	// Don't destroy framebuffer here - it needs to stay alive until GPU finishes
+
+	if (!vkCmdEndRenderingKHR)
+	{
+		throw std::runtime_error("Dynamic rendering not available - vkCmdEndRenderingKHR is null");
+	}
+
+	vkCmdEndRenderingKHR(commandBuffer);
+	inRendering = false;
 }
 
 void VulkanCommandList::SetPipeline(IRHIPipeline *pipeline)
 {
-	auto *vkPipeline = static_cast<VulkanPipeline *>(pipeline);
-	currentPipeline  = vkPipeline;
-	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipeline->GetHandle());
+	currentPipeline = static_cast<VulkanPipeline *>(pipeline);
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, currentPipeline->GetHandle());
 }
 
 void VulkanCommandList::SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, size_t offset)
 {
-	auto        *vkBuffer        = static_cast<VulkanBuffer *>(buffer);
-	VkBuffer     vertexBuffers[] = {vkBuffer->GetHandle()};
-	VkDeviceSize offsets[]       = {static_cast<VkDeviceSize>(offset)};
-	vkCmdBindVertexBuffers(commandBuffer, binding, 1, vertexBuffers, offsets);
+	auto        *vkBuffer  = static_cast<VulkanBuffer *>(buffer);
+	VkBuffer     buffers[] = {vkBuffer->GetHandle()};
+	VkDeviceSize offsets[] = {offset};
+	vkCmdBindVertexBuffers(commandBuffer, binding, 1, buffers, offsets);
+}
+
+void VulkanCommandList::BindIndexBuffer(IRHIBuffer *buffer, size_t offset)
+{
+	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
+	vkCmdBindIndexBuffer(commandBuffer, vkBuffer->GetHandle(), offset, VK_INDEX_TYPE_UINT16);
+}
+
+void VulkanCommandList::BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *descriptorSet,
+                                          const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount)
+{
+	if (!currentPipeline)
+	{
+		throw std::runtime_error("No pipeline bound when binding descriptor set");
+	}
+
+	auto           *vkDescriptorSet = static_cast<VulkanDescriptorSet *>(descriptorSet);
+	VkDescriptorSet sets[]          = {vkDescriptorSet->GetHandle()};
+
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, currentPipeline->GetLayout(), setIndex, 1,
+	                        sets, dynamicOffsetCount, dynamicOffsets);
+}
+
+void VulkanCommandList::PushConstants(ShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void *data)
+{
+	if (!currentPipeline)
+	{
+		throw std::runtime_error("No pipeline bound when pushing constants");
+	}
+
+	VkShaderStageFlags vkStageFlags = ShaderStageFlagsToVulkan(stageFlags);
+	vkCmdPushConstants(commandBuffer, currentPipeline->GetLayout(), vkStageFlags, offset, size, data);
 }
 
 void VulkanCommandList::SetViewport(float x, float y, float width, float height)
@@ -222,38 +290,6 @@ void VulkanCommandList::SetScissor(int32_t x, int32_t y, uint32_t width, uint32_
 	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 }
 
-void VulkanCommandList::BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *descriptorSet,
-                                          const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount)
-{
-	auto *vkDescSet = static_cast<VulkanDescriptorSet *>(descriptorSet);
-
-	if (!currentPipeline)
-	{
-		throw std::runtime_error("No pipeline bound - cannot bind descriptor set");
-	}
-
-	VkDescriptorSet descriptorSetHandle = vkDescSet->GetHandle();
-	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, currentPipeline->GetLayout(), setIndex, 1,
-	                        &descriptorSetHandle, dynamicOffsetCount, dynamicOffsets);
-}
-
-void VulkanCommandList::PushConstants(ShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void *data)
-{
-	if (!currentPipeline)
-	{
-		throw std::runtime_error("No pipeline bound - cannot push constants");
-	}
-
-	VkShaderStageFlags vkStageFlags = ShaderStageFlagsToVulkan(stageFlags);
-	vkCmdPushConstants(commandBuffer, currentPipeline->GetLayout(), vkStageFlags, offset, size, data);
-}
-
-void VulkanCommandList::BindIndexBuffer(IRHIBuffer *buffer, size_t offset)
-{
-	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
-	vkCmdBindIndexBuffer(commandBuffer, vkBuffer->GetHandle(), static_cast<VkDeviceSize>(offset), VK_INDEX_TYPE_UINT32);
-}
-
 void VulkanCommandList::Draw(uint32_t vertexCount, uint32_t firstVertex)
 {
 	vkCmdDraw(commandBuffer, vertexCount, 1, firstVertex, 0);
@@ -267,7 +303,7 @@ void VulkanCommandList::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, in
 void VulkanCommandList::DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, uint32_t drawCount, uint32_t stride)
 {
 	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
-	vkCmdDrawIndexedIndirect(commandBuffer, vkBuffer->GetHandle(), static_cast<VkDeviceSize>(offset), drawCount, stride);
+	vkCmdDrawIndexedIndirect(commandBuffer, vkBuffer->GetHandle(), offset, drawCount, stride);
 }
 
 }        // namespace RHI

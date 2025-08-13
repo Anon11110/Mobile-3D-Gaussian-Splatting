@@ -15,6 +15,7 @@ namespace RHI
 class VulkanDevice;
 class VulkanBuffer;
 class VulkanTexture;
+class VulkanTextureView;
 class VulkanShader;
 class VulkanPipeline;
 class VulkanCommandList;
@@ -60,6 +61,9 @@ class VulkanTexture : public IRHITexture
 	VmaAllocation allocation;
 	uint32_t      width;
 	uint32_t      height;
+	uint32_t      depth;
+	uint32_t      mipLevels;
+	uint32_t      arrayLayers;
 	TextureFormat format;
 	bool          ownedBySwapchain;
 
@@ -77,6 +81,18 @@ class VulkanTexture : public IRHITexture
 	{
 		return height;
 	}
+	uint32_t GetDepth() const override
+	{
+		return depth;
+	}
+	uint32_t GetMipLevels() const override
+	{
+		return mipLevels;
+	}
+	uint32_t GetArrayLayers() const override
+	{
+		return arrayLayers;
+	}
 	TextureFormat GetFormat() const override
 	{
 		return format;
@@ -87,6 +103,56 @@ class VulkanTexture : public IRHITexture
 		return image;
 	}
 	VkImageView GetImageView() const
+	{
+		return imageView;
+	}
+};
+
+// Vulkan Texture View implementation
+class VulkanTextureView : public IRHITextureView
+{
+  private:
+	VkDevice       device;
+	VkImageView    imageView;
+	VulkanTexture *texture;
+	TextureFormat  format;
+	uint32_t       baseMipLevel;
+	uint32_t       mipLevelCount;
+	uint32_t       baseArrayLayer;
+	uint32_t       arrayLayerCount;
+
+  public:
+	VulkanTextureView(VkDevice device, const TextureViewDesc &desc);
+	~VulkanTextureView() override;
+
+	IRHITexture *GetTexture() override
+	{
+		return texture;
+	}
+	TextureFormat GetFormat() const override
+	{
+		return format;
+	}
+	uint32_t GetWidth() const override;
+	uint32_t GetHeight() const override;
+	uint32_t GetBaseMipLevel() const override
+	{
+		return baseMipLevel;
+	}
+	uint32_t GetMipLevelCount() const override
+	{
+		return mipLevelCount;
+	}
+	uint32_t GetBaseArrayLayer() const override
+	{
+		return baseArrayLayer;
+	}
+	uint32_t GetArrayLayerCount() const override
+	{
+		return arrayLayerCount;
+	}
+
+	VkImageView GetHandle() const
 	{
 		return imageView;
 	}
@@ -118,10 +184,10 @@ class VulkanShader : public IRHIShader
 class VulkanPipeline : public IRHIPipeline
 {
   private:
-	VkDevice         device;
-	VkPipeline       pipeline;
-	VkPipelineLayout pipelineLayout;
-	VkRenderPass     renderPass;
+	VkDevice              device;
+	VkPipeline            pipeline;
+	VkPipelineLayout      pipelineLayout;
+	RenderTargetSignature targetSignature;
 
   public:
 	VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc);
@@ -135,9 +201,9 @@ class VulkanPipeline : public IRHIPipeline
 	{
 		return pipelineLayout;
 	}
-	VkRenderPass GetRenderPass() const
+	const RenderTargetSignature &GetTargetSignature() const
 	{
-		return renderPass;
+		return targetSignature;
 	}
 };
 
@@ -147,21 +213,25 @@ class VulkanCommandList : public IRHICommandList
   private:
 	VkDevice        device;
 	VkCommandBuffer commandBuffer;
-	VkRenderPass    currentRenderPass;
-	VkFramebuffer   currentFramebuffer;
 	VulkanPipeline *currentPipeline;
-	bool            inRenderPass;
+	bool            inRendering;
+
+	// Cached function pointers
+	PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
+	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
 
   public:
-	VulkanCommandList(VkDevice device, VkCommandPool commandPool);
+	VulkanCommandList(VkDevice device, VkCommandPool commandPool,
+	                  PFN_vkCmdBeginRenderingKHR beginFunc,
+	                  PFN_vkCmdEndRenderingKHR   endFunc);
 	~VulkanCommandList() override;
 
 	void Begin() override;
 	void End() override;
 	void Reset() override;
 
-	void BeginRenderPass(const RenderPassBeginInfo &info) override;
-	void EndRenderPass() override;
+	void BeginRendering(const RenderingInfo &info) override;
+	void EndRendering() override;
 
 	void SetPipeline(IRHIPipeline *pipeline) override;
 	void SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, size_t offset = 0) override;
@@ -186,32 +256,34 @@ class VulkanCommandList : public IRHICommandList
 class VulkanSwapchain : public IRHISwapchain
 {
   private:
-	VkDevice                                    device;
-	VkPhysicalDevice                            physicalDevice;
-	VmaAllocator                                allocator;
-	VkSurfaceKHR                                surface;
-	VkQueue                                     graphicsQueue;
-	VkSwapchainKHR                              swapchain;
-	std::vector<VkImage>                        swapchainImages;
-	std::vector<std::unique_ptr<VulkanTexture>> backBuffers;
-	std::vector<VkFramebuffer>                  framebuffers;
-	VkRenderPass                                renderPass;
-	VkFormat                                    swapchainFormat;
-	VkExtent2D                                  swapchainExtent;
-	VkSurfaceFormatKHR                          chosenSurfaceFormat;
-	VkPresentModeKHR                            chosenPresentMode;
-	uint32_t                                    requestedBufferCount;
+	VkDevice                                        device;
+	VkPhysicalDevice                                physicalDevice;
+	VmaAllocator                                    allocator;
+	VkSurfaceKHR                                    surface;
+	VkQueue                                         graphicsQueue;
+	VkSwapchainKHR                                  swapchain;
+	std::vector<VkImage>                            swapchainImages;
+	std::vector<std::unique_ptr<VulkanTexture>>     backBuffers;
+	std::vector<std::unique_ptr<VulkanTextureView>> backBufferViews;
+	std::vector<VkFramebuffer>                      framebuffers;
+	VkRenderPass                                    renderPass;
+	VkFormat                                        swapchainFormat;
+	VkExtent2D                                      swapchainExtent;
+	VkSurfaceFormatKHR                              chosenSurfaceFormat;
+	VkPresentModeKHR                                chosenPresentMode;
+	uint32_t                                        requestedBufferCount;
 
   public:
 	VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator, VkSurfaceKHR surface,
 	                VkQueue graphicsQueue, const SwapchainDesc &desc);
 	~VulkanSwapchain() override;
 
-	SwapchainStatus AcquireNextImage(uint32_t &imageIndex, IRHISemaphore *signalSemaphore = nullptr) override;
-	SwapchainStatus Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr) override;
-	IRHITexture    *GetBackBuffer(uint32_t index) override;
-	uint32_t        GetImageCount() const override;
-	void            Resize(uint32_t width, uint32_t height) override;
+	SwapchainStatus  AcquireNextImage(uint32_t &imageIndex, IRHISemaphore *signalSemaphore = nullptr) override;
+	SwapchainStatus  Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr) override;
+	IRHITexture     *GetBackBuffer(uint32_t index) override;
+	IRHITextureView *GetBackBufferView(uint32_t index) override;
+	uint32_t         GetImageCount() const override;
+	void             Resize(uint32_t width, uint32_t height) override;
 
 	VkFramebuffer GetFramebuffer(uint32_t index, VkRenderPass renderPass);
 };
@@ -327,6 +399,8 @@ VkPrimitiveTopology   PrimitiveTopologyToVulkan(PrimitiveTopology topology);
 VkPolygonMode         PolygonModeToVulkan(PolygonMode mode);
 VkCullModeFlags       CullModeToVulkan(CullMode mode);
 VkFrontFace           FrontFaceToVulkan(FrontFace face);
+VkAttachmentLoadOp    LoadOpToVulkan(LoadOp op);
+VkAttachmentStoreOp   StoreOpToVulkan(StoreOp op);
 VkCompareOp           CompareOpToVulkan(CompareOp op);
 VkStencilOp           StencilOpToVulkan(StencilOp op);
 VkBlendFactor         BlendFactorToVulkan(BlendFactor factor);

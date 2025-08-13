@@ -387,4 +387,32 @@ VkSampleCountFlagBits SampleCountToVulkan(SampleCount count)
 	}
 }
 
+VkAttachmentLoadOp LoadOpToVulkan(LoadOp op)
+{
+	switch (op)
+	{
+		case LoadOp::LOAD:
+			return VK_ATTACHMENT_LOAD_OP_LOAD;
+		case LoadOp::CLEAR:
+			return VK_ATTACHMENT_LOAD_OP_CLEAR;
+		case LoadOp::DONT_CARE:
+			return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		default:
+			return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	}
+}
+
+VkAttachmentStoreOp StoreOpToVulkan(StoreOp op)
+{
+	switch (op)
+	{
+		case StoreOp::STORE:
+			return VK_ATTACHMENT_STORE_OP_STORE;
+		case StoreOp::DONT_CARE:
+			return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		default:
+			return VK_ATTACHMENT_STORE_OP_STORE;
+	}
+}
+
 }        // namespace RHI

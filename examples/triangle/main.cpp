@@ -144,8 +144,9 @@ int main()
 		pipelineDesc.colorBlendAttachments[0].blendEnable    = false;
 		pipelineDesc.colorBlendAttachments[0].colorWriteMask = 0xF;
 
-		// Get the actual format chosen by the swapchain
-		pipelineDesc.colorFormats = {swapchain->GetBackBuffer(0)->GetFormat()};
+		pipelineDesc.targetSignature.colorFormats = {swapchain->GetBackBuffer(0)->GetFormat()};
+		pipelineDesc.targetSignature.depthFormat  = RHI::TextureFormat::UNDEFINED;
+		pipelineDesc.targetSignature.sampleCount  = RHI::SampleCount::COUNT_1;
 
 		pipelineDesc.descriptorSetLayouts = {descriptorSetLayout.get()};
 
@@ -232,14 +233,23 @@ int main()
 			uint32_t backBufferWidth  = backBuffer->GetWidth();
 			uint32_t backBufferHeight = backBuffer->GetHeight();
 
-			// Begin render pass
-			RHI::RenderPassBeginInfo rpInfo{};
-			rpInfo.colorTarget      = backBuffer;
-			rpInfo.width            = backBufferWidth;
-			rpInfo.height           = backBufferHeight;
-			rpInfo.clearColor       = {{0.1f, 0.1f, 0.1f, 1.0f}};
-			rpInfo.shouldClearColor = true;
-			cmdList->BeginRenderPass(rpInfo);
+			// Begin rendering with dynamic rendering
+			RHI::RenderingInfo renderingInfo{};
+			renderingInfo.renderAreaX      = 0;
+			renderingInfo.renderAreaY      = 0;
+			renderingInfo.renderAreaWidth  = backBufferWidth;
+			renderingInfo.renderAreaHeight = backBufferHeight;
+			renderingInfo.layerCount       = 1;
+
+			// Setup color attachment
+			RHI::ColorAttachment colorAttachment{};
+			colorAttachment.view       = swapchain->GetBackBufferView(imageIndex);
+			colorAttachment.loadOp     = RHI::LoadOp::CLEAR;
+			colorAttachment.storeOp    = RHI::StoreOp::STORE;
+			colorAttachment.clearValue = {{0.1f, 0.1f, 0.1f, 1.0f}};
+			renderingInfo.colorAttachments.push_back(colorAttachment);
+
+			cmdList->BeginRendering(renderingInfo);
 
 			// Viewport and scissor
 			cmdList->SetViewport(0, 0, float(backBufferWidth), float(backBufferHeight));
@@ -289,7 +299,7 @@ int main()
 			// Draw triangle
 			cmdList->Draw(3);
 
-			cmdList->EndRenderPass();
+			cmdList->EndRendering();
 			cmdList->End();
 
 			// Submit

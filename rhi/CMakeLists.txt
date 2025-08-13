@@ -33,6 +33,7 @@ target_sources(RHI PRIVATE
     src/vulkan/vulkan_buffer.cpp
     src/vulkan/vulkan_shader.cpp
     src/vulkan/vulkan_texture.cpp
+    src/vulkan/vulkan_textureview.cpp
     src/vulkan/vulkan_pipeline.cpp
     src/vulkan/vulkan_swapchain.cpp
     src/vulkan/vulkan_commandlist.cpp

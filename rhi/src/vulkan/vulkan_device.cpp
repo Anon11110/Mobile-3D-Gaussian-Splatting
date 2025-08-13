@@ -24,6 +24,12 @@ class VulkanDevice : public IRHIDevice
 	VkDescriptorPool computeDescriptorPool;
 	VkDescriptorPool transferDescriptorPool;
 
+	PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
+	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
+
+	// Device feature flags
+	bool hasDynamicRendering;
+
 #ifdef DEBUG
 	VkDebugUtilsMessengerEXT debugMessenger;
 #endif
@@ -43,6 +49,7 @@ class VulkanDevice : public IRHIDevice
 		CreateCommandPool();
 		CreateVmaAllocator();
 		CreateDescriptorPools();
+		CacheDynamicRenderingFunctions();
 	}
 
 	~VulkanDevice() override
@@ -138,6 +145,11 @@ class VulkanDevice : public IRHIDevice
 		return texture;
 	}
 
+	std::unique_ptr<IRHITextureView> CreateTextureView(const TextureViewDesc &desc) override
+	{
+		return std::make_unique<VulkanTextureView>(device, desc);
+	}
+
 	std::unique_ptr<IRHIShader> CreateShader(const ShaderDesc &desc) override
 	{
 		return std::make_unique<VulkanShader>(device, desc);
@@ -150,7 +162,7 @@ class VulkanDevice : public IRHIDevice
 
 	std::unique_ptr<IRHICommandList> CreateCommandList() override
 	{
-		return std::make_unique<VulkanCommandList>(device, commandPool);
+		return std::make_unique<VulkanCommandList>(device, commandPool, vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR);
 	}
 
 	std::unique_ptr<IRHISwapchain> CreateSwapchain(const SwapchainDesc &desc) override
@@ -409,6 +421,11 @@ class VulkanDevice : public IRHIDevice
 
 		VkPhysicalDeviceFeatures deviceFeatures{};
 
+		// Enable dynamic rendering if available
+		VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeatures{};
+		dynamicRenderingFeatures.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
+		dynamicRenderingFeatures.dynamicRendering = VK_TRUE;
+
 		VkDeviceCreateInfo createInfo{};
 		createInfo.sType                = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		createInfo.queueCreateInfoCount = 1;
@@ -424,7 +441,7 @@ class VulkanDevice : public IRHIDevice
 
 		std::vector<const char *> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
-		// Check for VMA-related extensions and enable them if available
+		hasDynamicRendering = false;
 		for (const auto &ext : availableExtensions)
 		{
 			if (strcmp(ext.extensionName, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME) == 0)
@@ -439,6 +456,11 @@ class VulkanDevice : public IRHIDevice
 			{
 				deviceExtensions.push_back(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME);
 			}
+			else if (strcmp(ext.extensionName, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0)
+			{
+				deviceExtensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+				hasDynamicRendering = true;
+			}
 #ifdef __APPLE__
 			else if (strcmp(ext.extensionName, "VK_KHR_portability_subset") == 0)
 			{
@@ -449,6 +471,11 @@ class VulkanDevice : public IRHIDevice
 
 		createInfo.enabledExtensionCount   = static_cast<uint32_t>(deviceExtensions.size());
 		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+
+		if (hasDynamicRendering)
+		{
+			createInfo.pNext = &dynamicRenderingFeatures;
+		}
 
 		if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
 		{
@@ -764,6 +791,31 @@ class VulkanDevice : public IRHIDevice
 		if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &transferDescriptorPool) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create transfer descriptor pool");
+		}
+	}
+
+	void CacheDynamicRenderingFunctions()
+	{
+		if (hasDynamicRendering)
+		{
+			// Try Vulkan 1.3 core functions first
+			vkCmdBeginRenderingKHR = (PFN_vkCmdBeginRenderingKHR) vkGetDeviceProcAddr(device, "vkCmdBeginRendering");
+			vkCmdEndRenderingKHR   = (PFN_vkCmdEndRenderingKHR) vkGetDeviceProcAddr(device, "vkCmdEndRendering");
+
+			// Fall back to KHR extension functions
+			if (!vkCmdBeginRenderingKHR)
+			{
+				vkCmdBeginRenderingKHR = (PFN_vkCmdBeginRenderingKHR) vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR");
+			}
+			if (!vkCmdEndRenderingKHR)
+			{
+				vkCmdEndRenderingKHR = (PFN_vkCmdEndRenderingKHR) vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR");
+			}
+		}
+		else
+		{
+			vkCmdBeginRenderingKHR = nullptr;
+			vkCmdEndRenderingKHR   = nullptr;
 		}
 	}
 };

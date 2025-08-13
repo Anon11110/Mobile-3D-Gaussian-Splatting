@@ -13,6 +13,7 @@ class IRHIDevice
 	// Resource creation
 	virtual std::unique_ptr<IRHIBuffer>              CreateBuffer(const BufferDesc &desc)                           = 0;
 	virtual std::unique_ptr<IRHITexture>             CreateTexture(const TextureDesc &desc)                         = 0;
+	virtual std::unique_ptr<IRHITextureView>         CreateTextureView(const TextureViewDesc &desc)                 = 0;
 	virtual std::unique_ptr<IRHIShader>              CreateShader(const ShaderDesc &desc)                           = 0;
 	virtual std::unique_ptr<IRHIPipeline>            CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)       = 0;
 	virtual std::unique_ptr<IRHICommandList>         CreateCommandList()                                            = 0;
@@ -44,10 +45,28 @@ class IRHIBuffer
 class IRHITexture
 {
   public:
-	virtual ~IRHITexture()                  = default;
-	virtual uint32_t      GetWidth() const  = 0;
-	virtual uint32_t      GetHeight() const = 0;
-	virtual TextureFormat GetFormat() const = 0;
+	virtual ~IRHITexture()                       = default;
+	virtual uint32_t      GetWidth() const       = 0;
+	virtual uint32_t      GetHeight() const      = 0;
+	virtual uint32_t      GetDepth() const       = 0;
+	virtual uint32_t      GetMipLevels() const   = 0;
+	virtual uint32_t      GetArrayLayers() const = 0;
+	virtual TextureFormat GetFormat() const      = 0;
+};
+
+// Texture view interface
+class IRHITextureView
+{
+  public:
+	virtual ~IRHITextureView()                       = default;
+	virtual IRHITexture  *GetTexture()               = 0;
+	virtual TextureFormat GetFormat() const          = 0;
+	virtual uint32_t      GetWidth() const           = 0;
+	virtual uint32_t      GetHeight() const          = 0;
+	virtual uint32_t      GetBaseMipLevel() const    = 0;
+	virtual uint32_t      GetMipLevelCount() const   = 0;
+	virtual uint32_t      GetBaseArrayLayer() const  = 0;
+	virtual uint32_t      GetArrayLayerCount() const = 0;
 };
 
 // Shader interface
@@ -75,8 +94,8 @@ class IRHICommandList
 	virtual void End()   = 0;
 	virtual void Reset() = 0;
 
-	virtual void BeginRenderPass(const RenderPassBeginInfo &info) = 0;
-	virtual void EndRenderPass()                                  = 0;
+	virtual void BeginRendering(const RenderingInfo &info) = 0;
+	virtual void EndRendering()                            = 0;
 
 	virtual void SetPipeline(IRHIPipeline *pipeline)                                                          = 0;
 	virtual void SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, size_t offset = 0)                     = 0;
@@ -87,8 +106,8 @@ class IRHICommandList
 	virtual void SetViewport(float x, float y, float width, float height)                                     = 0;
 	virtual void SetScissor(int32_t x, int32_t y, uint32_t width, uint32_t height)                            = 0;
 
-	virtual void Draw(uint32_t vertexCount, uint32_t firstVertex = 0)                          = 0;
-	virtual void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0) = 0;
+	virtual void Draw(uint32_t vertexCount, uint32_t firstVertex = 0)                                                                             = 0;
+	virtual void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0)                                              = 0;
 	virtual void DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, uint32_t drawCount, uint32_t stride = sizeof(DrawIndexedIndirectCommand)) = 0;
 };
 
@@ -98,11 +117,12 @@ class IRHISwapchain
   public:
 	virtual ~IRHISwapchain() = default;
 
-	virtual SwapchainStatus AcquireNextImage(uint32_t &imageIndex, IRHISemaphore *signalSemaphore = nullptr) = 0;
-	virtual SwapchainStatus Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr)            = 0;
-	virtual IRHITexture    *GetBackBuffer(uint32_t index)                                                   = 0;
-	virtual uint32_t        GetImageCount() const                                                           = 0;
-	virtual void            Resize(uint32_t width, uint32_t height)                                         = 0;
+	virtual SwapchainStatus  AcquireNextImage(uint32_t &imageIndex, IRHISemaphore *signalSemaphore = nullptr) = 0;
+	virtual SwapchainStatus  Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr)             = 0;
+	virtual IRHITexture     *GetBackBuffer(uint32_t index)                                                    = 0;
+	virtual IRHITextureView *GetBackBufferView(uint32_t index)                                                = 0;
+	virtual uint32_t         GetImageCount() const                                                            = 0;
+	virtual void             Resize(uint32_t width, uint32_t height)                                          = 0;
 };
 
 // Synchronization primitives

@@ -7,85 +7,12 @@ namespace RHI
 {
 
 VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc) :
-    device(device), pipeline(VK_NULL_HANDLE), pipelineLayout(VK_NULL_HANDLE), renderPass(VK_NULL_HANDLE)
+    device(device), pipeline(VK_NULL_HANDLE), pipelineLayout(VK_NULL_HANDLE)
 {
 	auto *vertexShader   = static_cast<VulkanShader *>(desc.vertexShader);
 	auto *fragmentShader = static_cast<VulkanShader *>(desc.fragmentShader);
 
-	// Create render pass for pipeline compatibility
-	std::vector<VkAttachmentDescription> attachments;
-	std::vector<VkAttachmentReference>   colorAttachmentRefs;
-
-	// Color attachments
-	for (size_t i = 0; i < desc.colorFormats.size(); ++i)
-	{
-		VkAttachmentDescription colorAttachment{};
-		colorAttachment.format         = TextureFormatToVulkan(desc.colorFormats[i]);
-		colorAttachment.samples        = SampleCountToVulkan(desc.multisampleState.rasterizationSamples);
-		colorAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		colorAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-		colorAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-		colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		colorAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-		colorAttachment.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-		attachments.push_back(colorAttachment);
-
-		VkAttachmentReference colorRef{};
-		colorRef.attachment = static_cast<uint32_t>(i);
-		colorRef.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		colorAttachmentRefs.push_back(colorRef);
-	}
-
-	// Depth attachment (optional)
-	VkAttachmentReference depthAttachmentRef{};
-	bool                  hasDepth = (desc.depthFormat != TextureFormat::UNDEFINED);
-	if (hasDepth)
-	{
-		VkAttachmentDescription depthAttachment{};
-		depthAttachment.format         = TextureFormatToVulkan(desc.depthFormat);
-		depthAttachment.samples        = SampleCountToVulkan(desc.multisampleState.rasterizationSamples);
-		depthAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		depthAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-		depthAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		depthAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-		depthAttachment.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-		depthAttachmentRef.attachment = static_cast<uint32_t>(attachments.size());
-		depthAttachmentRef.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-		attachments.push_back(depthAttachment);
-	}
-
-	VkSubpassDescription subpass{};
-	subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
-	subpass.colorAttachmentCount    = static_cast<uint32_t>(colorAttachmentRefs.size());
-	subpass.pColorAttachments       = colorAttachmentRefs.data();
-	subpass.pDepthStencilAttachment = hasDepth ? &depthAttachmentRef : nullptr;
-
-	VkSubpassDependency dependency{};
-	dependency.srcSubpass   = VK_SUBPASS_EXTERNAL;
-	dependency.dstSubpass   = 0;
-	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-	                          (hasDepth ? VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT : 0);
-	dependency.srcAccessMask = 0;
-	dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-	                          (hasDepth ? VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT : 0);
-	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-	                           (hasDepth ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT : 0);
-
-	VkRenderPassCreateInfo renderPassInfo{};
-	renderPassInfo.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-	renderPassInfo.pAttachments    = attachments.data();
-	renderPassInfo.subpassCount    = 1;
-	renderPassInfo.pSubpasses      = &subpass;
-	renderPassInfo.dependencyCount = 1;
-	renderPassInfo.pDependencies   = &dependency;
-
-	if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS)
-	{
-		throw std::runtime_error("Failed to create render pass for pipeline");
-	}
+	targetSignature = desc.targetSignature;
 
 	// Shader stages
 	std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
@@ -262,9 +189,37 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc
 		throw std::runtime_error("Failed to create pipeline layout");
 	}
 
-	// Graphics pipeline
+	// Setup dynamic rendering info for pipeline creation
+	std::vector<VkFormat> colorFormats;
+	for (const auto &format : targetSignature.colorFormats)
+	{
+		colorFormats.push_back(TextureFormatToVulkan(format));
+	}
+
+	VkPipelineRenderingCreateInfoKHR renderingInfo{};
+	renderingInfo.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+	renderingInfo.colorAttachmentCount    = static_cast<uint32_t>(colorFormats.size());
+	renderingInfo.pColorAttachmentFormats = colorFormats.data();
+
+	VkFormat depthFormat   = VK_FORMAT_UNDEFINED;
+	VkFormat stencilFormat = VK_FORMAT_UNDEFINED;
+	if (targetSignature.depthFormat != TextureFormat::UNDEFINED)
+	{
+		VkFormat vkDepthFormat = TextureFormatToVulkan(targetSignature.depthFormat);
+		depthFormat            = vkDepthFormat;
+		// Check if format has stencil component
+		if (vkDepthFormat == VK_FORMAT_D24_UNORM_S8_UINT || vkDepthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT)
+		{
+			stencilFormat = vkDepthFormat;
+		}
+	}
+	renderingInfo.depthAttachmentFormat   = depthFormat;
+	renderingInfo.stencilAttachmentFormat = stencilFormat;
+
+	// Graphics pipeline with dynamic rendering
 	VkGraphicsPipelineCreateInfo pipelineInfo{};
 	pipelineInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	pipelineInfo.pNext               = &renderingInfo;
 	pipelineInfo.stageCount          = static_cast<uint32_t>(shaderStages.size());
 	pipelineInfo.pStages             = shaderStages.data();
 	pipelineInfo.pVertexInputState   = &vertexInputInfo;
@@ -276,7 +231,7 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc
 	pipelineInfo.pColorBlendState    = &colorBlending;
 	pipelineInfo.pDynamicState       = &dynamicState;
 	pipelineInfo.layout              = pipelineLayout;
-	pipelineInfo.renderPass          = renderPass;
+	pipelineInfo.renderPass          = VK_NULL_HANDLE;
 	pipelineInfo.subpass             = 0;
 
 	if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS)
@@ -295,11 +250,6 @@ VulkanPipeline::~VulkanPipeline()
 	if (pipelineLayout != VK_NULL_HANDLE)
 	{
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-	}
-
-	if (renderPass != VK_NULL_HANDLE)
-	{
-		vkDestroyRenderPass(device, renderPass, nullptr);
 	}
 }
 

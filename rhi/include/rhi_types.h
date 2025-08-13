@@ -11,6 +11,7 @@ namespace RHI
 class IRHIDevice;
 class IRHIBuffer;
 class IRHITexture;
+class IRHITextureView;
 class IRHIPipeline;
 class IRHIShader;
 class IRHICommandList;
@@ -228,6 +229,66 @@ enum class ImageLayout
 	PRESENT_SRC
 };
 
+enum class TextureAspect : uint32_t
+{
+	COLOR   = 1 << 0,
+	DEPTH   = 1 << 1,
+	STENCIL = 1 << 2
+};
+
+// Bitwise operators for TextureAspect flags
+inline TextureAspect operator|(TextureAspect lhs, TextureAspect rhs)
+{
+	return static_cast<TextureAspect>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
+}
+
+inline TextureAspect operator&(TextureAspect lhs, TextureAspect rhs)
+{
+	return static_cast<TextureAspect>(static_cast<uint32_t>(lhs) & static_cast<uint32_t>(rhs));
+}
+
+inline TextureAspect operator~(TextureAspect aspect)
+{
+	return static_cast<TextureAspect>(~static_cast<uint32_t>(aspect));
+}
+
+inline TextureAspect &operator|=(TextureAspect &lhs, TextureAspect rhs)
+{
+	lhs = lhs | rhs;
+	return lhs;
+}
+
+inline TextureAspect &operator&=(TextureAspect &lhs, TextureAspect rhs)
+{
+	lhs = lhs & rhs;
+	return lhs;
+}
+
+inline bool operator!(TextureAspect aspect)
+{
+	return static_cast<uint32_t>(aspect) == 0;
+}
+
+enum class ResolveMode
+{
+	NONE,
+	SAMPLE_ZERO,
+	AVERAGE
+};
+
+enum class LoadOp
+{
+	LOAD,
+	CLEAR,
+	DONT_CARE
+};
+
+enum class StoreOp
+{
+	STORE,
+	DONT_CARE
+};
+
 // Structures
 struct BufferDesc
 {
@@ -242,8 +303,9 @@ struct TextureDesc
 {
 	uint32_t        width;
 	uint32_t        height;
-	uint32_t        depth     = 1;
-	uint32_t        mipLevels = 1;
+	uint32_t        depth       = 1;
+	uint32_t        mipLevels   = 1;
+	uint32_t        arrayLayers = 1;
 	TextureFormat   format;
 	ResourceUsage   resourceUsage   = ResourceUsage::Static;
 	AllocationHints hints           = {};
@@ -251,6 +313,17 @@ struct TextureDesc
 	bool            isDepthStencil  = false;
 	const void     *initialData     = nullptr;
 	size_t          initialDataSize = 0;
+};
+
+struct TextureViewDesc
+{
+	IRHITexture  *texture;
+	TextureFormat format          = TextureFormat::UNDEFINED;
+	TextureAspect aspectMask      = TextureAspect::COLOR;
+	uint32_t      baseMipLevel    = 0;
+	uint32_t      mipLevelCount   = 1;
+	uint32_t      baseArrayLayer  = 0;
+	uint32_t      arrayLayerCount = 1;
 };
 
 struct ShaderDesc
@@ -373,6 +446,13 @@ struct MultisampleState
 	bool        alphaToCoverageEnable = false;
 };
 
+struct RenderTargetSignature
+{
+	std::vector<TextureFormat> colorFormats = {TextureFormat::R8G8B8A8_UNORM};
+	TextureFormat              depthFormat  = TextureFormat::UNDEFINED;
+	SampleCount                sampleCount  = SampleCount::COUNT_1;
+};
+
 struct GraphicsPipelineDesc
 {
 	IRHIShader                            *vertexShader;
@@ -385,8 +465,7 @@ struct GraphicsPipelineDesc
 	MultisampleState                       multisampleState       = {};
 	std::vector<ColorBlendAttachmentState> colorBlendAttachments  = {{}};
 	float                                  blendConstants[4]      = {0, 0, 0, 0};
-	std::vector<TextureFormat>             colorFormats           = {TextureFormat::R8G8B8A8_UNORM};
-	TextureFormat                          depthFormat            = TextureFormat::UNDEFINED;
+	RenderTargetSignature                  targetSignature;
 	std::vector<IRHIDescriptorSetLayout *> descriptorSetLayouts;
 	std::vector<PushConstantRange>         pushConstantRanges;
 };
@@ -414,16 +493,36 @@ struct ClearValue
 	};
 };
 
-struct RenderPassBeginInfo
+struct ColorAttachment
 {
-	IRHITexture *colorTarget;
-	IRHITexture *depthTarget = nullptr;
-	uint32_t     width;
-	uint32_t     height;
-	ClearValue   clearColor = {{0.0f, 0.0f, 0.0f, 1.0f}};
-	ClearValue   clearDepth;
-	bool         shouldClearColor = true;
-	bool         shouldClearDepth = true;
+	IRHITextureView *view          = nullptr;
+	IRHITextureView *resolveTarget = nullptr;
+	LoadOp           loadOp        = LoadOp::CLEAR;
+	StoreOp          storeOp       = StoreOp::STORE;
+	ResolveMode      resolveMode   = ResolveMode::NONE;
+	ClearValue       clearValue    = {{0.0f, 0.0f, 0.0f, 1.0f}};
+};
+
+struct DepthStencilAttachment
+{
+	IRHITextureView *view           = nullptr;
+	LoadOp           depthLoadOp    = LoadOp::CLEAR;
+	StoreOp          depthStoreOp   = StoreOp::STORE;
+	LoadOp           stencilLoadOp  = LoadOp::DONT_CARE;
+	StoreOp          stencilStoreOp = StoreOp::DONT_CARE;
+	ClearValue       clearValue     = {};
+	bool             readOnly       = false;
+};
+
+struct RenderingInfo
+{
+	uint32_t                     renderAreaX      = 0;
+	uint32_t                     renderAreaY      = 0;
+	uint32_t                     renderAreaWidth  = 0;
+	uint32_t                     renderAreaHeight = 0;
+	uint32_t                     layerCount       = 1;
+	std::vector<ColorAttachment> colorAttachments;
+	DepthStencilAttachment       depthStencilAttachment;
 };
 
 struct DrawIndexedIndirectCommand
