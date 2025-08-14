@@ -2,22 +2,24 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <vector>
 
+#include "core/math/math.h"
 #include "rhi.h"
 
 #include <GLFW/glfw3.h>
 
 struct Vertex
 {
-	float position[3];
-	float color[3];
+	vec3 position;
+	vec3 color;
 };
 
 struct UniformBufferObject
 {
-	float mvp[16];           // MVP matrix
+	mat4  mvp;               // MVP matrix
 	float time;              // Animation time
 	float padding[3];        // Alignment padding
 };
@@ -72,9 +74,10 @@ int main()
 		auto swapchain             = device->CreateSwapchain(swapchainDesc);
 
 		// Create vertex buffer
-		Vertex vertices[] = {{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-		                     {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-		                     {{0.0f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}};
+		Vertex vertices[] = {
+		    {vec3(-0.5f, -0.5f, 0.0f), vec3(1.0f, 0.0f, 0.0f)},
+		    {vec3(0.5f, -0.5f, 0.0f), vec3(0.0f, 1.0f, 0.0f)},
+		    {vec3(0.0f, 0.5f, 0.0f), vec3(0.0f, 0.0f, 1.0f)}};
 
 		RHI::BufferDesc vbDesc{};
 		vbDesc.size          = sizeof(vertices);
@@ -189,11 +192,8 @@ int main()
 
 			UniformBufferObject ubo{};
 			// Simple identity matrix for MVP (no transformation)
-			ubo.mvp[0]  = 1.0f;
-			ubo.mvp[5]  = 1.0f;
-			ubo.mvp[10] = 1.0f;
-			ubo.mvp[15] = 1.0f;
-			ubo.time    = time;
+			ubo.mvp  = identity();
+			ubo.time = time;
 
 			// Update uniform buffer
 			void *uniformData = uniformBuffer->Map();
@@ -262,37 +262,35 @@ int main()
 
 			// Calculate projected NDC centroid of the triangle vertices
 			// Triangle vertices in object space
-			float vertices_obj[3][3] = {{-0.5f, -0.5f, 0.0f}, {0.5f, -0.5f, 0.0f}, {0.0f, 0.5f, 0.0f}};
+			vec3 vertices_obj[3] = {
+			    vec3(-0.5f, -0.5f, 0.0f),
+			    vec3(0.5f, -0.5f, 0.0f),
+			    vec3(0.0f, 0.5f, 0.0f)};
 
-			float ndc_sum_x = 0.0f;
-			float ndc_sum_y = 0.0f;
+			vec2 ndc_sum(0.0f);
 
 			for (int i = 0; i < 3; i++)
 			{
-				const float x = vertices_obj[i][0];
-				const float y = vertices_obj[i][1];
-				const float z = vertices_obj[i][2];
+				const vec3 &vertex = vertices_obj[i];
 
 				// clip = MVP * [x y z 1]^T
-				float clip_x = ubo.mvp[0] * x + ubo.mvp[4] * y + ubo.mvp[8] * z + ubo.mvp[12];
-				float clip_y = ubo.mvp[1] * x + ubo.mvp[5] * y + ubo.mvp[9] * z + ubo.mvp[13];
-				float clip_w = ubo.mvp[3] * x + ubo.mvp[7] * y + ubo.mvp[11] * z + ubo.mvp[15];
+				vec4 clip = ubo.mvp * vec4(vertex, 1.0f);
 
 				// NDC per-vertex
-				ndc_sum_x += clip_x / clip_w;
-				ndc_sum_y += clip_y / clip_w;
+				vec2 ndc = vec2(clip) / clip.w;
+				ndc_sum += ndc;
 			}
 
 			// Average NDC = true screen-space centroid under perspective
-			float center_ndc[2] = {ndc_sum_x / 3.0f, ndc_sum_y / 3.0f};
+			vec2 center_ndc = ndc_sum / 3.0f;
 
 			float aspect = static_cast<float>(backBufferWidth) / static_cast<float>(backBufferHeight);
 
 			float pushData[4] = {
-			    center_ndc[0],        // centerNdc.x
-			    center_ndc[1],        // centerNdc.y
-			    time * 0.5f,          // rotation in radians
-			    aspect                // aspect ratio
+			    center_ndc.x,        // centerNdc.x
+			    center_ndc.y,        // centerNdc.y
+			    time * 0.5f,         // rotation in radians
+			    aspect               // aspect ratio
 			};
 			cmdList->PushConstants(RHI::ShaderStageFlags::VERTEX, 0, sizeof(pushData), pushData);
 

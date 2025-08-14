@@ -24,6 +24,8 @@ FORMAT_DIRS = [
     "rhi/src/",
     "rhi/include/",
     "examples/triangle/",
+    "include/core",
+    "src/core",
 ]
 
 

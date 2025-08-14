@@ -10,6 +10,9 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
+# Include core library configuration
+include(cmake/core.cmake)
+
 # Add subdirectories
 add_subdirectory(rhi)
 add_subdirectory(examples)
