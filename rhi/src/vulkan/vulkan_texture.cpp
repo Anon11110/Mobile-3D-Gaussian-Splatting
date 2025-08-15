@@ -177,4 +177,74 @@ VulkanTexture::~VulkanTexture()
 	}
 }
 
+VulkanTexture::VulkanTexture(VulkanTexture &&other) noexcept :
+    device(other.device),
+    allocator(other.allocator),
+    image(other.image),
+    imageView(other.imageView),
+    allocation(other.allocation),
+    width(other.width),
+    height(other.height),
+    depth(other.depth),
+    mipLevels(other.mipLevels),
+    arrayLayers(other.arrayLayers),
+    format(other.format),
+    ownedBySwapchain(other.ownedBySwapchain)
+{
+	other.device           = VK_NULL_HANDLE;
+	other.allocator        = VK_NULL_HANDLE;
+	other.image            = VK_NULL_HANDLE;
+	other.imageView        = VK_NULL_HANDLE;
+	other.allocation       = VK_NULL_HANDLE;
+	other.width            = 0;
+	other.height           = 0;
+	other.depth            = 0;
+	other.mipLevels        = 0;
+	other.arrayLayers      = 0;
+	other.format           = TextureFormat::UNDEFINED;
+	other.ownedBySwapchain = false;
+}
+
+VulkanTexture &VulkanTexture::operator=(VulkanTexture &&other) noexcept
+{
+	if (this != &other)
+	{
+		if (imageView != VK_NULL_HANDLE)
+		{
+			vkDestroyImageView(device, imageView, nullptr);
+		}
+		if (!ownedBySwapchain && image != VK_NULL_HANDLE && allocation != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE)
+		{
+			vmaDestroyImage(allocator, image, allocation);
+		}
+
+		device           = other.device;
+		allocator        = other.allocator;
+		image            = other.image;
+		imageView        = other.imageView;
+		allocation       = other.allocation;
+		width            = other.width;
+		height           = other.height;
+		depth            = other.depth;
+		mipLevels        = other.mipLevels;
+		arrayLayers      = other.arrayLayers;
+		format           = other.format;
+		ownedBySwapchain = other.ownedBySwapchain;
+
+		other.device           = VK_NULL_HANDLE;
+		other.allocator        = VK_NULL_HANDLE;
+		other.image            = VK_NULL_HANDLE;
+		other.imageView        = VK_NULL_HANDLE;
+		other.allocation       = VK_NULL_HANDLE;
+		other.width            = 0;
+		other.height           = 0;
+		other.depth            = 0;
+		other.mipLevels        = 0;
+		other.arrayLayers      = 0;
+		other.format           = TextureFormat::UNDEFINED;
+		other.ownedBySwapchain = false;
+	}
+	return *this;
+}
+
 }        // namespace RHI

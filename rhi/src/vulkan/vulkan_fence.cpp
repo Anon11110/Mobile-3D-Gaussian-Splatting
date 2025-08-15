@@ -29,6 +29,32 @@ VulkanFence::~VulkanFence()
 	}
 }
 
+VulkanFence::VulkanFence(VulkanFence &&other) noexcept :
+    device(other.device),
+    fence(other.fence)
+{
+	other.device = VK_NULL_HANDLE;
+	other.fence  = VK_NULL_HANDLE;
+}
+
+VulkanFence &VulkanFence::operator=(VulkanFence &&other) noexcept
+{
+	if (this != &other)
+	{
+		if (fence != VK_NULL_HANDLE)
+		{
+			vkDestroyFence(device, fence, nullptr);
+		}
+
+		device = other.device;
+		fence  = other.fence;
+
+		other.device = VK_NULL_HANDLE;
+		other.fence  = VK_NULL_HANDLE;
+	}
+	return *this;
+}
+
 void VulkanFence::Wait(uint64_t timeout)
 {
 	VkResult result = vkWaitForFences(device, 1, &fence, VK_TRUE, timeout);

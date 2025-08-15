@@ -53,6 +53,34 @@ VulkanDescriptorSetLayout::~VulkanDescriptorSetLayout()
 	vkDestroyDescriptorSetLayout(device, layout, nullptr);
 }
 
+VulkanDescriptorSetLayout::VulkanDescriptorSetLayout(VulkanDescriptorSetLayout &&other) noexcept :
+    device(other.device),
+    layout(other.layout),
+    poolSizes(std::move(other.poolSizes))
+{
+	other.device = VK_NULL_HANDLE;
+	other.layout = VK_NULL_HANDLE;
+}
+
+VulkanDescriptorSetLayout &VulkanDescriptorSetLayout::operator=(VulkanDescriptorSetLayout &&other) noexcept
+{
+	if (this != &other)
+	{
+		if (layout != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorSetLayout(device, layout, nullptr);
+		}
+
+		device    = other.device;
+		layout    = other.layout;
+		poolSizes = std::move(other.poolSizes);
+
+		other.device = VK_NULL_HANDLE;
+		other.layout = VK_NULL_HANDLE;
+	}
+	return *this;
+}
+
 // VulkanDescriptorSet implementation
 VulkanDescriptorSet::VulkanDescriptorSet(VkDevice device, VulkanDescriptorSetLayout *layout, VkDescriptorPool pool,
                                          VkDescriptorSet set) :
@@ -63,6 +91,39 @@ VulkanDescriptorSet::~VulkanDescriptorSet()
 {
 	// Descriptor sets are automatically freed when pool is reset or destroyed
 	// No explicit cleanup needed
+}
+
+VulkanDescriptorSet::VulkanDescriptorSet(VulkanDescriptorSet &&other) noexcept :
+    device(other.device),
+    descriptorSet(other.descriptorSet),
+    sourcePool(other.sourcePool),
+    layout(other.layout)
+{
+	other.device        = VK_NULL_HANDLE;
+	other.descriptorSet = VK_NULL_HANDLE;
+	other.sourcePool    = VK_NULL_HANDLE;
+	other.layout        = nullptr;
+}
+
+VulkanDescriptorSet &VulkanDescriptorSet::operator=(VulkanDescriptorSet &&other) noexcept
+{
+	if (this != &other)
+	{
+		// No explicit cleanup needed for descriptor sets
+
+		// Move from other
+		device        = other.device;
+		descriptorSet = other.descriptorSet;
+		sourcePool    = other.sourcePool;
+		layout        = other.layout;
+
+		// Reset other
+		other.device        = VK_NULL_HANDLE;
+		other.descriptorSet = VK_NULL_HANDLE;
+		other.sourcePool    = VK_NULL_HANDLE;
+		other.layout        = nullptr;
+	}
+	return *this;
 }
 
 void VulkanDescriptorSet::BindBuffer(uint32_t binding, const BufferBinding &bufferBinding)
@@ -145,6 +206,32 @@ VulkanSampler::VulkanSampler(VkDevice device) :
 VulkanSampler::~VulkanSampler()
 {
 	vkDestroySampler(device, sampler, nullptr);
+}
+
+VulkanSampler::VulkanSampler(VulkanSampler &&other) noexcept :
+    device(other.device),
+    sampler(other.sampler)
+{
+	other.device  = VK_NULL_HANDLE;
+	other.sampler = VK_NULL_HANDLE;
+}
+
+VulkanSampler &VulkanSampler::operator=(VulkanSampler &&other) noexcept
+{
+	if (this != &other)
+	{
+		if (sampler != VK_NULL_HANDLE)
+		{
+			vkDestroySampler(device, sampler, nullptr);
+		}
+
+		device  = other.device;
+		sampler = other.sampler;
+
+		other.device  = VK_NULL_HANDLE;
+		other.sampler = VK_NULL_HANDLE;
+	}
+	return *this;
 }
 
 }        // namespace RHI

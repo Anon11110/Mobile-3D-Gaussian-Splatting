@@ -56,6 +56,56 @@ VulkanTextureView::~VulkanTextureView()
 	}
 }
 
+VulkanTextureView::VulkanTextureView(VulkanTextureView &&other) noexcept :
+    device(other.device),
+    imageView(other.imageView),
+    texture(other.texture),
+    format(other.format),
+    baseMipLevel(other.baseMipLevel),
+    mipLevelCount(other.mipLevelCount),
+    baseArrayLayer(other.baseArrayLayer),
+    arrayLayerCount(other.arrayLayerCount)
+{
+	other.device          = VK_NULL_HANDLE;
+	other.imageView       = VK_NULL_HANDLE;
+	other.texture         = nullptr;
+	other.format          = TextureFormat::UNDEFINED;
+	other.baseMipLevel    = 0;
+	other.mipLevelCount   = 0;
+	other.baseArrayLayer  = 0;
+	other.arrayLayerCount = 0;
+}
+
+VulkanTextureView &VulkanTextureView::operator=(VulkanTextureView &&other) noexcept
+{
+	if (this != &other)
+	{
+		if (imageView != VK_NULL_HANDLE)
+		{
+			vkDestroyImageView(device, imageView, nullptr);
+		}
+
+		device          = other.device;
+		imageView       = other.imageView;
+		texture         = other.texture;
+		format          = other.format;
+		baseMipLevel    = other.baseMipLevel;
+		mipLevelCount   = other.mipLevelCount;
+		baseArrayLayer  = other.baseArrayLayer;
+		arrayLayerCount = other.arrayLayerCount;
+
+		other.device          = VK_NULL_HANDLE;
+		other.imageView       = VK_NULL_HANDLE;
+		other.texture         = nullptr;
+		other.format          = TextureFormat::UNDEFINED;
+		other.baseMipLevel    = 0;
+		other.mipLevelCount   = 0;
+		other.baseArrayLayer  = 0;
+		other.arrayLayerCount = 0;
+	}
+	return *this;
+}
+
 uint32_t VulkanTextureView::GetWidth() const
 {
 	return texture->GetWidth() >> baseMipLevel;

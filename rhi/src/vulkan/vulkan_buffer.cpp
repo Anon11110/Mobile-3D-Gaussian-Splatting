@@ -93,6 +93,44 @@ VulkanBuffer::~VulkanBuffer()
 	}
 }
 
+VulkanBuffer::VulkanBuffer(VulkanBuffer &&other) noexcept :
+    allocator(other.allocator),
+    buffer(other.buffer),
+    allocation(other.allocation),
+    size(other.size),
+    mappedData(other.mappedData)
+{
+	other.allocator  = VK_NULL_HANDLE;
+	other.buffer     = VK_NULL_HANDLE;
+	other.allocation = VK_NULL_HANDLE;
+	other.size       = 0;
+	other.mappedData = nullptr;
+}
+
+VulkanBuffer &VulkanBuffer::operator=(VulkanBuffer &&other) noexcept
+{
+	if (this != &other)
+	{
+		if (buffer != VK_NULL_HANDLE && allocation != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE)
+		{
+			vmaDestroyBuffer(allocator, buffer, allocation);
+		}
+
+		allocator  = other.allocator;
+		buffer     = other.buffer;
+		allocation = other.allocation;
+		size       = other.size;
+		mappedData = other.mappedData;
+
+		other.allocator  = VK_NULL_HANDLE;
+		other.buffer     = VK_NULL_HANDLE;
+		other.allocation = VK_NULL_HANDLE;
+		other.size       = 0;
+		other.mappedData = nullptr;
+	}
+	return *this;
+}
+
 void *VulkanBuffer::Map()
 {
 	if (mappedData != nullptr)

@@ -253,4 +253,40 @@ VulkanPipeline::~VulkanPipeline()
 	}
 }
 
+VulkanPipeline::VulkanPipeline(VulkanPipeline &&other) noexcept :
+    device(other.device),
+    pipeline(other.pipeline),
+    pipelineLayout(other.pipelineLayout),
+    targetSignature(std::move(other.targetSignature))
+{
+	other.device         = VK_NULL_HANDLE;
+	other.pipeline       = VK_NULL_HANDLE;
+	other.pipelineLayout = VK_NULL_HANDLE;
+}
+
+VulkanPipeline &VulkanPipeline::operator=(VulkanPipeline &&other) noexcept
+{
+	if (this != &other)
+	{
+		if (pipeline != VK_NULL_HANDLE)
+		{
+			vkDestroyPipeline(device, pipeline, nullptr);
+		}
+		if (pipelineLayout != VK_NULL_HANDLE)
+		{
+			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+		}
+
+		device          = other.device;
+		pipeline        = other.pipeline;
+		pipelineLayout  = other.pipelineLayout;
+		targetSignature = std::move(other.targetSignature);
+
+		other.device         = VK_NULL_HANDLE;
+		other.pipeline       = VK_NULL_HANDLE;
+		other.pipelineLayout = VK_NULL_HANDLE;
+	}
+	return *this;
+}
+
 }        // namespace RHI

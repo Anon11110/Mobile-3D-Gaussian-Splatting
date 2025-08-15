@@ -27,4 +27,34 @@ VulkanShader::~VulkanShader()
 	}
 }
 
+VulkanShader::VulkanShader(VulkanShader &&other) noexcept :
+    device(other.device),
+    shaderModule(other.shaderModule),
+    stage(other.stage)
+{
+	other.device       = VK_NULL_HANDLE;
+	other.shaderModule = VK_NULL_HANDLE;
+	other.stage        = ShaderStage::VERTEX;
+}
+
+VulkanShader &VulkanShader::operator=(VulkanShader &&other) noexcept
+{
+	if (this != &other)
+	{
+		if (shaderModule != VK_NULL_HANDLE)
+		{
+			vkDestroyShaderModule(device, shaderModule, nullptr);
+		}
+
+		device       = other.device;
+		shaderModule = other.shaderModule;
+		stage        = other.stage;
+
+		other.device       = VK_NULL_HANDLE;
+		other.shaderModule = VK_NULL_HANDLE;
+		other.stage        = ShaderStage::VERTEX;
+	}
+	return *this;
+}
+
 }        // namespace RHI

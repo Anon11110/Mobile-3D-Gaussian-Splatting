@@ -25,4 +25,30 @@ VulkanSemaphore::~VulkanSemaphore()
 	}
 }
 
+VulkanSemaphore::VulkanSemaphore(VulkanSemaphore &&other) noexcept :
+    device(other.device),
+    semaphore(other.semaphore)
+{
+	other.device    = VK_NULL_HANDLE;
+	other.semaphore = VK_NULL_HANDLE;
+}
+
+VulkanSemaphore &VulkanSemaphore::operator=(VulkanSemaphore &&other) noexcept
+{
+	if (this != &other)
+	{
+		if (semaphore != VK_NULL_HANDLE)
+		{
+			vkDestroySemaphore(device, semaphore, nullptr);
+		}
+
+		device    = other.device;
+		semaphore = other.semaphore;
+
+		other.device    = VK_NULL_HANDLE;
+		other.semaphore = VK_NULL_HANDLE;
+	}
+	return *this;
+}
+
 }        // namespace RHI

@@ -40,6 +40,11 @@ class VulkanBuffer : public IRHIBuffer
 	VulkanBuffer(VmaAllocator allocator, const BufferDesc &desc);
 	~VulkanBuffer() override;
 
+	VulkanBuffer(const VulkanBuffer &)            = delete;
+	VulkanBuffer &operator=(const VulkanBuffer &) = delete;
+	VulkanBuffer(VulkanBuffer &&other) noexcept;
+	VulkanBuffer &operator=(VulkanBuffer &&other) noexcept;
+
 	void  *Map() override;
 	void   Unmap() override;
 	size_t GetSize() const override;
@@ -72,6 +77,11 @@ class VulkanTexture : public IRHITexture
 	              uint32_t height, bool ownedBySwapchain = false);
 	VulkanTexture(VkDevice device, VmaAllocator allocator, const TextureDesc &desc);
 	~VulkanTexture() override;
+
+	VulkanTexture(const VulkanTexture &)            = delete;
+	VulkanTexture &operator=(const VulkanTexture &) = delete;
+	VulkanTexture(VulkanTexture &&other) noexcept;
+	VulkanTexture &operator=(VulkanTexture &&other) noexcept;
 
 	uint32_t GetWidth() const override
 	{
@@ -125,6 +135,11 @@ class VulkanTextureView : public IRHITextureView
 	VulkanTextureView(VkDevice device, const TextureViewDesc &desc);
 	~VulkanTextureView() override;
 
+	VulkanTextureView(const VulkanTextureView &)            = delete;
+	VulkanTextureView &operator=(const VulkanTextureView &) = delete;
+	VulkanTextureView(VulkanTextureView &&other) noexcept;
+	VulkanTextureView &operator=(VulkanTextureView &&other) noexcept;
+
 	IRHITexture *GetTexture() override
 	{
 		return texture;
@@ -170,6 +185,11 @@ class VulkanShader : public IRHIShader
 	VulkanShader(VkDevice device, const ShaderDesc &desc);
 	~VulkanShader() override;
 
+	VulkanShader(const VulkanShader &)            = delete;
+	VulkanShader &operator=(const VulkanShader &) = delete;
+	VulkanShader(VulkanShader &&other) noexcept;
+	VulkanShader &operator=(VulkanShader &&other) noexcept;
+
 	ShaderStage GetStage() const override
 	{
 		return stage;
@@ -192,6 +212,11 @@ class VulkanPipeline : public IRHIPipeline
   public:
 	VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc);
 	~VulkanPipeline() override;
+
+	VulkanPipeline(const VulkanPipeline &)            = delete;
+	VulkanPipeline &operator=(const VulkanPipeline &) = delete;
+	VulkanPipeline(VulkanPipeline &&other) noexcept;
+	VulkanPipeline &operator=(VulkanPipeline &&other) noexcept;
 
 	VkPipeline GetHandle() const
 	{
@@ -225,6 +250,11 @@ class VulkanCommandList : public IRHICommandList
 	                  PFN_vkCmdBeginRenderingKHR beginFunc,
 	                  PFN_vkCmdEndRenderingKHR   endFunc);
 	~VulkanCommandList() override;
+
+	VulkanCommandList(const VulkanCommandList &)            = delete;
+	VulkanCommandList &operator=(const VulkanCommandList &) = delete;
+	VulkanCommandList(VulkanCommandList &&)                 = delete;
+	VulkanCommandList &operator=(VulkanCommandList &&)      = delete;
 
 	void Begin() override;
 	void End() override;
@@ -285,6 +315,11 @@ class VulkanSwapchain : public IRHISwapchain
 	                VkQueue graphicsQueue, const SwapchainDesc &desc);
 	~VulkanSwapchain() override;
 
+	VulkanSwapchain(const VulkanSwapchain &)            = delete;
+	VulkanSwapchain &operator=(const VulkanSwapchain &) = delete;
+	VulkanSwapchain(VulkanSwapchain &&)                 = delete;
+	VulkanSwapchain &operator=(VulkanSwapchain &&)      = delete;
+
 	SwapchainStatus  AcquireNextImage(uint32_t &imageIndex, IRHISemaphore *signalSemaphore = nullptr) override;
 	SwapchainStatus  Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr) override;
 	IRHITexture     *GetBackBuffer(uint32_t index) override;
@@ -306,6 +341,11 @@ class VulkanSemaphore : public IRHISemaphore
 	VulkanSemaphore(VkDevice device);
 	~VulkanSemaphore() override;
 
+	VulkanSemaphore(const VulkanSemaphore &)            = delete;
+	VulkanSemaphore &operator=(const VulkanSemaphore &) = delete;
+	VulkanSemaphore(VulkanSemaphore &&other) noexcept;
+	VulkanSemaphore &operator=(VulkanSemaphore &&other) noexcept;
+
 	VkSemaphore GetHandle() const
 	{
 		return semaphore;
@@ -322,6 +362,11 @@ class VulkanFence : public IRHIFence
   public:
 	VulkanFence(VkDevice device, bool signaled = false);
 	~VulkanFence() override;
+
+	VulkanFence(const VulkanFence &)            = delete;
+	VulkanFence &operator=(const VulkanFence &) = delete;
+	VulkanFence(VulkanFence &&other) noexcept;
+	VulkanFence &operator=(VulkanFence &&other) noexcept;
 
 	void Wait(uint64_t timeout = UINT64_MAX) override;
 	void Reset() override;
@@ -344,6 +389,11 @@ class VulkanDescriptorSetLayout : public IRHIDescriptorSetLayout
   public:
 	VulkanDescriptorSetLayout(VkDevice device, const DescriptorSetLayoutDesc &desc);
 	~VulkanDescriptorSetLayout() override;
+
+	VulkanDescriptorSetLayout(const VulkanDescriptorSetLayout &)            = delete;
+	VulkanDescriptorSetLayout &operator=(const VulkanDescriptorSetLayout &) = delete;
+	VulkanDescriptorSetLayout(VulkanDescriptorSetLayout &&other) noexcept;
+	VulkanDescriptorSetLayout &operator=(VulkanDescriptorSetLayout &&other) noexcept;
 
 	VkDescriptorSetLayout GetHandle() const
 	{
@@ -368,6 +418,11 @@ class VulkanDescriptorSet : public IRHIDescriptorSet
 	VulkanDescriptorSet(VkDevice device, VulkanDescriptorSetLayout *layout, VkDescriptorPool pool, VkDescriptorSet set);
 	~VulkanDescriptorSet() override;
 
+	VulkanDescriptorSet(const VulkanDescriptorSet &)            = delete;
+	VulkanDescriptorSet &operator=(const VulkanDescriptorSet &) = delete;
+	VulkanDescriptorSet(VulkanDescriptorSet &&other) noexcept;
+	VulkanDescriptorSet &operator=(VulkanDescriptorSet &&other) noexcept;
+
 	void BindBuffer(uint32_t binding, const BufferBinding &bufferBinding) override;
 	void BindTexture(uint32_t binding, const TextureBinding &textureBinding) override;
 
@@ -387,6 +442,11 @@ class VulkanSampler : public IRHISampler
   public:
 	VulkanSampler(VkDevice device);
 	~VulkanSampler() override;
+
+	VulkanSampler(const VulkanSampler &)            = delete;
+	VulkanSampler &operator=(const VulkanSampler &) = delete;
+	VulkanSampler(VulkanSampler &&other) noexcept;
+	VulkanSampler &operator=(VulkanSampler &&other) noexcept;
 
 	VkSampler GetHandle() const
 	{
