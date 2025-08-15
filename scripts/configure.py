@@ -352,9 +352,8 @@ def main():
     term.success("Configuration completed successfully")
     term.sep()
     term.info("Next steps:")
-    print(f"  cd {os.path.relpath(build_dir, start=os.getcwd())}")
 
-    # Determine generator to tailor build instructions
+    # Print a single copy-pasteable command for building
     generator = None
     try:
         g_index = config.cmake_args.index("-G")
@@ -371,19 +370,23 @@ def main():
         or ("multi-config" in generator_lower)
     )
 
+    abs_build_dir = str(build_dir.resolve())
+
     if is_multi_config:
-        print(f"  cmake --build . --config {args.build_type} --parallel")
+        print(
+            f"cd {abs_build_dir} && cmake --build . --config {args.build_type} --parallel"
+        )
         if "visual studio" in generator_lower or platform.system().lower() == "windows":
             sln_path = build_dir / f"{project_name}.sln"
             term.info(f"Or open the generated .sln in Visual Studio:")
-            print(f'  start "{sln_path}"')
+            print(f'start "{sln_path}"')
         if "xcode" in generator_lower or platform.system().lower() == "darwin":
             xcodeproj_path = build_dir / f"{project_name}.xcodeproj"
             term.info(f"Or open the generated .xcodeproj in Xcode:")
-            print(f'  open "{xcodeproj_path}"')
+            print(f'open "{xcodeproj_path}"')
     else:
         # Single-config generators (e.g., Ninja, Unix Makefiles) use CMAKE_BUILD_TYPE set at configure time
-        print("  cmake --build . --parallel")
+        print(f"cd {abs_build_dir} && cmake --build . --parallel")
 
     return 0
 

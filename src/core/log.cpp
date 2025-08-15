@@ -7,61 +7,76 @@
 namespace msplat::log
 {
 
-// Default console backend implementation
-class ConsoleBackend : public Logger::Backend
+// Default ANSI color scheme implementation
+const char *Logger::DefaultColorScheme::getColorCode(Severity severity) const
 {
-  public:
-	void write(Severity severity, const std::string &message) override
+	switch (severity)
 	{
-		auto now    = std::chrono::system_clock::now();
-		auto time_t = std::chrono::system_clock::to_time_t(now);
-		auto ms     = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      now.time_since_epoch()) %
-		          1000;
-
-		std::ostringstream timestamp;
-		timestamp << std::put_time(std::localtime(&time_t), "%H:%M:%S");
-		timestamp << '.' << std::setfill('0') << std::setw(3) << ms.count();
-
-		const char *severityStr = "";
-		const char *colorCode   = "";
-		const char *resetColor  = "\033[0m";
-
-		switch (severity)
-		{
-			case Severity::Debug:
-				severityStr = "DEBUG";
-				colorCode   = "\033[36m";        // Cyan
-				break;
-			case Severity::Info:
-				severityStr = "INFO";
-				colorCode   = "\033[37m";        // White
-				break;
-			case Severity::Warning:
-				severityStr = "WARN";
-				colorCode   = "\033[33m";        // Yellow
-				break;
-			case Severity::Error:
-				severityStr = "ERROR";
-				colorCode   = "\033[31m";        // Red
-				break;
-			case Severity::Fatal:
-				severityStr = "FATAL";
-				colorCode   = "\033[35m";        // Magenta
-				break;
-			default:
-				severityStr = "UNKNOWN";
-				colorCode   = "";
-				resetColor  = "";
-				break;
-		}
-
-		std::ostream &output = (severity >= Severity::Error) ? std::cerr : std::cout;
-		output << "[" << timestamp.str() << "] "
-		       << colorCode << "[" << severityStr << "]" << resetColor
-		       << " " << message << std::endl;
+		case Severity::Debug:
+			return "\033[36m";        // Cyan
+		case Severity::Info:
+			return "\033[37m";        // White
+		case Severity::Warning:
+			return "\033[33m";        // Yellow
+		case Severity::Error:
+			return "\033[31m";        // Red
+		case Severity::Fatal:
+			return "\033[35m";        // Magenta
+		default:
+			return "";
 	}
-};
+}
+
+const char *Logger::DefaultColorScheme::getResetCode() const
+{
+	return "\033[0m";
+}
+
+// ConsoleBackend implementation
+Logger::ConsoleBackend::ConsoleBackend() :
+    m_colorScheme(std::make_unique<Logger::DefaultColorScheme>())
+{}
+
+void Logger::ConsoleBackend::write(Severity severity, const std::string &message)
+{
+	auto now    = std::chrono::system_clock::now();
+	auto time_t = std::chrono::system_clock::to_time_t(now);
+	auto ms     = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now.time_since_epoch()) %
+	          1000;
+
+	std::ostringstream timestamp;
+	timestamp << std::put_time(std::localtime(&time_t), "%H:%M:%S");
+	timestamp << '.' << std::setfill('0') << std::setw(3) << ms.count();
+
+	const char *severityStr = getSeverityString(severity);
+	const char *colorCode   = m_colorScheme->getColorCode(severity);
+	const char *resetColor  = m_colorScheme->getResetCode();
+
+	std::ostream &output = (severity >= Severity::Error) ? std::cerr : std::cout;
+	output << "[" << timestamp.str() << "] "
+	       << colorCode << "[" << severityStr << "]" << resetColor
+	       << " " << message << std::endl;
+}
+
+const char *Logger::ConsoleBackend::getSeverityString(Severity severity) const
+{
+	switch (severity)
+	{
+		case Severity::Debug:
+			return "DEBUG";
+		case Severity::Info:
+			return "INFO";
+		case Severity::Warning:
+			return "WARN";
+		case Severity::Error:
+			return "ERROR";
+		case Severity::Fatal:
+			return "FATAL";
+		default:
+			return "UNKNOWN";
+	}
+}
 
 Logger &Logger::getInstance()
 {

@@ -26,6 +26,23 @@ class Logger
 
 	void log(Severity severity, const std::string &message);
 
+	// Color management for console output
+	class ColorScheme
+	{
+	  public:
+		virtual ~ColorScheme()                                    = default;
+		virtual const char *getColorCode(Severity severity) const = 0;
+		virtual const char *getResetCode() const                  = 0;
+	};
+
+	// Default ANSI color scheme
+	class DefaultColorScheme : public ColorScheme
+	{
+	  public:
+		const char *getColorCode(Severity severity) const override;
+		const char *getResetCode() const override;
+	};
+
 	// Extensibility points for future backends
 	class Backend
 	{
@@ -35,6 +52,18 @@ class Logger
 	};
 
 	void setBackend(std::unique_ptr<Backend> backend);
+
+	// Default console backend implementation
+	class ConsoleBackend : public Backend
+	{
+	  public:
+		ConsoleBackend();
+		void write(Severity severity, const std::string &message) override;
+
+	  private:
+		const char                  *getSeverityString(Severity severity) const;
+		std::unique_ptr<ColorScheme> m_colorScheme;
+	};
 
   private:
 	Logger()                          = default;

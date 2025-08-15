@@ -16,12 +16,24 @@ set(CORE_HEADERS
     
     # Logging headers
     ${CMAKE_SOURCE_DIR}/include/core/log.h
+    
+    # Timer headers
+    ${CMAKE_SOURCE_DIR}/include/core/timer.h
+    
+    # VFS headers
+    ${CMAKE_SOURCE_DIR}/include/core/vfs.h
 )
 
 set(CORE_SOURCES
     # Math sources (header-only for now)
     # Logging sources
     ${CMAKE_SOURCE_DIR}/src/core/log.cpp
+    
+    # Timer sources
+    ${CMAKE_SOURCE_DIR}/src/core/timer.cpp
+    
+    # VFS sources
+    ${CMAKE_SOURCE_DIR}/src/core/vfs.cpp
     
     # Add a dummy source file to create the library
     ${CMAKE_SOURCE_DIR}/src/core/core.cpp

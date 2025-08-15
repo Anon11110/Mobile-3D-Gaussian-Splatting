@@ -1,13 +1,13 @@
-#include <chrono>
 #include <cmath>
 #include <cstring>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <vector>
 
 #include "core/log.h"
 #include "core/math/math.h"
+#include "core/timer.h"
+#include "core/vfs.h"
 #include "rhi.h"
 
 #include <GLFW/glfw3.h>
@@ -29,19 +29,7 @@ struct UniformBufferObject
 
 std::vector<uint8_t> LoadShaderCode(const std::string &filename)
 {
-	std::ifstream file(filename, std::ios::binary | std::ios::ate);
-	if (!file.is_open())
-	{
-		LOG_ERROR("Failed to open shader file: " + filename);
-		throw std::runtime_error("Failed to open shader file: " + filename);
-	}
-
-	size_t               fileSize = file.tellg();
-	std::vector<uint8_t> code(fileSize);
-	file.seekg(0);
-	file.read(reinterpret_cast<char *>(code.data()), fileSize);
-	LOG_DEBUG("Successfully loaded shader: " + filename + " (" + std::to_string(fileSize) + " bytes)");
-	return code;
+	return vfs::readFile(filename);
 }
 
 int main()
@@ -190,9 +178,9 @@ int main()
 
 		// Main loop
 		LOG_INFO("Starting render loop");
-		auto     applicationStartTime = std::chrono::high_resolution_clock::now();
-		auto     fpsStartTime         = std::chrono::high_resolution_clock::now();
-		uint32_t frameCount           = 0;
+		timer::Timer      applicationTimer;
+		timer::FPSCounter fpsCounter(1.0);
+		applicationTimer.start();
 
 		while (!glfwWindowShouldClose(window))
 		{
@@ -203,8 +191,7 @@ int main()
 			inFlightFence->Reset();
 
 			// Update uniform buffer with animation
-			auto  currentTime = std::chrono::high_resolution_clock::now();
-			float time        = std::chrono::duration<float>(currentTime - applicationStartTime).count();
+			float time = static_cast<float>(applicationTimer.elapsedSeconds());
 
 			UniformBufferObject ubo{};
 			// Simple identity matrix for MVP (no transformation)
@@ -378,14 +365,12 @@ int main()
 			}
 
 			// FPS counter
-			frameCount++;
-			currentTime      = std::chrono::high_resolution_clock::now();
-			float fpsElapsed = std::chrono::duration<float>(currentTime - fpsStartTime).count();
-			if (fpsElapsed >= 1.0f)
+			fpsCounter.frame();
+			if (fpsCounter.shouldUpdate())
 			{
-				LOG_INFO("FPS: " + std::to_string(static_cast<int>(frameCount / fpsElapsed + 0.5f)));
-				frameCount   = 0;
-				fpsStartTime = currentTime;
+				double fps = fpsCounter.getFPS();
+				LOG_INFO("FPS: " + std::to_string(static_cast<int>(fps + 0.5)));
+				fpsCounter.reset();
 			}
 		}
 
