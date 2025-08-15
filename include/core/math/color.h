@@ -2,7 +2,6 @@
 
 #include "basics.h"
 #include "vector.h"
-#include <algorithm>
 #include <cmath>
 
 namespace core
@@ -184,7 +183,7 @@ inline Color4 alphaBlend(const Color4 &source, const Color4 &dest)
 inline Color3 temperatureToRgb(float temperature)
 {
 	// Temperature in Kelvin, typically 1000-12000
-	temperature = clamp(temperature, 1000.0f, 12000.0f) / 100.0f;
+	temperature = glm::clamp(temperature, 1000.0f, 12000.0f) / 100.0f;
 
 	Color3 rgb;
 
@@ -196,7 +195,7 @@ inline Color3 temperatureToRgb(float temperature)
 	else
 	{
 		rgb.r = 1.292936f * std::pow(temperature - 60.0f, -0.1332047f);
-		rgb.r = clamp(rgb.r, 0.0f, 1.0f);
+		rgb.r = glm::clamp(rgb.r, 0.0f, 1.0f);
 	}
 
 	// Green
@@ -208,7 +207,7 @@ inline Color3 temperatureToRgb(float temperature)
 	{
 		rgb.g = 1.292936f * std::pow(temperature - 60.0f, -0.0755148f);
 	}
-	rgb.g = clamp(rgb.g, 0.0f, 1.0f);
+	rgb.g = glm::clamp(rgb.g, 0.0f, 1.0f);
 
 	// Blue
 	if (temperature >= 66.0f)
@@ -222,7 +221,7 @@ inline Color3 temperatureToRgb(float temperature)
 	else
 	{
 		rgb.b = 0.543206789f * std::log(temperature - 10.0f) - 1.19625408f;
-		rgb.b = clamp(rgb.b, 0.0f, 1.0f);
+		rgb.b = glm::clamp(rgb.b, 0.0f, 1.0f);
 	}
 
 	return rgb;
@@ -237,7 +236,7 @@ inline float luminance(const Color3 &color)
 // Color distance
 inline float colorDistance(const Color3 &a, const Color3 &b)
 {
-	return length(a - b);
+	return glm::length(a - b);
 }
 
 // Premultiplied alpha operations

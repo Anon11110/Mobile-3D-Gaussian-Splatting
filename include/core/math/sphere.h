@@ -4,7 +4,6 @@
 #include "basics.h"
 #include "vector.h"
 #include <algorithm>
-#include <limits>
 
 namespace core
 {
@@ -43,7 +42,7 @@ class Sphere
 	// Expand to include point
 	void expandToInclude(const vec3 &point)
 	{
-		float dist = core::math::distance(center, point);
+		float dist = glm::distance(center, point);
 		if (dist > radius)
 		{
 			radius = dist;
@@ -53,7 +52,7 @@ class Sphere
 	// Expand to include another sphere
 	void expandToInclude(const Sphere &other)
 	{
-		float dist      = core::math::distance(center, other.center);
+		float dist      = glm::distance(center, other.center);
 		float newRadius = std::max(radius, dist + other.radius);
 
 		if (newRadius > radius)
@@ -62,11 +61,11 @@ class Sphere
 			if (dist + other.radius > radius && dist + radius > other.radius)
 			{
 				// Neither sphere contains the other
-				vec3 direction = core::math::normalize(other.center - center);
+				vec3 direction = glm::normalize(other.center - center);
 				vec3 point1    = center - direction * radius;
 				vec3 point2    = other.center + direction * other.radius;
 				center         = (point1 + point2) * 0.5f;
-				radius         = core::math::distance(center, point1);
+				radius         = glm::distance(center, point1);
 			}
 			else if (dist + other.radius > radius)
 			{
@@ -87,18 +86,18 @@ class Sphere
 	// Contains tests
 	bool contains(const vec3 &point) const
 	{
-		return core::math::distance2(center, point) <= radius * radius;
+		return distance2(center, point) <= radius * radius;
 	}
 
 	bool contains(const Sphere &other) const
 	{
-		return core::math::distance(center, other.center) + other.radius <= radius;
+		return glm::distance(center, other.center) + other.radius <= radius;
 	}
 
 	// Intersection test
 	bool intersects(const Sphere &other) const
 	{
-		float dist = core::math::distance(center, other.center);
+		float dist = glm::distance(center, other.center);
 		return dist <= (radius + other.radius);
 	}
 
@@ -110,13 +109,13 @@ class Sphere
 	// Distance from point to sphere surface
 	float distanceToPoint(const vec3 &point) const
 	{
-		return core::math::distance(center, point) - radius;
+		return glm::distance(center, point) - radius;
 	}
 
 	// Get point on sphere surface
 	vec3 pointOnSurface(const vec3 &direction) const
 	{
-		return center + core::math::normalize(direction) * radius;
+		return center + glm::normalize(direction) * radius;
 	}
 
 	// Get AABB that contains this sphere
@@ -140,7 +139,7 @@ class Sphere
 
 	bool operator==(const Sphere &other) const
 	{
-		return core::math::equal(center, other.center) &&
+		return glm::all(glm::epsilonEqual(center, other.center, glm::epsilon<float>())) &&
 		       std::abs(radius - other.radius) < glm::epsilon<float>();
 	}
 
@@ -164,7 +163,7 @@ class Sphere
 		float maxDistSq = 0.0f;
 		for (size_t i = 0; i < count; ++i)
 		{
-			maxDistSq = std::max(maxDistSq, core::math::distance2(center, points[i]));
+			maxDistSq = std::max(maxDistSq, distance2(center, points[i]));
 		}
 
 		return Sphere(center, std::sqrt(maxDistSq));
@@ -175,7 +174,7 @@ class Sphere
 		if (!aabb.isValid())
 			return Sphere();
 		vec3  center = aabb.center();
-		float radius = core::math::length(aabb.extents());
+		float radius = glm::length(aabb.extents());
 		return Sphere(center, radius);
 	}
 

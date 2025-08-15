@@ -1,7 +1,6 @@
 #pragma once
 
 #include "vector.h"
-#include <algorithm>
 #include <limits>
 
 namespace core
@@ -72,8 +71,8 @@ class AABB
 	// Expand to include point
 	void expandToInclude(const vec3 &point)
 	{
-		min = core::math::min(min, point);
-		max = core::math::max(max, point);
+		min = glm::min(min, point);
+		max = glm::max(max, point);
 	}
 
 	// Expand to include another AABB
@@ -81,8 +80,8 @@ class AABB
 	{
 		if (!other.isValid())
 			return;
-		min = core::math::min(min, other.min);
-		max = core::math::max(max, other.max);
+		min = glm::min(min, other.min);
+		max = glm::max(max, other.max);
 	}
 
 	// Expand by a margin
@@ -125,20 +124,20 @@ class AABB
 	{
 		if (!intersects(other))
 			return AABB();        // Invalid AABB
-		return AABB(core::math::max(min, other.min), core::math::min(max, other.max));
+		return AABB(glm::max(min, other.min), glm::min(max, other.max));
 	}
 
 	// Distance from point to AABB
 	float distanceToPoint(const vec3 &point) const
 	{
-		vec3 closest = core::math::max(min, core::math::min(point, max));
-		return core::math::distance(point, closest);
+		vec3 closest = glm::max(min, glm::min(point, max));
+		return glm::distance(point, closest);
 	}
 
 	float distanceToPointSquared(const vec3 &point) const
 	{
-		vec3 closest = core::math::max(min, core::math::min(point, max));
-		return core::math::distance2(point, closest);
+		vec3 closest = glm::max(min, glm::min(point, max));
+		return glm::length(point - closest) * glm::length(point - closest);
 	}
 
 	// Get corner point (index 0-7)
@@ -174,7 +173,7 @@ class AABB
 
 	bool operator==(const AABB &other) const
 	{
-		return core::math::equal(min, other.min) && core::math::equal(max, other.max);
+		return glm::all(glm::epsilonEqual(min, other.min, glm::epsilon<float>())) && glm::all(glm::epsilonEqual(max, other.max, glm::epsilon<float>()));
 	}
 
 	bool operator!=(const AABB &other) const

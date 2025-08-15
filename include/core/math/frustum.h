@@ -23,26 +23,26 @@ struct Plane
 	    normal(normal), distance(distance)
 	{}
 	Plane(const vec3 &normal, const vec3 &point) :
-	    normal(normal), distance(core::math::dot(normal, point))
+	    normal(normal), distance(glm::dot(normal, point))
 	{}
 	Plane(const vec3 &a, const vec3 &b, const vec3 &c)
 	{
 		vec3 ab  = b - a;
 		vec3 ac  = c - a;
-		normal   = core::math::normalize(core::math::cross(ab, ac));
-		distance = core::math::dot(normal, a);
+		normal   = glm::normalize(glm::cross(ab, ac));
+		distance = glm::dot(normal, a);
 	}
 
 	// Distance from point to plane (positive = in front)
 	float distanceToPoint(const vec3 &point) const
 	{
-		return core::math::dot(normal, point) - distance;
+		return glm::dot(normal, point) - distance;
 	}
 
 	// Normalize the plane equation
 	void normalize()
 	{
-		float len = core::math::length(normal);
+		float len = glm::length(normal);
 		normal /= len;
 		distance /= len;
 	}

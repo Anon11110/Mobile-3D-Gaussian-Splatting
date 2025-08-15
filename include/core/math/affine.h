@@ -111,9 +111,9 @@ class Transform
 		result.position = vec3(matrix[3]);
 
 		// Extract scale
-		result.scale.x = core::math::length(vec3(matrix[0]));
-		result.scale.y = core::math::length(vec3(matrix[1]));
-		result.scale.z = core::math::length(vec3(matrix[2]));
+		result.scale.x = glm::length(vec3(matrix[0]));
+		result.scale.y = glm::length(vec3(matrix[1]));
+		result.scale.z = glm::length(vec3(matrix[2]));
 
 		// Extract rotation (normalize the matrix first)
 		mat3 rotMatrix = mat3(
