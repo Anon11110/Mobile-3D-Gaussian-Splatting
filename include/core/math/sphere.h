@@ -5,9 +5,7 @@
 #include "vector.h"
 #include <algorithm>
 
-namespace core
-{
-namespace math
+namespace msplat::math
 {
 
 // Bounding Sphere
@@ -184,5 +182,4 @@ class Sphere
 	}
 };
 
-}        // namespace math
-}        // namespace core
+}        // namespace msplat::math

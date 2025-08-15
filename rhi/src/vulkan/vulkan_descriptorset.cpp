@@ -3,7 +3,7 @@
 
 #include "vulkan_backend.h"
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 // VulkanDescriptorSetLayout implementation
@@ -234,4 +234,4 @@ VulkanSampler &VulkanSampler::operator=(VulkanSampler &&other) noexcept
 	return *this;
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

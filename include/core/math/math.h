@@ -27,12 +27,3 @@
 
 // Color utilities
 #include "color.h"
-
-// Convenience namespace alias
-namespace core
-{
-using namespace math;
-}
-
-// Common type aliases for convenience
-using namespace core::math;

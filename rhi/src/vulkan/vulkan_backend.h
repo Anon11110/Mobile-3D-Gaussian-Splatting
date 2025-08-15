@@ -8,7 +8,7 @@
 
 #include "rhi.h"
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 // Forward declarations of Vulkan classes
@@ -481,4 +481,4 @@ void                  GetVulkanStagesAndAccess(ResourceState state, PipelineScop
                                                VkPipelineStageFlags &stages, VkAccessFlags &access);
 VkImageLayout         ResourceStateToImageLayout(ResourceState state);
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

@@ -4,9 +4,7 @@
 #include "quaternion.h"
 #include "vector.h"
 
-namespace core
-{
-namespace math
+namespace msplat::math
 {
 
 // Affine transform class
@@ -155,5 +153,4 @@ inline Transform makeScale(float scale)
 	return makeScale(vec3(scale));
 }
 
-}        // namespace math
-}        // namespace core
+}        // namespace msplat::math

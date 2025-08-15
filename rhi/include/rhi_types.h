@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 
-namespace RHI
+namespace rhi
 {
 
 // Forward declarations
@@ -680,4 +680,4 @@ struct DrawIndexedIndirectCommand
 	uint32_t firstInstance;
 };
 
-}        // namespace RHI
+}        // namespace rhi

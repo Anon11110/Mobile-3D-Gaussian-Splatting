@@ -2,7 +2,7 @@
 
 #include "vulkan_backend.h"
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, VkImage image, VkFormat format, uint32_t width,
@@ -247,4 +247,4 @@ VulkanTexture &VulkanTexture::operator=(VulkanTexture &&other) noexcept
 	return *this;
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

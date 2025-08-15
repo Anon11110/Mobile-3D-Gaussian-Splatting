@@ -2,7 +2,7 @@
 
 #include "vulkan_backend.h"
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 VulkanSemaphore::VulkanSemaphore(VkDevice device) :
@@ -51,4 +51,4 @@ VulkanSemaphore &VulkanSemaphore::operator=(VulkanSemaphore &&other) noexcept
 	return *this;
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

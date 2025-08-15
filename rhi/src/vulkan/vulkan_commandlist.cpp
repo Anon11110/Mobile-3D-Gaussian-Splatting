@@ -2,7 +2,7 @@
 
 #include "vulkan_backend.h"
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool,
@@ -483,4 +483,4 @@ void VulkanCommandList::Barrier(
 	}
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

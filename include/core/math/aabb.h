@@ -3,9 +3,7 @@
 #include "vector.h"
 #include <limits>
 
-namespace core
-{
-namespace math
+namespace msplat::math
 {
 
 // Axis-Aligned Bounding Box
@@ -214,5 +212,4 @@ class AABB
 	}
 };
 
-}        // namespace math
-}        // namespace core
+}        // namespace msplat::math

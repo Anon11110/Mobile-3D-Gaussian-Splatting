@@ -3,9 +3,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/epsilon.hpp>
 
-namespace core
-{
-namespace math
+namespace msplat::math
 {
 
 // 2D vector types
@@ -109,5 +107,4 @@ constexpr bool notEqual(const T &a, const T &b, float epsilon = glm::epsilon<flo
 	return glm::any(glm::epsilonNotEqual(a, b, epsilon));
 }
 
-}        // namespace math
-}        // namespace core
+}        // namespace msplat::math

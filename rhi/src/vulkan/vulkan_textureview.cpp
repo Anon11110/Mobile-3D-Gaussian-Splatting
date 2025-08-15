@@ -2,7 +2,7 @@
 
 #include "vulkan_backend.h"
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 VulkanTextureView::VulkanTextureView(VkDevice device, const TextureViewDesc &desc) :
@@ -116,4 +116,4 @@ uint32_t VulkanTextureView::GetHeight() const
 	return texture->GetHeight() >> baseMipLevel;
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

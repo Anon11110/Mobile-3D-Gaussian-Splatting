@@ -11,17 +11,19 @@
 
 #include <GLFW/glfw3.h>
 
+using namespace msplat;
+
 struct Vertex
 {
-	vec3 position;
-	vec3 color;
+	math::vec3 position;
+	math::vec3 color;
 };
 
 struct UniformBufferObject
 {
-	mat4  mvp;               // MVP matrix
-	float time;              // Animation time
-	float padding[3];        // Alignment padding
+	math::mat4 mvp;               // MVP matrix
+	float      time;              // Animation time
+	float      padding[3];        // Alignment padding
 };
 
 std::vector<uint8_t> LoadShaderCode(const std::string &filename)
@@ -61,36 +63,36 @@ int main()
 	try
 	{
 		// Create RHI device
-		auto device = RHI::CreateRHIDevice();
+		auto device = rhi::CreateRHIDevice();
 
 		// Create swapchain
-		RHI::SwapchainDesc swapchainDesc{};
+		rhi::SwapchainDesc swapchainDesc{};
 		int                fbw, fbh;
 		glfwGetFramebufferSize(window, &fbw, &fbh);
 		swapchainDesc.windowHandle = window;
 		swapchainDesc.width        = static_cast<uint32_t>(fbw);
 		swapchainDesc.height       = static_cast<uint32_t>(fbh);
-		swapchainDesc.format       = RHI::TextureFormat::R8G8B8A8_UNORM;
+		swapchainDesc.format       = rhi::TextureFormat::R8G8B8A8_UNORM;
 		auto swapchain             = device->CreateSwapchain(swapchainDesc);
 
 		// Create vertex buffer
 		Vertex vertices[] = {
-		    {vec3(-0.5f, -0.5f, 0.0f), vec3(1.0f, 0.0f, 0.0f)},
-		    {vec3(0.5f, -0.5f, 0.0f), vec3(0.0f, 1.0f, 0.0f)},
-		    {vec3(0.0f, 0.5f, 0.0f), vec3(0.0f, 0.0f, 1.0f)}};
+		    {math::vec3(-0.5f, -0.5f, 0.0f), math::vec3(1.0f, 0.0f, 0.0f)},
+		    {math::vec3(0.5f, -0.5f, 0.0f), math::vec3(0.0f, 1.0f, 0.0f)},
+		    {math::vec3(0.0f, 0.5f, 0.0f), math::vec3(0.0f, 0.0f, 1.0f)}};
 
-		RHI::BufferDesc vbDesc{};
+		rhi::BufferDesc vbDesc{};
 		vbDesc.size          = sizeof(vertices);
-		vbDesc.usage         = RHI::BufferUsage::VERTEX;
-		vbDesc.resourceUsage = RHI::ResourceUsage::Static;
+		vbDesc.usage         = rhi::BufferUsage::VERTEX;
+		vbDesc.resourceUsage = rhi::ResourceUsage::Static;
 		vbDesc.initialData   = vertices;
 		auto vertexBuffer    = device->CreateBuffer(vbDesc);
 
 		// Create uniform buffer for MVP matrix and animation
-		RHI::BufferDesc ubDesc{};
+		rhi::BufferDesc ubDesc{};
 		ubDesc.size                      = sizeof(UniformBufferObject);
-		ubDesc.usage                     = RHI::BufferUsage::UNIFORM;
-		ubDesc.resourceUsage             = RHI::ResourceUsage::DynamicUpload;
+		ubDesc.usage                     = rhi::BufferUsage::UNIFORM;
+		ubDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
 		ubDesc.hints.persistently_mapped = true;
 		auto uniformBuffer               = device->CreateBuffer(ubDesc);
 
@@ -98,63 +100,63 @@ int main()
 		auto vertexCode   = LoadShaderCode("shaders/compiled/triangle.vert.spv");
 		auto fragmentCode = LoadShaderCode("shaders/compiled/triangle.frag.spv");
 
-		RHI::ShaderDesc vsDesc{};
-		vsDesc.stage      = RHI::ShaderStage::VERTEX;
+		rhi::ShaderDesc vsDesc{};
+		vsDesc.stage      = rhi::ShaderStage::VERTEX;
 		vsDesc.code       = vertexCode.data();
 		vsDesc.codeSize   = vertexCode.size();
 		auto vertexShader = device->CreateShader(vsDesc);
 
-		RHI::ShaderDesc fsDesc{};
-		fsDesc.stage        = RHI::ShaderStage::FRAGMENT;
+		rhi::ShaderDesc fsDesc{};
+		fsDesc.stage        = rhi::ShaderStage::FRAGMENT;
 		fsDesc.code         = fragmentCode.data();
 		fsDesc.codeSize     = fragmentCode.size();
 		auto fragmentShader = device->CreateShader(fsDesc);
 
 		// Create descriptor set layout for uniform buffer
-		RHI::DescriptorSetLayoutDesc layoutDesc{};
-		layoutDesc.bindings      = {{0, RHI::DescriptorType::UNIFORM_BUFFER, 1, RHI::ShaderStageFlags::VERTEX}};
+		rhi::DescriptorSetLayoutDesc layoutDesc{};
+		layoutDesc.bindings      = {{0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::VERTEX}};
 		auto descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 
 		// Create descriptor set and bind uniform buffer
-		auto descriptorSet = device->CreateDescriptorSet(descriptorSetLayout.get(), RHI::QueueType::GRAPHICS);
+		auto descriptorSet = device->CreateDescriptorSet(descriptorSetLayout.get(), rhi::QueueType::GRAPHICS);
 
-		RHI::BufferBinding bufferBinding{};
+		rhi::BufferBinding bufferBinding{};
 		bufferBinding.buffer = uniformBuffer.get();
 		bufferBinding.offset = 0;
 		bufferBinding.range  = 0;        // Whole buffer
-		bufferBinding.type   = RHI::DescriptorType::UNIFORM_BUFFER;
+		bufferBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
 		descriptorSet->BindBuffer(0, bufferBinding);
 
 		// Create pipeline
-		RHI::GraphicsPipelineDesc pipelineDesc{};
+		rhi::GraphicsPipelineDesc pipelineDesc{};
 		pipelineDesc.vertexShader   = vertexShader.get();
 		pipelineDesc.fragmentShader = fragmentShader.get();
 
 		// Vertex layout
 		pipelineDesc.vertexLayout.attributes = {
-		    {0, 0, RHI::VertexFormat::R32G32B32_SFLOAT, 0},        // position
-		    {1, 0, RHI::VertexFormat::R32G32B32_SFLOAT, 12}        // color
+		    {0, 0, rhi::VertexFormat::R32G32B32_SFLOAT, 0},        // position
+		    {1, 0, rhi::VertexFormat::R32G32B32_SFLOAT, 12}        // color
 		};
 		pipelineDesc.vertexLayout.bindings = {{0, sizeof(Vertex), false}};
 
-		pipelineDesc.topology = RHI::PrimitiveTopology::TRIANGLE_LIST;
+		pipelineDesc.topology = rhi::PrimitiveTopology::TRIANGLE_LIST;
 
-		pipelineDesc.rasterizationState.cullMode    = RHI::CullMode::BACK;
-		pipelineDesc.rasterizationState.frontFace   = RHI::FrontFace::CLOCKWISE;
-		pipelineDesc.rasterizationState.polygonMode = RHI::PolygonMode::FILL;
+		pipelineDesc.rasterizationState.cullMode    = rhi::CullMode::BACK;
+		pipelineDesc.rasterizationState.frontFace   = rhi::FrontFace::CLOCKWISE;
+		pipelineDesc.rasterizationState.polygonMode = rhi::PolygonMode::FILL;
 
 		pipelineDesc.colorBlendAttachments.resize(1);
 		pipelineDesc.colorBlendAttachments[0].blendEnable    = false;
 		pipelineDesc.colorBlendAttachments[0].colorWriteMask = 0xF;
 
 		pipelineDesc.targetSignature.colorFormats = {swapchain->GetBackBuffer(0)->GetFormat()};
-		pipelineDesc.targetSignature.depthFormat  = RHI::TextureFormat::UNDEFINED;
-		pipelineDesc.targetSignature.sampleCount  = RHI::SampleCount::COUNT_1;
+		pipelineDesc.targetSignature.depthFormat  = rhi::TextureFormat::UNDEFINED;
+		pipelineDesc.targetSignature.sampleCount  = rhi::SampleCount::COUNT_1;
 
 		pipelineDesc.descriptorSetLayouts = {descriptorSetLayout.get()};
 
-		RHI::PushConstantRange pushConstantRange{};
-		pushConstantRange.stageFlags    = RHI::ShaderStageFlags::VERTEX;
+		rhi::PushConstantRange pushConstantRange{};
+		pushConstantRange.stageFlags    = rhi::ShaderStageFlags::VERTEX;
 		pushConstantRange.offset        = 0;
 		pushConstantRange.size          = 16;        // 4 floats (scale, rotation, etc.)
 		pipelineDesc.pushConstantRanges = {pushConstantRange};
@@ -167,7 +169,7 @@ int main()
 		auto inFlightFence           = device->CreateFence(true);
 
 		// Create command lists for each swapchain image
-		std::vector<std::unique_ptr<RHI::IRHICommandList>> commandLists;
+		std::vector<std::unique_ptr<rhi::IRHICommandList>> commandLists;
 		for (uint32_t i = 0; i < swapchain->GetImageCount(); i++)
 		{
 			commandLists.push_back(device->CreateCommandList());
@@ -196,7 +198,7 @@ int main()
 
 			UniformBufferObject ubo{};
 			// Simple identity matrix for MVP (no transformation)
-			ubo.mvp  = identity();
+			ubo.mvp  = math::identity();
 			ubo.time = time;
 
 			// Update uniform buffer
@@ -206,9 +208,9 @@ int main()
 
 			// Acquire next image
 			uint32_t             imageIndex;
-			RHI::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, imageAvailableSemaphore.get());
+			rhi::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, imageAvailableSemaphore.get());
 
-			if (acquireStatus == RHI::SwapchainStatus::OUT_OF_DATE)
+			if (acquireStatus == rhi::SwapchainStatus::OUT_OF_DATE)
 			{
 				// Swapchain is out of date, need to recreate it
 				int width, height;
@@ -223,7 +225,7 @@ int main()
 				std::fill(imageFirstUse.begin(), imageFirstUse.end(), true);
 				continue;
 			}
-			else if (acquireStatus == RHI::SwapchainStatus::ERROR)
+			else if (acquireStatus == rhi::SwapchainStatus::ERROR)
 			{
 				std::cerr << "Failed to acquire swapchain image" << std::endl;
 				break;
@@ -242,14 +244,14 @@ int main()
 			// Transition swapchain image to render target
 			// First frame: Undefined -> RenderTarget
 			// Subsequent frames: Present -> RenderTarget
-			RHI::TextureTransition swapchainTransition{};
+			rhi::TextureTransition swapchainTransition{};
 			swapchainTransition.texture = backBuffer;
-			swapchainTransition.before  = imageFirstUse[imageIndex] ? RHI::ResourceState::Undefined : RHI::ResourceState::Present;
-			swapchainTransition.after   = RHI::ResourceState::RenderTarget;
+			swapchainTransition.before  = imageFirstUse[imageIndex] ? rhi::ResourceState::Undefined : rhi::ResourceState::Present;
+			swapchainTransition.after   = rhi::ResourceState::RenderTarget;
 
 			cmdList->Barrier(
-			    RHI::PipelineScope::Graphics,
-			    RHI::PipelineScope::Graphics,
+			    rhi::PipelineScope::Graphics,
+			    rhi::PipelineScope::Graphics,
 			    {},
 			    {swapchainTransition},
 			    {});
@@ -258,7 +260,7 @@ int main()
 			imageFirstUse[imageIndex] = false;
 
 			// Begin rendering with dynamic rendering
-			RHI::RenderingInfo renderingInfo{};
+			rhi::RenderingInfo renderingInfo{};
 			renderingInfo.renderAreaX      = 0;
 			renderingInfo.renderAreaY      = 0;
 			renderingInfo.renderAreaWidth  = backBufferWidth;
@@ -266,10 +268,10 @@ int main()
 			renderingInfo.layerCount       = 1;
 
 			// Setup color attachment
-			RHI::ColorAttachment colorAttachment{};
+			rhi::ColorAttachment colorAttachment{};
 			colorAttachment.view       = swapchain->GetBackBufferView(imageIndex);
-			colorAttachment.loadOp     = RHI::LoadOp::CLEAR;
-			colorAttachment.storeOp    = RHI::StoreOp::STORE;
+			colorAttachment.loadOp     = rhi::LoadOp::CLEAR;
+			colorAttachment.storeOp    = rhi::StoreOp::STORE;
 			colorAttachment.clearValue = {{0.1f, 0.1f, 0.1f, 1.0f}};
 			renderingInfo.colorAttachments.push_back(colorAttachment);
 
@@ -286,27 +288,27 @@ int main()
 
 			// Calculate projected NDC centroid of the triangle vertices
 			// Triangle vertices in object space
-			vec3 vertices_obj[3] = {
-			    vec3(-0.5f, -0.5f, 0.0f),
-			    vec3(0.5f, -0.5f, 0.0f),
-			    vec3(0.0f, 0.5f, 0.0f)};
+			math::vec3 vertices_obj[3] = {
+			    math::vec3(-0.5f, -0.5f, 0.0f),
+			    math::vec3(0.5f, -0.5f, 0.0f),
+			    math::vec3(0.0f, 0.5f, 0.0f)};
 
-			vec2 ndc_sum(0.0f);
+			math::vec2 ndc_sum(0.0f);
 
 			for (int i = 0; i < 3; i++)
 			{
-				const vec3 &vertex = vertices_obj[i];
+				const math::vec3 &vertex = vertices_obj[i];
 
 				// clip = MVP * [x y z 1]^T
-				vec4 clip = ubo.mvp * vec4(vertex, 1.0f);
+				math::vec4 clip = ubo.mvp * math::vec4(vertex, 1.0f);
 
 				// NDC per-vertex
-				vec2 ndc = vec2(clip) / clip.w;
+				math::vec2 ndc = math::vec2(clip) / clip.w;
 				ndc_sum += ndc;
 			}
 
 			// Average NDC = true screen-space centroid under perspective
-			vec2 center_ndc = ndc_sum / 3.0f;
+			math::vec2 center_ndc = ndc_sum / 3.0f;
 
 			float aspect = static_cast<float>(backBufferWidth) / static_cast<float>(backBufferHeight);
 
@@ -316,7 +318,7 @@ int main()
 			    time * 0.5f,         // rotation in radians
 			    aspect               // aspect ratio
 			};
-			cmdList->PushConstants(RHI::ShaderStageFlags::VERTEX, 0, sizeof(pushData), pushData);
+			cmdList->PushConstants(rhi::ShaderStageFlags::VERTEX, 0, sizeof(pushData), pushData);
 
 			// Draw triangle
 			cmdList->Draw(3);
@@ -324,12 +326,12 @@ int main()
 			cmdList->EndRendering();
 
 			// Transition swapchain image from render target to present
-			swapchainTransition.before = RHI::ResourceState::RenderTarget;
-			swapchainTransition.after  = RHI::ResourceState::Present;
+			swapchainTransition.before = rhi::ResourceState::RenderTarget;
+			swapchainTransition.after  = rhi::ResourceState::Present;
 
 			cmdList->Barrier(
-			    RHI::PipelineScope::Graphics,
-			    RHI::PipelineScope::Graphics,
+			    rhi::PipelineScope::Graphics,
+			    rhi::PipelineScope::Graphics,
 			    {},
 			    {swapchainTransition},
 			    {});
@@ -337,14 +339,14 @@ int main()
 			cmdList->End();
 
 			// Submit
-			RHI::IRHICommandList *cmdListPtr = cmdList.get();
+			rhi::IRHICommandList *cmdListPtr = cmdList.get();
 			device->SubmitCommandLists(&cmdListPtr, 1, imageAvailableSemaphore.get(), renderFinishedSemaphore.get(),
 			                           inFlightFence.get());
 
 			// Present
-			RHI::SwapchainStatus presentStatus = swapchain->Present(imageIndex, renderFinishedSemaphore.get());
+			rhi::SwapchainStatus presentStatus = swapchain->Present(imageIndex, renderFinishedSemaphore.get());
 
-			if (presentStatus == RHI::SwapchainStatus::OUT_OF_DATE || presentStatus == RHI::SwapchainStatus::SUBOPTIMAL)
+			if (presentStatus == rhi::SwapchainStatus::OUT_OF_DATE || presentStatus == rhi::SwapchainStatus::SUBOPTIMAL)
 			{
 				// Swapchain needs recreation on next frame
 				int width, height;
@@ -357,7 +359,7 @@ int main()
 				swapchain->Resize(width, height);
 				std::fill(imageFirstUse.begin(), imageFirstUse.end(), true);
 			}
-			else if (presentStatus == RHI::SwapchainStatus::ERROR)
+			else if (presentStatus == rhi::SwapchainStatus::ERROR)
 			{
 				std::cerr << "Failed to present swapchain image" << std::endl;
 				break;

@@ -5,9 +5,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-namespace core
-{
-namespace math
+namespace msplat::math
 {
 
 // Quaternion type
@@ -142,5 +140,4 @@ inline bool quatNotEqual(const quat &a, const quat &b, float epsilon = glm::epsi
 	return glm::any(glm::epsilonNotEqual(a, b, epsilon));
 }
 
-}        // namespace math
-}        // namespace core
+}        // namespace msplat::math

@@ -2,7 +2,7 @@
 
 #include "vulkan_backend.h"
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 VulkanShader::VulkanShader(VkDevice device, const ShaderDesc &desc) :
@@ -57,4 +57,4 @@ VulkanShader &VulkanShader::operator=(VulkanShader &&other) noexcept
 	return *this;
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

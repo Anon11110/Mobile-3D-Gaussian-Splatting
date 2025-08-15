@@ -1,7 +1,7 @@
 #pragma once
 #include "rhi_types.h"
 
-namespace RHI
+namespace rhi
 {
 
 // Main device interface
@@ -174,4 +174,4 @@ class IRHIDescriptorSet
 // Device creation function
 std::unique_ptr<IRHIDevice> CreateRHIDevice();
 
-}        // namespace RHI
+}        // namespace rhi

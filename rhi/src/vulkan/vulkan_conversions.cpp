@@ -1,7 +1,7 @@
 #include "vulkan_backend.h"
 #include <stdexcept>
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 VkFormat TextureFormatToVulkan(TextureFormat format)
@@ -641,4 +641,4 @@ VkImageLayout ResourceStateToImageLayout(ResourceState state)
 	}
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

@@ -2,7 +2,7 @@
 
 #include "vulkan_backend.h"
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 VulkanFence::VulkanFence(VkDevice device, bool signaled) :
@@ -82,4 +82,4 @@ bool VulkanFence::IsSignaled() const
 	return result == VK_SUCCESS;
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

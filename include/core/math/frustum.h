@@ -3,9 +3,7 @@
 #include "matrix.h"
 #include "vector.h"
 
-namespace core
-{
-namespace math
+namespace msplat::math
 {
 
 // Forward declarations
@@ -201,5 +199,4 @@ inline mat4 lookAtRH(const vec3 &eye, const vec3 &center, const vec3 &up)
 	return glm::lookAtRH(eye, center, up);
 }
 
-}        // namespace math
-}        // namespace core
+}        // namespace msplat::math

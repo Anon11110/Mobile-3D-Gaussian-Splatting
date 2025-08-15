@@ -3,7 +3,7 @@
 
 #include "vulkan_backend.h"
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc) :
@@ -289,4 +289,4 @@ VulkanPipeline &VulkanPipeline::operator=(VulkanPipeline &&other) noexcept
 	return *this;
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

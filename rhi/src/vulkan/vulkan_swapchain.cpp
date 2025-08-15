@@ -6,7 +6,7 @@
 
 #include <GLFW/glfw3.h>
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator,
@@ -394,4 +394,4 @@ VkFramebuffer VulkanSwapchain::GetFramebuffer(uint32_t index, VkRenderPass rende
 	return framebuffers[index];
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

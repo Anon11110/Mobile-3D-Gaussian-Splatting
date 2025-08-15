@@ -4,9 +4,7 @@
 #include "vector.h"
 #include <cmath>
 
-namespace core
-{
-namespace math
+namespace msplat::math
 {
 
 // Color types
@@ -252,5 +250,4 @@ inline Color4 unpremultiplyAlpha(const Color4 &color)
 	return Color4(vec3(color) / color.a, color.a);
 }
 
-}        // namespace math
-}        // namespace core
+}        // namespace msplat::math

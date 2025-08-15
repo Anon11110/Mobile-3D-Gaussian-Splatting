@@ -5,9 +5,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-namespace core
-{
-namespace math
+namespace msplat::math
 {
 
 // Matrix types
@@ -106,5 +104,4 @@ constexpr bool matrixNotEqual(const T &a, const T &b, float epsilon = glm::epsil
 	return glm::any(glm::epsilonNotEqual(a, b, epsilon));
 }
 
-}        // namespace math
-}        // namespace core
+}        // namespace msplat::math

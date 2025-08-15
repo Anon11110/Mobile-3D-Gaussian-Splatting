@@ -3,7 +3,7 @@
 
 #include "vulkan_backend.h"
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 VulkanBuffer::VulkanBuffer(VmaAllocator allocator, const BufferDesc &desc) :
@@ -168,4 +168,4 @@ size_t VulkanBuffer::GetSize() const
 	return size;
 }
 
-}        // namespace RHI
+}        // namespace rhi::vulkan

@@ -6,7 +6,7 @@
 
 #include <GLFW/glfw3.h>
 
-namespace RHI
+namespace rhi::vulkan
 {
 
 class VulkanDevice : public IRHIDevice
@@ -820,10 +820,15 @@ class VulkanDevice : public IRHIDevice
 	}
 };
 
+}        // namespace rhi::vulkan
+
+namespace rhi
+{
+
 // Factory function
 std::unique_ptr<IRHIDevice> CreateRHIDevice()
 {
-	return std::make_unique<VulkanDevice>();
+	return std::make_unique<vulkan::VulkanDevice>();
 }
 
-}        // namespace RHI
+}        // namespace rhi

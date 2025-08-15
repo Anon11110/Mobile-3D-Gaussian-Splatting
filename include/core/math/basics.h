@@ -3,9 +3,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 
-namespace core
-{
-namespace math
+namespace msplat::math
 {
 
 // Common mathematical constants
@@ -45,5 +43,4 @@ constexpr T smoothstep(T edge0, T edge1, T x)
 	return glm::smoothstep(edge0, edge1, x);
 }
 
-}        // namespace math
-}        // namespace core
+}        // namespace msplat::math
