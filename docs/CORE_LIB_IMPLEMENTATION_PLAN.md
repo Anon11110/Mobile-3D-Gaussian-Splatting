@@ -3,10 +3,10 @@
 ## Overview
 Create a foundational `core` static library for the 3D graphics engine with no dependencies on other engine modules. The library will provide essential utilities including math (GLM wrapper), logging, timing, and virtual file system functionality.
 
-### Current Status: **2/6 Phases Complete** 🔄
+### Current Status: **3/6 Phases Complete** 🔄
 - ✅ **Phase 1**: Math Foundation - **COMPLETED**
-- ⏳ **Phase 2**: Logging System - **Not Started**
-- ⏳ **Phase 3**: Timing Utilities - **Not Started** 
+- ✅ **Phase 2**: Logging System - **COMPLETED**
+- ⏳ **Phase 3**: Timing Utilities - **Not Started**
 - ⏳ **Phase 4**: Virtual File System - **Not Started**
 - ✅ **Phase 5**: Build System Integration - **COMPLETED**
 - 🔄 **Phase 6**: Integration and Testing - **Partially Complete**
@@ -49,26 +49,33 @@ Create a foundational `core` static library for the 3D graphics engine with no d
 - ✅ No direct GLM includes needed in client code
 
 ### Phase 2: Logging System
-**Goal:** Implement flexible logging system with macro-based interface
-**Status:** Not Started
+**Goal:** Implement flexible logging system with severity-based macro interface within `msplat::log` namespace
+**Status:** ✅ **COMPLETED**
 
 **Tasks:**
-1. Design logger interface and implementation
-2. Create `log.h` with LOG_INFO, LOG_WARN, LOG_ERROR macros
-3. Implement console output backend
-4. Add log level filtering
-5. Design extensibility points for future backends
-6. Integrate logging into triangle example
+1. ✅ Design logger interface with Severity enum (None, Debug, Info, Warning, Error, Fatal)
+2. ✅ Create `log.h` with severity-matched LOG_* macros:
+   - ✅ `LOG_DEBUG` (Severity::Debug)
+   - ✅ `LOG_INFO` (Severity::Info)  
+   - ✅ `LOG_WARNING` (Severity::Warning)
+   - ✅ `LOG_ERROR` (Severity::Error)
+   - ✅ `LOG_FATAL` (Severity::Fatal)
+3. ✅ Implement console output backend with severity-based formatting
+4. ✅ Add log level filtering based on minimum severity
+5. ✅ Design extensibility points for future backends
+6. ✅ Integrate logging into triangle example
+7. ✅ Add automatic build-type detection for minimum severity level
 
 **Deliverables:**
-- `include/core/log.h` - Public logging interface
-- `src/core/log.cpp` - Logger implementation
-- Updated triangle example with logging
+- ✅ `include/core/log.h` - Public logging interface with Severity enum
+- ✅ `src/core/log.cpp` - Logger implementation with severity filtering
+- ✅ Updated triangle example with severity-based logging
 
 **Success Criteria:**
-- Logging macros work correctly
-- Different log levels display appropriately
-- Triangle example demonstrates logging
+- ✅ All LOG_* macros work correctly with corresponding severity levels
+- ✅ Severity-based filtering displays appropriate log levels
+- ✅ Triangle example demonstrates different severity levels
+- ✅ Automatic build-type detection: Debug builds show DEBUG messages, Release builds hide them
 
 ### Phase 3: Timing Utilities
 **Goal:** Create lightweight timing utilities using std::chrono
@@ -138,22 +145,23 @@ Create a foundational `core` static library for the 3D graphics engine with no d
 **Status:** 🔄 **Partially Complete**
 
 **Tasks:**
-1. 🔄 Remove all direct std includes for replaced functionality (math partially done)
+1. 🔄 Remove all direct std includes for replaced functionality (math and logging done)
 2. ✅ Update all math operations to use msplat::math
 3. ⏳ Replace all file I/O with VFS (pending Phase 4)
-4. ⏳ Add comprehensive logging throughout (pending Phase 2)
+4. ✅ Add comprehensive logging throughout
 5. ⏳ Use Timer for all timing operations (pending Phase 3)
 6. ⏳ Verify no regressions in functionality (pending full integration)
 
 **Deliverables:**
 - ✅ Triangle example successfully uses msplat::math types
-- 🔄 Partial core functionality demonstrated (math only)
-- ⏳ Clean separation of concerns (partially achieved)
+- ✅ Triangle example uses msplat::log for all output
+- 🔄 Partial core functionality demonstrated (math and logging)
+- 🔄 Clean separation of concerns (partially achieved)
 
 **Success Criteria:**
 - ✅ Triangle example works identically to original
-- 🔄 Math subsystem properly utilized (other subsystems pending)
-- 🔄 Code is cleaner for math operations (other areas pending)
+- 🔄 Math and logging subsystems properly utilized (other subsystems pending)
+- 🔄 Code is cleaner with proper logging and math operations (other areas pending)
 
 ## Technical Specifications
 
@@ -168,6 +176,20 @@ namespace msplat::math {
     using mat4 = glm::mat4;
     using quat = glm::quat;
     /* ... etc. */
+}
+
+namespace msplat::log {
+    /* Logging system */
+    enum class Severity {
+        None = 0,
+        Debug,
+        Info,
+        Warning,
+        Error,
+        Fatal
+    };
+    
+    /* LOG_DEBUG, LOG_INFO, LOG_WARNING, LOG_ERROR, LOG_FATAL macros */
 }
 
 /* Future core components will be in msplat:: namespace */
@@ -188,9 +210,14 @@ set(CORE_HEADERS
     ${CMAKE_SOURCE_DIR}/include/core/math/sphere.h
     ${CMAKE_SOURCE_DIR}/include/core/math/frustum.h
     ${CMAKE_SOURCE_DIR}/include/core/math/color.h
+    
+    # Logging headers (completed)
+    ${CMAKE_SOURCE_DIR}/include/core/log.h
 )
 
-add_library(core STATIC 
+add_library(core STATIC
+    # Logging sources
+    ${CMAKE_SOURCE_DIR}/src/core/log.cpp
     ${CMAKE_SOURCE_DIR}/src/core/core.cpp  # Dummy source file
     ${CORE_HEADERS}
 )
@@ -212,18 +239,18 @@ target_compile_features(core PUBLIC cxx_std_20)
 
 ### ✅ Completed
 - **Math Library**: Clean GLM wrapper in msplat::math namespace
+- **Logging System**: Comprehensive logging with severity levels and build-type detection
 - **Header-only Design**: Math components are header-only for optimal performance
-- **Clean Separation**: Math library has no dependencies on graphics/RHI code
+- **Clean Separation**: Core library has no dependencies on graphics/RHI code
 - **CMake Integration**: Proper static library configuration with cmake/core.cmake
-- **Triangle Integration**: Example successfully uses math::vec3, math::mat4, etc.
+- **Triangle Integration**: Example successfully uses math::vec3, math::mat4, and logging
 
 ### 🔄 In Progress
-- **Namespace Migration**: Updated from nested to flat namespace (msplat::math)
-- **Build System**: Core library builds but only contains math functionality
+- **Namespace Migration**: Updated from nested to flat namespace (msplat::math, msplat::log)
+- **Build System**: Core library builds with math and logging functionality
 
 ### ⏳ Remaining Tasks
-- Implement logging system with macro-based interface (Phase 2)
-- Create timing utilities using std::chrono (Phase 3)  
+- Create timing utilities using std::chrono (Phase 3)
 - Build virtual file system with physical filesystem backend (Phase 4)
 - Complete integration testing across all subsystems
 

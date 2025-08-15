@@ -13,10 +13,16 @@ set(CORE_HEADERS
     ${CMAKE_SOURCE_DIR}/include/core/math/sphere.h
     ${CMAKE_SOURCE_DIR}/include/core/math/frustum.h
     ${CMAKE_SOURCE_DIR}/include/core/math/color.h
+    
+    # Logging headers
+    ${CMAKE_SOURCE_DIR}/include/core/log.h
 )
 
 set(CORE_SOURCES
     # Math sources (header-only for now)
+    # Logging sources
+    ${CMAKE_SOURCE_DIR}/src/core/log.cpp
+    
     # Add a dummy source file to create the library
     ${CMAKE_SOURCE_DIR}/src/core/core.cpp
 )

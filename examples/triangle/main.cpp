@@ -6,6 +6,7 @@
 #include <iostream>
 #include <vector>
 
+#include "core/log.h"
 #include "core/math/math.h"
 #include "rhi.h"
 
@@ -31,6 +32,7 @@ std::vector<uint8_t> LoadShaderCode(const std::string &filename)
 	std::ifstream file(filename, std::ios::binary | std::ios::ate);
 	if (!file.is_open())
 	{
+		LOG_ERROR("Failed to open shader file: " + filename);
 		throw std::runtime_error("Failed to open shader file: " + filename);
 	}
 
@@ -38,15 +40,20 @@ std::vector<uint8_t> LoadShaderCode(const std::string &filename)
 	std::vector<uint8_t> code(fileSize);
 	file.seekg(0);
 	file.read(reinterpret_cast<char *>(code.data()), fileSize);
+	LOG_DEBUG("Successfully loaded shader: " + filename + " (" + std::to_string(fileSize) + " bytes)");
 	return code;
 }
 
 int main()
 {
+	// Initialize logging system - automatically sets appropriate level for build type
+	LOG_INFO("Starting Triangle Example");
+	LOG_DEBUG("Logging system initialized");
+
 	// Initialize GLFW
 	if (!glfwInit())
 	{
-		std::cerr << "Failed to initialize GLFW" << std::endl;
+		LOG_FATAL("Failed to initialize GLFW");
 		return -1;
 	}
 
@@ -55,13 +62,14 @@ int main()
 	GLFWwindow *window = glfwCreateWindow(800, 600, "Simple Triangle", nullptr, nullptr);
 	if (!window)
 	{
-		std::cerr << "Failed to create window" << std::endl;
+		LOG_FATAL("Failed to create window");
 		glfwTerminate();
 		return -1;
 	}
 
 	try
 	{
+		LOG_INFO("Initializing RHI device");
 		// Create RHI device
 		auto device = rhi::CreateRHIDevice();
 
@@ -97,6 +105,7 @@ int main()
 		auto uniformBuffer               = device->CreateBuffer(ubDesc);
 
 		// Load and create shaders
+		LOG_INFO("Loading shaders");
 		auto vertexCode   = LoadShaderCode("shaders/compiled/triangle.vert.spv");
 		auto fragmentCode = LoadShaderCode("shaders/compiled/triangle.frag.spv");
 
@@ -180,6 +189,7 @@ int main()
 		std::vector<bool> imageFirstUse(swapchain->GetImageCount(), true);
 
 		// Main loop
+		LOG_INFO("Starting render loop");
 		auto     applicationStartTime = std::chrono::high_resolution_clock::now();
 		auto     fpsStartTime         = std::chrono::high_resolution_clock::now();
 		uint32_t frameCount           = 0;
@@ -213,6 +223,7 @@ int main()
 			if (acquireStatus == rhi::SwapchainStatus::OUT_OF_DATE)
 			{
 				// Swapchain is out of date, need to recreate it
+				LOG_WARNING("Swapchain out of date, recreating");
 				int width, height;
 				glfwGetFramebufferSize(window, &width, &height);
 				while (width == 0 || height == 0)
@@ -227,7 +238,7 @@ int main()
 			}
 			else if (acquireStatus == rhi::SwapchainStatus::ERROR)
 			{
-				std::cerr << "Failed to acquire swapchain image" << std::endl;
+				LOG_ERROR("Failed to acquire swapchain image");
 				break;
 			}
 
@@ -349,6 +360,7 @@ int main()
 			if (presentStatus == rhi::SwapchainStatus::OUT_OF_DATE || presentStatus == rhi::SwapchainStatus::SUBOPTIMAL)
 			{
 				// Swapchain needs recreation on next frame
+				LOG_WARNING("Swapchain needs recreation (out of date or suboptimal)");
 				int width, height;
 				glfwGetFramebufferSize(window, &width, &height);
 				while (width == 0 || height == 0)
@@ -361,7 +373,7 @@ int main()
 			}
 			else if (presentStatus == rhi::SwapchainStatus::ERROR)
 			{
-				std::cerr << "Failed to present swapchain image" << std::endl;
+				LOG_ERROR("Failed to present swapchain image");
 				break;
 			}
 
@@ -371,24 +383,26 @@ int main()
 			float fpsElapsed = std::chrono::duration<float>(currentTime - fpsStartTime).count();
 			if (fpsElapsed >= 1.0f)
 			{
-				std::cout << "FPS: " << std::fixed << std::setprecision(1) << frameCount / fpsElapsed << std::endl;
+				LOG_INFO("FPS: " + std::to_string(static_cast<int>(frameCount / fpsElapsed + 0.5f)));
 				frameCount   = 0;
 				fpsStartTime = currentTime;
 			}
 		}
 
 		// Wait for GPU to finish
+		LOG_INFO("Waiting for GPU to finish");
 		device->WaitIdle();
 	}
 	catch (const std::exception &e)
 	{
-		std::cerr << "Error: " << e.what() << std::endl;
+		LOG_FATAL("Error: " + std::string(e.what()));
 		glfwDestroyWindow(window);
 		glfwTerminate();
 		return -1;
 	}
 
 	// Cleanup
+	LOG_INFO("Cleaning up and exiting");
 	glfwDestroyWindow(window);
 	glfwTerminate();
 	return 0;
