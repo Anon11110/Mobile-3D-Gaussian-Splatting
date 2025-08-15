@@ -306,4 +306,181 @@ void VulkanCommandList::DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, u
 	vkCmdDrawIndexedIndirect(commandBuffer, vkBuffer->GetHandle(), offset, drawCount, stride);
 }
 
+void VulkanCommandList::Barrier(
+    PipelineScope                         src_scope,
+    PipelineScope                         dst_scope,
+    const std::vector<BufferTransition>  &buffer_transitions,
+    const std::vector<TextureTransition> &texture_transitions,
+    const std::vector<MemoryBarrier>     &memory_barriers)
+{
+	std::vector<VkBufferMemoryBarrier> bufferBarriers;
+	std::vector<VkImageMemoryBarrier>  imageBarriers;
+	std::vector<VkMemoryBarrier>       memBarriers;
+
+	VkPipelineStageFlags srcStageFlags = 0;
+	VkPipelineStageFlags dstStageFlags = 0;
+
+	// Process buffer transitions
+	for (const auto &transition : buffer_transitions)
+	{
+		if (!transition.buffer)
+			continue;
+
+		VkBufferMemoryBarrier barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.buffer              = static_cast<VulkanBuffer *>(transition.buffer)->GetHandle();
+		barrier.offset              = transition.offset;
+		barrier.size                = (transition.size == ~0ull) ? VK_WHOLE_SIZE : transition.size;
+
+		VkPipelineStageFlags srcStages, dstStages;
+		VkAccessFlags        srcAccess, dstAccess;
+
+		if (transition.src_stages != StageMask::Auto)
+		{
+			srcStages = StageMaskToVulkan(transition.src_stages);
+			srcAccess = AccessMaskToVulkan(transition.src_access);
+		}
+		else
+		{
+			GetVulkanStagesAndAccess(transition.before, src_scope, srcStages, srcAccess);
+		}
+
+		if (transition.dst_stages != StageMask::Auto)
+		{
+			dstStages = StageMaskToVulkan(transition.dst_stages);
+			dstAccess = AccessMaskToVulkan(transition.dst_access);
+		}
+		else
+		{
+			GetVulkanStagesAndAccess(transition.after, dst_scope, dstStages, dstAccess);
+		}
+
+		barrier.srcAccessMask = srcAccess;
+		barrier.dstAccessMask = dstAccess;
+
+		srcStageFlags |= srcStages;
+		dstStageFlags |= dstStages;
+
+		bufferBarriers.push_back(barrier);
+	}
+
+	// Process texture transitions
+	for (const auto &transition : texture_transitions)
+	{
+		if (!transition.texture)
+			continue;
+
+		VkImageMemoryBarrier barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.image               = static_cast<VulkanTexture *>(transition.texture)->GetHandle();
+		barrier.oldLayout           = ResourceStateToImageLayout(transition.before);
+		barrier.newLayout           = ResourceStateToImageLayout(transition.after);
+
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+		// Check if it's a depth/stencil format
+		TextureFormat format = transition.texture->GetFormat();
+		if (format == TextureFormat::D32_FLOAT)
+		{
+			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+		}
+		else if (format == TextureFormat::D24_UNORM_S8_UINT)
+		{
+			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+
+		barrier.subresourceRange.baseMipLevel   = transition.baseMipLevel;
+		barrier.subresourceRange.levelCount     = (transition.mipLevelCount == ~0u) ? VK_REMAINING_MIP_LEVELS : transition.mipLevelCount;
+		barrier.subresourceRange.baseArrayLayer = transition.baseArrayLayer;
+		barrier.subresourceRange.layerCount     = (transition.arrayLayerCount == ~0u) ? VK_REMAINING_ARRAY_LAYERS : transition.arrayLayerCount;
+
+		VkPipelineStageFlags srcStages, dstStages;
+		VkAccessFlags        srcAccess, dstAccess;
+
+		if (transition.src_stages != StageMask::Auto)
+		{
+			srcStages = StageMaskToVulkan(transition.src_stages);
+			srcAccess = AccessMaskToVulkan(transition.src_access);
+		}
+		else
+		{
+			GetVulkanStagesAndAccess(transition.before, src_scope, srcStages, srcAccess);
+		}
+
+		if (transition.dst_stages != StageMask::Auto)
+		{
+			dstStages = StageMaskToVulkan(transition.dst_stages);
+			dstAccess = AccessMaskToVulkan(transition.dst_access);
+		}
+		else
+		{
+			GetVulkanStagesAndAccess(transition.after, dst_scope, dstStages, dstAccess);
+		}
+
+		barrier.srcAccessMask = srcAccess;
+		barrier.dstAccessMask = dstAccess;
+
+		srcStageFlags |= srcStages;
+		dstStageFlags |= dstStages;
+
+		imageBarriers.push_back(barrier);
+	}
+
+	// Process memory barriers
+	for (const auto &memBarrier : memory_barriers)
+	{
+		VkMemoryBarrier barrier{};
+		barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+
+		if (memBarrier.src_stages != StageMask::Auto)
+		{
+			srcStageFlags |= StageMaskToVulkan(memBarrier.src_stages);
+			barrier.srcAccessMask = AccessMaskToVulkan(memBarrier.src_access);
+		}
+		else
+		{
+			srcStageFlags |= PipelineScopeToVulkanStages(src_scope);
+			barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+		}
+
+		if (memBarrier.dst_stages != StageMask::Auto)
+		{
+			dstStageFlags |= StageMaskToVulkan(memBarrier.dst_stages);
+			barrier.dstAccessMask = AccessMaskToVulkan(memBarrier.dst_access);
+		}
+		else
+		{
+			dstStageFlags |= PipelineScopeToVulkanStages(dst_scope);
+			barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		}
+
+		memBarriers.push_back(barrier);
+	}
+
+	// If no specific stages were set, use the scope defaults
+	if (srcStageFlags == 0)
+		srcStageFlags = PipelineScopeToVulkanStages(src_scope);
+	if (dstStageFlags == 0)
+		dstStageFlags = PipelineScopeToVulkanStages(dst_scope);
+
+	if (!bufferBarriers.empty() || !imageBarriers.empty() || !memBarriers.empty())
+	{
+		vkCmdPipelineBarrier(
+		    commandBuffer,
+		    srcStageFlags,
+		    dstStageFlags,
+		    0,
+		    static_cast<uint32_t>(memBarriers.size()),
+		    memBarriers.empty() ? nullptr : memBarriers.data(),
+		    static_cast<uint32_t>(bufferBarriers.size()),
+		    bufferBarriers.empty() ? nullptr : bufferBarriers.data(),
+		    static_cast<uint32_t>(imageBarriers.size()),
+		    imageBarriers.empty() ? nullptr : imageBarriers.data());
+	}
+}
+
 }        // namespace RHI

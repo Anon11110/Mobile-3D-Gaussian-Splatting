@@ -109,6 +109,13 @@ class IRHICommandList
 	virtual void Draw(uint32_t vertexCount, uint32_t firstVertex = 0)                                                                             = 0;
 	virtual void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0)                                              = 0;
 	virtual void DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, uint32_t drawCount, uint32_t stride = sizeof(DrawIndexedIndirectCommand)) = 0;
+
+	virtual void Barrier(
+	    PipelineScope                         src_scope,
+	    PipelineScope                         dst_scope,
+	    const std::vector<BufferTransition>  &buffer_transitions,
+	    const std::vector<TextureTransition> &texture_transitions,
+	    const std::vector<MemoryBarrier>     &memory_barriers = {}) = 0;
 };
 
 // Swapchain interface

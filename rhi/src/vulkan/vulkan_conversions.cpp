@@ -415,4 +415,230 @@ VkAttachmentStoreOp StoreOpToVulkan(StoreOp op)
 	}
 }
 
+VkPipelineStageFlags PipelineScopeToVulkanStages(PipelineScope scope)
+{
+	switch (scope)
+	{
+		case PipelineScope::Graphics:
+			return VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+		case PipelineScope::Compute:
+			return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+		case PipelineScope::Copy:
+			return VK_PIPELINE_STAGE_TRANSFER_BIT;
+		case PipelineScope::All:
+		default:
+			return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	}
+}
+
+VkPipelineStageFlags StageMaskToVulkan(StageMask mask)
+{
+	if (mask == StageMask::Auto)
+		return 0;
+
+	VkPipelineStageFlags flags = 0;
+
+	if (static_cast<uint64_t>(mask & StageMask::DrawIndirect))
+		flags |= VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::VertexInput))
+		flags |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::VertexShader))
+		flags |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::FragmentShader))
+		flags |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::DepthTests))
+		flags |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::RenderTarget))
+		flags |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::ComputeShader))
+		flags |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::Transfer))
+		flags |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::Host))
+		flags |= VK_PIPELINE_STAGE_HOST_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::AllGraphics))
+		flags |= VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::AllCommands))
+		flags |= VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+
+	return flags;
+}
+
+VkAccessFlags AccessMaskToVulkan(AccessMask mask)
+{
+	if (mask == AccessMask::Auto)
+		return 0;
+
+	VkAccessFlags flags = 0;
+
+	if (static_cast<uint64_t>(mask & AccessMask::IndirectRead))
+		flags |= VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::IndexRead))
+		flags |= VK_ACCESS_INDEX_READ_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::VertexAttributeRead))
+		flags |= VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::UniformRead))
+		flags |= VK_ACCESS_UNIFORM_READ_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::ShaderRead))
+		flags |= VK_ACCESS_SHADER_READ_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::ShaderWrite))
+		flags |= VK_ACCESS_SHADER_WRITE_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::RenderTargetRead))
+		flags |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::RenderTargetWrite))
+		flags |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::DepthStencilRead))
+		flags |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::DepthStencilWrite))
+		flags |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::TransferRead))
+		flags |= VK_ACCESS_TRANSFER_READ_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::TransferWrite))
+		flags |= VK_ACCESS_TRANSFER_WRITE_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::HostRead))
+		flags |= VK_ACCESS_HOST_READ_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::HostWrite))
+		flags |= VK_ACCESS_HOST_WRITE_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::MemoryRead))
+		flags |= VK_ACCESS_MEMORY_READ_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::MemoryWrite))
+		flags |= VK_ACCESS_MEMORY_WRITE_BIT;
+
+	return flags;
+}
+
+void GetVulkanStagesAndAccess(ResourceState state, PipelineScope scope,
+                              VkPipelineStageFlags &stages, VkAccessFlags &access)
+{
+	switch (state)
+	{
+		case ResourceState::Undefined:
+			stages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+			access = 0;
+			break;
+
+		case ResourceState::GeneralRead:
+			stages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+			         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			access = VK_ACCESS_SHADER_READ_BIT;
+			break;
+
+		case ResourceState::CopySource:
+			stages = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			access = VK_ACCESS_TRANSFER_READ_BIT;
+			break;
+
+		case ResourceState::CopyDestination:
+			stages = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			access = VK_ACCESS_TRANSFER_WRITE_BIT;
+			break;
+
+		case ResourceState::ShaderReadWrite:
+			stages = (scope == PipelineScope::Compute) ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+			break;
+
+		case ResourceState::RenderTarget:
+			stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			break;
+
+		case ResourceState::DepthStencilRead:
+			stages = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+			access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+			break;
+
+		case ResourceState::DepthStencilWrite:
+			stages = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+			access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+			break;
+
+		case ResourceState::ResolveSource:
+			stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+			break;
+
+		case ResourceState::ResolveDestination:
+			stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			break;
+
+		case ResourceState::Present:
+			stages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+			access = 0;
+			break;
+
+		case ResourceState::IndirectArgument:
+			stages = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+			access = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+			break;
+
+		case ResourceState::VertexBuffer:
+			stages = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+			access = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+			break;
+
+		case ResourceState::IndexBuffer:
+			stages = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+			access = VK_ACCESS_INDEX_READ_BIT;
+			break;
+
+		case ResourceState::UniformBuffer:
+			stages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+			         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			access = VK_ACCESS_UNIFORM_READ_BIT;
+			break;
+
+		default:
+			stages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+			access = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+			break;
+	}
+
+	if (scope == PipelineScope::Graphics &&
+	    !(stages & (VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT)))
+	{
+		stages &= VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+	}
+	else if (scope == PipelineScope::Compute)
+	{
+		if (state == ResourceState::GeneralRead || state == ResourceState::UniformBuffer ||
+		    state == ResourceState::ShaderReadWrite)
+		{
+			stages = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+		}
+	}
+}
+
+VkImageLayout ResourceStateToImageLayout(ResourceState state)
+{
+	switch (state)
+	{
+		case ResourceState::Undefined:
+			return VK_IMAGE_LAYOUT_UNDEFINED;
+		case ResourceState::GeneralRead:
+			return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		case ResourceState::CopySource:
+			return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		case ResourceState::CopyDestination:
+			return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		case ResourceState::ShaderReadWrite:
+			return VK_IMAGE_LAYOUT_GENERAL;
+		case ResourceState::RenderTarget:
+			return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		case ResourceState::DepthStencilRead:
+			return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+		case ResourceState::DepthStencilWrite:
+			return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		case ResourceState::ResolveSource:
+			return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		case ResourceState::ResolveDestination:
+			return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		case ResourceState::Present:
+			return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		default:
+			return VK_IMAGE_LAYOUT_GENERAL;
+	}
+}
+
 }        // namespace RHI

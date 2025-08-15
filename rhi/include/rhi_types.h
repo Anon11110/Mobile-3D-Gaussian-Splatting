@@ -269,6 +269,108 @@ inline bool operator!(TextureAspect aspect)
 	return static_cast<uint32_t>(aspect) == 0;
 }
 
+// Barrier and Synchronization types, defining the high-level intended usage of a resource
+enum class ResourceState : uint8_t
+{
+	Undefined,          // Initial state, content can be discarded
+	GeneralRead,        // Generic read-only state (vertex/index/uniform buffer, shader resource)
+	CopySource,
+	CopyDestination,
+	ShaderReadWrite,        // Read/write storage (UAV/SSBO)
+	RenderTarget,
+	DepthStencilRead,
+	DepthStencilWrite,
+	ResolveSource,
+	ResolveDestination,
+	Present,                 // Ready for presentation to the screen
+	IndirectArgument,        // Buffer used as indirect argument
+	VertexBuffer,
+	IndexBuffer,
+	UniformBuffer,
+};
+
+// Pipeline execution scope where work occurs
+enum class PipelineScope : uint8_t
+{
+	All,             // A catch-all, potentially less efficient
+	Graphics,        // Graphics pipeline (vertex, fragment, etc.)
+	Compute,         // Compute pipeline
+	Copy,            // Transfer/blit engine
+};
+
+// --- Optional Fine-Grained Control (The "Pro Mode") ---
+
+// Fine-grained pipeline execution stages
+enum class StageMask : uint64_t
+{
+	Auto           = 0,
+	DrawIndirect   = 1ull << 1,
+	VertexInput    = 1ull << 2,
+	VertexShader   = 1ull << 3,
+	FragmentShader = 1ull << 4,
+	DepthTests     = 1ull << 5,        // Early & Late
+	RenderTarget   = 1ull << 6,
+	ComputeShader  = 1ull << 7,
+	Transfer       = 1ull << 8,
+	Host           = 1ull << 9,
+	AllGraphics    = 1ull << 10,
+	AllCommands    = 1ull << 11,
+};
+
+// Fine-grained memory access types
+enum class AccessMask : uint64_t
+{
+	Auto                = 0,
+	IndirectRead        = 1ull << 1,
+	IndexRead           = 1ull << 2,
+	VertexAttributeRead = 1ull << 3,
+	UniformRead         = 1ull << 4,
+	ShaderRead          = 1ull << 5,
+	ShaderWrite         = 1ull << 6,
+	RenderTargetRead    = 1ull << 7,
+	RenderTargetWrite   = 1ull << 8,
+	DepthStencilRead    = 1ull << 9,
+	DepthStencilWrite   = 1ull << 10,
+	TransferRead        = 1ull << 11,
+	TransferWrite       = 1ull << 12,
+	HostRead            = 1ull << 13,
+	HostWrite           = 1ull << 14,
+	MemoryRead          = 1ull << 15,
+	MemoryWrite         = 1ull << 16,
+};
+
+inline StageMask operator|(StageMask lhs, StageMask rhs)
+{
+	return static_cast<StageMask>(static_cast<uint64_t>(lhs) | static_cast<uint64_t>(rhs));
+}
+
+inline StageMask operator&(StageMask lhs, StageMask rhs)
+{
+	return static_cast<StageMask>(static_cast<uint64_t>(lhs) & static_cast<uint64_t>(rhs));
+}
+
+inline StageMask &operator|=(StageMask &lhs, StageMask rhs)
+{
+	lhs = lhs | rhs;
+	return lhs;
+}
+
+inline AccessMask operator|(AccessMask lhs, AccessMask rhs)
+{
+	return static_cast<AccessMask>(static_cast<uint64_t>(lhs) | static_cast<uint64_t>(rhs));
+}
+
+inline AccessMask operator&(AccessMask lhs, AccessMask rhs)
+{
+	return static_cast<AccessMask>(static_cast<uint64_t>(lhs) & static_cast<uint64_t>(rhs));
+}
+
+inline AccessMask &operator|=(AccessMask &lhs, AccessMask rhs)
+{
+	lhs = lhs | rhs;
+	return lhs;
+}
+
 enum class ResolveMode
 {
 	NONE,
@@ -523,6 +625,50 @@ struct RenderingInfo
 	uint32_t                     layerCount       = 1;
 	std::vector<ColorAttachment> colorAttachments;
 	DepthStencilAttachment       depthStencilAttachment;
+};
+
+struct TextureTransition
+{
+	IRHITexture  *texture = nullptr;
+	ResourceState before  = ResourceState::Undefined;
+	ResourceState after   = ResourceState::GeneralRead;
+
+	// Subresource range (optional, defaults to entire resource)
+	uint32_t baseMipLevel    = 0;
+	uint32_t mipLevelCount   = ~0u;        // All remaining mips
+	uint32_t baseArrayLayer  = 0;
+	uint32_t arrayLayerCount = ~0u;        // All remaining layers
+
+	// Optional stage and access flag
+	StageMask  src_stages = StageMask::Auto;
+	AccessMask src_access = AccessMask::Auto;
+	StageMask  dst_stages = StageMask::Auto;
+	AccessMask dst_access = AccessMask::Auto;
+};
+
+struct BufferTransition
+{
+	IRHIBuffer   *buffer = nullptr;
+	ResourceState before = ResourceState::Undefined;
+	ResourceState after  = ResourceState::GeneralRead;
+
+	// Buffer range (optional, defaults to entire buffer)
+	size_t offset = 0;
+	size_t size   = ~0ull;        // Entire buffer
+
+	// Optional stage and access flag
+	StageMask  src_stages = StageMask::Auto;
+	AccessMask src_access = AccessMask::Auto;
+	StageMask  dst_stages = StageMask::Auto;
+	AccessMask dst_access = AccessMask::Auto;
+};
+
+struct MemoryBarrier
+{
+	StageMask  src_stages = StageMask::Auto;
+	AccessMask src_access = AccessMask::Auto;
+	StageMask  dst_stages = StageMask::Auto;
+	AccessMask dst_access = AccessMask::Auto;
 };
 
 struct DrawIndexedIndirectCommand

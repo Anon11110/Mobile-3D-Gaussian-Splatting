@@ -52,3 +52,6 @@ CLAUDE.md
 .cursor/
 .vscode/
 .mcp.json
+
+# Ignore all compiled SPIR-V shader binaries
+shaders/compiled/*.spv

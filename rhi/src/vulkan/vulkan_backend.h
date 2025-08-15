@@ -246,6 +246,13 @@ class VulkanCommandList : public IRHICommandList
 	void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0) override;
 	void DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, uint32_t drawCount, uint32_t stride = sizeof(DrawIndexedIndirectCommand)) override;
 
+	void Barrier(
+	    PipelineScope                         src_scope,
+	    PipelineScope                         dst_scope,
+	    const std::vector<BufferTransition>  &buffer_transitions,
+	    const std::vector<TextureTransition> &texture_transitions,
+	    const std::vector<MemoryBarrier>     &memory_barriers = {}) override;
+
 	VkCommandBuffer GetHandle() const
 	{
 		return commandBuffer;
@@ -407,5 +414,11 @@ VkBlendFactor         BlendFactorToVulkan(BlendFactor factor);
 VkBlendOp             BlendOpToVulkan(BlendOp op);
 VkSampleCountFlagBits SampleCountToVulkan(SampleCount count);
 uint32_t              FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
+VkPipelineStageFlags  PipelineScopeToVulkanStages(PipelineScope scope);
+VkPipelineStageFlags  StageMaskToVulkan(StageMask mask);
+VkAccessFlags         AccessMaskToVulkan(AccessMask mask);
+void                  GetVulkanStagesAndAccess(ResourceState state, PipelineScope scope,
+                                               VkPipelineStageFlags &stages, VkAccessFlags &access);
+VkImageLayout         ResourceStateToImageLayout(ResourceState state);
 
 }        // namespace RHI

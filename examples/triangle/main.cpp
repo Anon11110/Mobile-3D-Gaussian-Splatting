@@ -173,6 +173,10 @@ int main()
 			commandLists.push_back(device->CreateCommandList());
 		}
 
+		// Track per-image state for swapchain images
+		// Initially all images are in Undefined state (first use)
+		std::vector<bool> imageFirstUse(swapchain->GetImageCount(), true);
+
 		// Main loop
 		auto     applicationStartTime = std::chrono::high_resolution_clock::now();
 		auto     fpsStartTime         = std::chrono::high_resolution_clock::now();
@@ -215,6 +219,8 @@ int main()
 					glfwWaitEvents();
 				}
 				swapchain->Resize(width, height);
+
+				std::fill(imageFirstUse.begin(), imageFirstUse.end(), true);
 				continue;
 			}
 			else if (acquireStatus == RHI::SwapchainStatus::ERROR)
@@ -232,6 +238,24 @@ int main()
 			auto    *backBuffer       = swapchain->GetBackBuffer(imageIndex);
 			uint32_t backBufferWidth  = backBuffer->GetWidth();
 			uint32_t backBufferHeight = backBuffer->GetHeight();
+
+			// Transition swapchain image to render target
+			// First frame: Undefined -> RenderTarget
+			// Subsequent frames: Present -> RenderTarget
+			RHI::TextureTransition swapchainTransition{};
+			swapchainTransition.texture = backBuffer;
+			swapchainTransition.before  = imageFirstUse[imageIndex] ? RHI::ResourceState::Undefined : RHI::ResourceState::Present;
+			swapchainTransition.after   = RHI::ResourceState::RenderTarget;
+
+			cmdList->Barrier(
+			    RHI::PipelineScope::Graphics,
+			    RHI::PipelineScope::Graphics,
+			    {},
+			    {swapchainTransition},
+			    {});
+
+			// Mark this image as no longer first use
+			imageFirstUse[imageIndex] = false;
 
 			// Begin rendering with dynamic rendering
 			RHI::RenderingInfo renderingInfo{};
@@ -298,6 +322,18 @@ int main()
 			cmdList->Draw(3);
 
 			cmdList->EndRendering();
+
+			// Transition swapchain image from render target to present
+			swapchainTransition.before = RHI::ResourceState::RenderTarget;
+			swapchainTransition.after  = RHI::ResourceState::Present;
+
+			cmdList->Barrier(
+			    RHI::PipelineScope::Graphics,
+			    RHI::PipelineScope::Graphics,
+			    {},
+			    {swapchainTransition},
+			    {});
+
 			cmdList->End();
 
 			// Submit
@@ -319,6 +355,7 @@ int main()
 					glfwWaitEvents();
 				}
 				swapchain->Resize(width, height);
+				std::fill(imageFirstUse.begin(), imageFirstUse.end(), true);
 			}
 			else if (presentStatus == RHI::SwapchainStatus::ERROR)
 			{
