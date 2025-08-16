@@ -161,9 +161,14 @@ int main()
 		auto pipeline = device->CreateGraphicsPipeline(pipelineDesc);
 
 		// Create synchronization objects
-		auto imageAvailableSemaphore = device->CreateSemaphore();
-		auto renderFinishedSemaphore = device->CreateSemaphore();
-		auto inFlightFence           = device->CreateFence(true);
+		std::vector<std::unique_ptr<rhi::IRHISemaphore>> imageAvailableSemaphores;
+		std::vector<std::unique_ptr<rhi::IRHISemaphore>> renderFinishedSemaphores;
+		for (uint32_t i = 0; i < swapchain->GetImageCount(); i++)
+		{
+			imageAvailableSemaphores.push_back(device->CreateSemaphore());
+			renderFinishedSemaphores.push_back(device->CreateSemaphore());
+		}
+		auto inFlightFence = device->CreateFence(true);
 
 		// Create command lists for each swapchain image
 		std::vector<std::unique_ptr<rhi::IRHICommandList>> commandLists;
@@ -205,7 +210,7 @@ int main()
 
 			// Acquire next image
 			uint32_t             imageIndex;
-			rhi::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, imageAvailableSemaphore.get());
+			rhi::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, imageAvailableSemaphores[0].get());
 
 			if (acquireStatus == rhi::SwapchainStatus::OUT_OF_DATE)
 			{
@@ -338,11 +343,11 @@ int main()
 
 			// Submit
 			rhi::IRHICommandList *cmdListPtr = cmdList.get();
-			device->SubmitCommandLists(&cmdListPtr, 1, imageAvailableSemaphore.get(), renderFinishedSemaphore.get(),
+			device->SubmitCommandLists(&cmdListPtr, 1, imageAvailableSemaphores[0].get(), renderFinishedSemaphores[imageIndex].get(),
 			                           inFlightFence.get());
 
 			// Present
-			rhi::SwapchainStatus presentStatus = swapchain->Present(imageIndex, renderFinishedSemaphore.get());
+			rhi::SwapchainStatus presentStatus = swapchain->Present(imageIndex, renderFinishedSemaphores[imageIndex].get());
 
 			if (presentStatus == rhi::SwapchainStatus::OUT_OF_DATE || presentStatus == rhi::SwapchainStatus::SUBOPTIMAL)
 			{

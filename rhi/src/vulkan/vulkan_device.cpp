@@ -30,7 +30,7 @@ class VulkanDevice : public IRHIDevice
 	// Device feature flags
 	bool hasDynamicRendering;
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(_DEBUG)
 	VkDebugUtilsMessengerEXT debugMessenger;
 #endif
 
@@ -93,7 +93,7 @@ class VulkanDevice : public IRHIDevice
 			vkDestroyDevice(device, nullptr);
 		}
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(_DEBUG)
 		DestroyDebugMessenger();
 #endif
 
@@ -291,7 +291,7 @@ class VulkanDevice : public IRHIDevice
 		appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
 		appInfo.pEngineName        = "RHI";
 		appInfo.engineVersion      = VK_MAKE_VERSION(1, 0, 0);
-		appInfo.apiVersion         = VK_API_VERSION_1_0;
+		appInfo.apiVersion         = VK_API_VERSION_1_3;  // Request 1.3 for dynamic rendering core support
 
 		VkInstanceCreateInfo createInfo{};
 		createInfo.sType            = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -318,13 +318,56 @@ class VulkanDevice : public IRHIDevice
 		extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
 
-		// Debug extension disabled for now
+#if defined(DEBUG) || defined(_DEBUG)
+		extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+#endif
 
 		createInfo.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
 		createInfo.ppEnabledExtensionNames = extensions.data();
 
-		// Validation layers (disabled for now to avoid macOS/MoltenVK issues)
+#if defined(DEBUG) || defined(_DEBUG)
+		const std::vector<const char *> validationLayers = {
+		    "VK_LAYER_KHRONOS_validation"
+		};
+
+		uint32_t layerCount;
+		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+		std::vector<VkLayerProperties> availableLayers(layerCount);
+		vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+		bool layersAvailable = true;
+		for (const char *layerName : validationLayers)
+		{
+			bool layerFound = false;
+			for (const auto &layerProperties : availableLayers)
+			{
+				if (strcmp(layerName, layerProperties.layerName) == 0)
+				{
+					layerFound = true;
+					break;
+				}
+			}
+			if (!layerFound)
+			{
+				fprintf(stderr, "Warning: Validation layer %s not available\n", layerName);
+				layersAvailable = false;
+			}
+		}
+
+		if (layersAvailable)
+		{
+			createInfo.enabledLayerCount   = static_cast<uint32_t>(validationLayers.size());
+			createInfo.ppEnabledLayerNames = validationLayers.data();
+			fprintf(stdout, "Vulkan validation layers enabled\n");
+		}
+		else
+		{
+			createInfo.enabledLayerCount = 0;
+			fprintf(stderr, "Warning: Validation layers requested but not available\n");
+		}
+#else
 		createInfo.enabledLayerCount = 0;
+#endif
 
 		if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS)
 		{
@@ -334,10 +377,11 @@ class VulkanDevice : public IRHIDevice
 
 	void SetupDebugMessenger()
 	{
-#ifdef DEBUG
+#if defined(DEBUG) || defined(_DEBUG)
 		VkDebugUtilsMessengerCreateInfoEXT createInfo{};
 		createInfo.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-		createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+		// Enable all severity levels except verbose (too noisy)
+		createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
 		                             VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
 		                             VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
 		createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
@@ -346,7 +390,88 @@ class VulkanDevice : public IRHIDevice
 		createInfo.pfnUserCallback =
 		    [](VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType,
 		       const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData, void *pUserData) -> VkBool32 {
-			fprintf(stderr, "Validation layer: %s\n", pCallbackData->pMessage);
+
+			const char *severityStr = "";
+			const char *typeStr = "";
+
+			switch (messageSeverity)
+			{
+				case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+					severityStr = "[VERBOSE]";
+					break;
+				case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+					severityStr = "[INFO]";
+					break;
+				case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+					severityStr = "[WARNING]";
+					break;
+				case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+					severityStr = "[ERROR]";
+					break;
+				default:
+					severityStr = "[UNKNOWN]";
+			}
+
+			if (messageType & VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT)
+				typeStr = "General";
+			else if (messageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT)
+				typeStr = "Validation";
+			else if (messageType & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT)
+				typeStr = "Performance";
+
+			fprintf(stderr, "\n%s Vulkan %s:\n", severityStr, typeStr);
+
+			if (pCallbackData->pMessageIdName)
+			{
+				fprintf(stderr, "  Message ID: %s (0x%x)\n",
+				        pCallbackData->pMessageIdName, pCallbackData->messageIdNumber);
+			}
+
+			fprintf(stderr, "  Message: %s\n", pCallbackData->pMessage);
+
+			if (pCallbackData->objectCount > 0)
+			{
+				fprintf(stderr, "  Objects involved:\n");
+				for (uint32_t i = 0; i < pCallbackData->objectCount; i++)
+				{
+					const VkDebugUtilsObjectNameInfoEXT &obj = pCallbackData->pObjects[i];
+					fprintf(stderr, "    - Type: %d, Handle: 0x%llx",
+					        obj.objectType, (unsigned long long)obj.objectHandle);
+					if (obj.pObjectName)
+					{
+						fprintf(stderr, ", Name: %s", obj.pObjectName);
+					}
+					fprintf(stderr, "\n");
+				}
+			}
+
+			if (pCallbackData->queueLabelCount > 0)
+			{
+				fprintf(stderr, "  Queue Labels:\n");
+				for (uint32_t i = 0; i < pCallbackData->queueLabelCount; i++)
+				{
+					fprintf(stderr, "    - %s\n", pCallbackData->pQueueLabels[i].pLabelName);
+				}
+			}
+
+			if (pCallbackData->cmdBufLabelCount > 0)
+			{
+				fprintf(stderr, "  Command Buffer Labels:\n");
+				for (uint32_t i = 0; i < pCallbackData->cmdBufLabelCount; i++)
+				{
+					fprintf(stderr, "    - %s\n", pCallbackData->pCmdBufLabels[i].pLabelName);
+				}
+			}
+
+			fprintf(stderr, "\n");
+
+			if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+			{
+				#ifdef _WIN32
+					__debugbreak();
+				#endif
+			}
+
 			return VK_FALSE;
 		};
 
@@ -361,7 +486,7 @@ class VulkanDevice : public IRHIDevice
 
 	void DestroyDebugMessenger()
 	{
-#ifdef DEBUG
+#if defined(DEBUG) || defined(_DEBUG)
 		auto func =
 		    (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
 		if (func != nullptr)
@@ -421,6 +546,11 @@ class VulkanDevice : public IRHIDevice
 
 		VkPhysicalDeviceFeatures deviceFeatures{};
 
+		// Check if Vulkan 1.3 is supported (dynamic rendering is core in 1.3)
+		VkPhysicalDeviceProperties deviceProperties;
+		vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+		uint32_t apiVersion = deviceProperties.apiVersion;
+
 		// Enable dynamic rendering if available
 		VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeatures{};
 		dynamicRenderingFeatures.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
@@ -442,32 +572,76 @@ class VulkanDevice : public IRHIDevice
 		std::vector<const char *> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
 		hasDynamicRendering = false;
-		for (const auto &ext : availableExtensions)
+
+		auto isExtensionAvailable = [&availableExtensions](const char* extensionName) {
+			for (const auto &ext : availableExtensions)
+			{
+				if (strcmp(ext.extensionName, extensionName) == 0)
+					return true;
+			}
+			return false;
+		};
+
+		// Add VMA-related extensions
+		if (isExtensionAvailable(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME))
 		{
-			if (strcmp(ext.extensionName, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME) == 0)
-			{
-				deviceExtensions.push_back(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
-			}
-			else if (strcmp(ext.extensionName, VK_KHR_BIND_MEMORY_2_EXTENSION_NAME) == 0)
-			{
-				deviceExtensions.push_back(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME);
-			}
-			else if (strcmp(ext.extensionName, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME) == 0)
-			{
-				deviceExtensions.push_back(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME);
-			}
-			else if (strcmp(ext.extensionName, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0)
-			{
-				deviceExtensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
-				hasDynamicRendering = true;
-			}
-#ifdef __APPLE__
-			else if (strcmp(ext.extensionName, "VK_KHR_portability_subset") == 0)
-			{
-				deviceExtensions.push_back("VK_KHR_portability_subset");
-			}
-#endif
+			deviceExtensions.push_back(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
 		}
+		if (isExtensionAvailable(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME))
+		{
+			deviceExtensions.push_back(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME);
+		}
+		if (isExtensionAvailable(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME))
+		{
+			deviceExtensions.push_back(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME);
+		}
+
+		// Check for dynamic rendering support
+		// For Vulkan 1.3+, dynamic rendering is core and doesn't need the extension
+		// For Vulkan 1.2 and below, we need the extension
+		if (apiVersion >= VK_API_VERSION_1_3)
+		{
+			// Dynamic rendering is core in Vulkan 1.3, no extension needed
+			hasDynamicRendering = true;
+			fprintf(stdout, "Dynamic rendering supported via Vulkan 1.3 core\n");
+		}
+		else if (isExtensionAvailable(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME))
+		{
+			// For older Vulkan versions, check if we can use the extension
+			deviceExtensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+
+			if (isExtensionAvailable(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME))
+			{
+				deviceExtensions.push_back(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME);
+			}
+			if (isExtensionAvailable(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME))
+			{
+				deviceExtensions.push_back(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME);
+			}
+			if (isExtensionAvailable(VK_KHR_MULTIVIEW_EXTENSION_NAME))
+			{
+				deviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
+			}
+			if (isExtensionAvailable(VK_KHR_MAINTENANCE2_EXTENSION_NAME))
+			{
+				deviceExtensions.push_back(VK_KHR_MAINTENANCE2_EXTENSION_NAME);
+			}
+
+			hasDynamicRendering = true;
+			fprintf(stdout, "Dynamic rendering enabled via VK_KHR_dynamic_rendering extension\n");
+		}
+		else
+		{
+			hasDynamicRendering = false;
+			fprintf(stderr, "Warning: Dynamic rendering not available, falling back to render passes\n");
+		}
+
+#ifdef __APPLE__
+		if (isExtensionAvailable("VK_KHR_portability_subset"))
+		{
+			deviceExtensions.push_back("VK_KHR_portability_subset");
+		}
+#endif
 
 		createInfo.enabledExtensionCount   = static_cast<uint32_t>(deviceExtensions.size());
 		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
