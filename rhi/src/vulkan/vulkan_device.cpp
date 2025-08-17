@@ -245,47 +245,82 @@ class VulkanDevice : public IRHIDevice
 	                        IRHISemaphore *signalSemaphore = nullptr,
 	                        IRHIFence     *signalFence     = nullptr) override
 	{
+		SubmitInfo submitInfo{};
+		if (waitSemaphore)
+		{
+			SemaphoreWaitInfo waitInfo{waitSemaphore, StageMask::RenderTarget};
+			submitInfo.waitSemaphores     = &waitInfo;
+			submitInfo.waitSemaphoreCount = 1;
+		}
+		if (signalSemaphore)
+		{
+			submitInfo.signalSemaphores     = &signalSemaphore;
+			submitInfo.signalSemaphoreCount = 1;
+		}
+		submitInfo.signalFence = signalFence;
+
+		SubmitCommandLists(cmdLists, count, queueType, submitInfo);
+	}
+
+	void SubmitCommandLists(IRHICommandList **cmdLists, uint32_t count,
+	                        QueueType         queueType,
+	                        const SubmitInfo &submitInfo) override
+	{
 		std::vector<VkCommandBuffer> commandBuffers(count);
-		for (uint32_t i = 0; i < count; ++i)
+		for (uint32_t i = 0; i < count; i++)
 		{
 			auto *vkCmdList   = static_cast<VulkanCommandList *>(cmdLists[i]);
 			commandBuffers[i] = vkCmdList->GetHandle();
 		}
 
-		VkSubmitInfo submitInfo{};
-		submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submitInfo.commandBufferCount = count;
-		submitInfo.pCommandBuffers    = commandBuffers.data();
+		VkSubmitInfo vkSubmitInfo{};
+		vkSubmitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		vkSubmitInfo.commandBufferCount = count;
+		vkSubmitInfo.pCommandBuffers    = commandBuffers.data();
 
-		VkSemaphore          waitSem      = VK_NULL_HANDLE;
-		VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-		if (waitSemaphore)
+		std::vector<VkSemaphore>          waitSemaphores;
+		std::vector<VkPipelineStageFlags> waitStages;
+		if (submitInfo.waitSemaphoreCount > 0)
 		{
-			auto *vkSemaphore             = static_cast<VulkanSemaphore *>(waitSemaphore);
-			waitSem                       = vkSemaphore->GetHandle();
-			submitInfo.waitSemaphoreCount = 1;
-			submitInfo.pWaitSemaphores    = &waitSem;
-			submitInfo.pWaitDstStageMask  = waitStages;
+			waitSemaphores.reserve(submitInfo.waitSemaphoreCount);
+			waitStages.reserve(submitInfo.waitSemaphoreCount);
+
+			for (uint32_t i = 0; i < submitInfo.waitSemaphoreCount; i++)
+			{
+				auto *vkSemaphore = static_cast<VulkanSemaphore *>(submitInfo.waitSemaphores[i].semaphore);
+				waitSemaphores.push_back(vkSemaphore->GetHandle());
+				waitStages.push_back(StageMaskToVulkan(submitInfo.waitSemaphores[i].waitStage));
+			}
+
+			vkSubmitInfo.waitSemaphoreCount = submitInfo.waitSemaphoreCount;
+			vkSubmitInfo.pWaitSemaphores    = waitSemaphores.data();
+			vkSubmitInfo.pWaitDstStageMask  = waitStages.data();
 		}
 
-		VkSemaphore signalSem = VK_NULL_HANDLE;
-		if (signalSemaphore)
+		std::vector<VkSemaphore> signalSemaphores;
+		if (submitInfo.signalSemaphoreCount > 0)
 		{
-			auto *vkSemaphore               = static_cast<VulkanSemaphore *>(signalSemaphore);
-			signalSem                       = vkSemaphore->GetHandle();
-			submitInfo.signalSemaphoreCount = 1;
-			submitInfo.pSignalSemaphores    = &signalSem;
+			signalSemaphores.reserve(submitInfo.signalSemaphoreCount);
+
+			for (uint32_t i = 0; i < submitInfo.signalSemaphoreCount; i++)
+			{
+				auto *vkSemaphore = static_cast<VulkanSemaphore *>(submitInfo.signalSemaphores[i]);
+				signalSemaphores.push_back(vkSemaphore->GetHandle());
+			}
+
+			vkSubmitInfo.signalSemaphoreCount = submitInfo.signalSemaphoreCount;
+			vkSubmitInfo.pSignalSemaphores    = signalSemaphores.data();
 		}
 
 		VkFence fence = VK_NULL_HANDLE;
-		if (signalFence)
+		if (submitInfo.signalFence)
 		{
-			auto *vkFence = static_cast<VulkanFence *>(signalFence);
+			auto *vkFence = static_cast<VulkanFence *>(submitInfo.signalFence);
 			fence         = vkFence->GetHandle();
 		}
 
 		VkQueue queue = GetQueue(queueType);
-		if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS)
+		if (vkQueueSubmit(queue, 1, &vkSubmitInfo, fence) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to submit command buffer");
 		}

@@ -186,11 +186,20 @@ enum class VertexFormat
 
 enum class DescriptorType
 {
-	UNIFORM_BUFFER,
-	STORAGE_BUFFER,
-	SAMPLER,
-	TEXTURE,
-	COMBINED_IMAGE_SAMPLER
+	// Buffers
+	UNIFORM_BUFFER,        // VK: UNIFORM_BUFFER
+	STORAGE_BUFFER,        // VK: STORAGE_BUFFER
+
+	// Texel buffer views
+	UNIFORM_TEXEL_BUFFER,        // VK: UNIFORM_TEXEL_BUFFER
+	STORAGE_TEXEL_BUFFER,        // VK: STORAGE_TEXEL_BUFFER
+
+	// Textures
+	SAMPLED_TEXTURE,        // VK: SAMPLED_IMAGE
+	STORAGE_TEXTURE,        // VK: STORAGE_IMAGE
+
+	// Samplers
+	SAMPLER,        // VK: SAMPLER
 };
 
 enum class ShaderStageFlags : uint32_t
@@ -496,7 +505,7 @@ struct TextureBinding
 	IRHITexture   *texture;
 	IRHISampler   *sampler = nullptr;
 	ImageLayout    layout  = ImageLayout::SHADER_READ_ONLY;
-	DescriptorType type    = DescriptorType::COMBINED_IMAGE_SAMPLER;
+	DescriptorType type    = DescriptorType::SAMPLED_TEXTURE;
 };
 
 struct RasterizationState
@@ -698,6 +707,21 @@ struct DispatchIndirectCommand
 	uint32_t x;
 	uint32_t y;
 	uint32_t z;
+};
+
+struct SemaphoreWaitInfo
+{
+	IRHISemaphore *semaphore;
+	StageMask      waitStage;
+};
+
+struct SubmitInfo
+{
+	const SemaphoreWaitInfo *waitSemaphores       = nullptr;
+	uint32_t                 waitSemaphoreCount   = 0;
+	IRHISemaphore          **signalSemaphores     = nullptr;
+	uint32_t                 signalSemaphoreCount = 0;
+	IRHIFence               *signalFence          = nullptr;
 };
 
 }        // namespace rhi

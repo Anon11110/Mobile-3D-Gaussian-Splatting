@@ -28,7 +28,6 @@ VulkanDescriptorSetLayout::VulkanDescriptorSetLayout(VkDevice device, const Desc
 		poolSizeMap[layoutBinding.descriptorType] += layoutBinding.descriptorCount;
 	}
 
-	// Convert pool size map to vector
 	for (const auto &pair : poolSizeMap)
 	{
 		VkDescriptorPoolSize poolSize{};
@@ -88,10 +87,7 @@ VulkanDescriptorSet::VulkanDescriptorSet(VkDevice device, VulkanDescriptorSetLay
 {}
 
 VulkanDescriptorSet::~VulkanDescriptorSet()
-{
-	// Descriptor sets are automatically freed when pool is reset or destroyed
-	// No explicit cleanup needed
-}
+{}
 
 VulkanDescriptorSet::VulkanDescriptorSet(VulkanDescriptorSet &&other) noexcept :
     device(other.device),
@@ -109,15 +105,11 @@ VulkanDescriptorSet &VulkanDescriptorSet::operator=(VulkanDescriptorSet &&other)
 {
 	if (this != &other)
 	{
-		// No explicit cleanup needed for descriptor sets
-
-		// Move from other
 		device        = other.device;
 		descriptorSet = other.descriptorSet;
 		sourcePool    = other.sourcePool;
 		layout        = other.layout;
 
-		// Reset other
 		other.device        = VK_NULL_HANDLE;
 		other.descriptorSet = VK_NULL_HANDLE;
 		other.sourcePool    = VK_NULL_HANDLE;

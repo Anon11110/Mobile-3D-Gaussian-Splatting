@@ -32,6 +32,10 @@ class IRHIDevice
 	                                IRHISemaphore *signalSemaphore = nullptr,
 	                                IRHIFence     *signalFence     = nullptr) = 0;
 
+	virtual void SubmitCommandLists(IRHICommandList **cmdLists, uint32_t count,
+	                                QueueType         queueType,
+	                                const SubmitInfo &submitInfo) = 0;
+
 	virtual void WaitQueueIdle(QueueType queueType) = 0;
 	virtual void WaitIdle()                         = 0;
 };

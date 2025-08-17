@@ -138,16 +138,28 @@ VkDescriptorType DescriptorTypeToVulkan(DescriptorType type)
 {
 	switch (type)
 	{
+		// Buffers
 		case DescriptorType::UNIFORM_BUFFER:
 			return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		case DescriptorType::STORAGE_BUFFER:
 			return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+
+		// Texel buffer views
+		case DescriptorType::UNIFORM_TEXEL_BUFFER:
+			return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+		case DescriptorType::STORAGE_TEXEL_BUFFER:
+			return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+
+		// Textures
+		case DescriptorType::SAMPLED_TEXTURE:
+			return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		case DescriptorType::STORAGE_TEXTURE:
+			return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+
+		// Samplers
 		case DescriptorType::SAMPLER:
 			return VK_DESCRIPTOR_TYPE_SAMPLER;
-		case DescriptorType::TEXTURE:
-			return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-		case DescriptorType::COMBINED_IMAGE_SAMPLER:
-			return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+
 		default:
 			throw std::runtime_error("Unknown descriptor type");
 	}
