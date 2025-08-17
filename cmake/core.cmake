@@ -53,6 +53,11 @@ target_include_directories(core PUBLIC
 # Require C++20
 target_compile_features(core PUBLIC cxx_std_20)
 
+# Add /utf-8 flag for MSVC to fix Unicode support in spdlog
+if(MSVC)
+    target_compile_options(core PUBLIC /utf-8)
+endif()
+
 # Link GLM (header-only, so just for interface)
 target_link_libraries(core PUBLIC)
 

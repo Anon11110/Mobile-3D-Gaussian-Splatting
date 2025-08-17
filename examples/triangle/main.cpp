@@ -224,7 +224,7 @@ int main()
 				std::fill(imageFirstUse.begin(), imageFirstUse.end(), true);
 				continue;
 			}
-			else if (acquireStatus == rhi::SwapchainStatus::ERROR)
+			else if (acquireStatus == rhi::SwapchainStatus::ERROR_OCCURRED)
 			{
 				LOG_ERROR("Failed to acquire swapchain image");
 				break;
@@ -360,7 +360,7 @@ int main()
 				swapchain->Resize(width, height);
 				std::fill(imageFirstUse.begin(), imageFirstUse.end(), true);
 			}
-			else if (presentStatus == rhi::SwapchainStatus::ERROR)
+			else if (presentStatus == rhi::SwapchainStatus::ERROR_OCCURRED)
 			{
 				LOG_ERROR("Failed to present swapchain image");
 				break;

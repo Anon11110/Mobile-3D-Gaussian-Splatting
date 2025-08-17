@@ -214,7 +214,7 @@ SwapchainStatus VulkanSwapchain::AcquireNextImage(uint32_t &imageIndex, IRHISema
 		case VK_SUBOPTIMAL_KHR:
 			return SwapchainStatus::SUBOPTIMAL;
 		default:
-			return SwapchainStatus::ERROR;
+			return SwapchainStatus::ERROR_OCCURRED;
 	}
 }
 
@@ -247,7 +247,7 @@ SwapchainStatus VulkanSwapchain::Present(uint32_t imageIndex, IRHISemaphore *wai
 		case VK_SUBOPTIMAL_KHR:
 			return SwapchainStatus::SUBOPTIMAL;
 		default:
-			return SwapchainStatus::ERROR;
+			return SwapchainStatus::ERROR_OCCURRED;
 	}
 }
 

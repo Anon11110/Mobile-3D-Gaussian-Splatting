@@ -219,7 +219,7 @@ enum class SwapchainStatus
 	SUCCESS,
 	OUT_OF_DATE,
 	SUBOPTIMAL,
-	ERROR
+	ERROR_OCCURRED
 };
 
 enum class ImageLayout

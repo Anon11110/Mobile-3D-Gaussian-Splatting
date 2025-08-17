@@ -64,3 +64,8 @@ target_include_directories(RHI PRIVATE
 
 # Link libraries
 target_link_libraries(RHI PUBLIC glfw)
+
+# Add /utf-8 flag for MSVC to fix Unicode support
+if(MSVC)
+    target_compile_options(RHI PUBLIC /utf-8)
+endif()
