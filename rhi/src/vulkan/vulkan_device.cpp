@@ -1,4 +1,5 @@
 #include <cstring>
+#include <set>
 #include <stdexcept>
 #include <vector>
 
@@ -15,10 +16,20 @@ class VulkanDevice : public IRHIDevice
 	VkInstance       instance;
 	VkPhysicalDevice physicalDevice;
 	VkDevice         device;
-	VkQueue          graphicsQueue;
-	uint32_t         graphicsQueueFamily;
-	VkCommandPool    commandPool;
-	VmaAllocator     allocator;
+
+	// Queue families and queues
+	VkQueue  graphicsQueue;
+	VkQueue  computeQueue;
+	VkQueue  transferQueue;
+	uint32_t graphicsQueueFamily;
+	uint32_t computeQueueFamily;
+	uint32_t transferQueueFamily;
+
+	// Command pools for different queue families
+	VkCommandPool graphicsCommandPool;
+	VkCommandPool computeCommandPool;
+	VkCommandPool transferCommandPool;
+	VmaAllocator  allocator;
 
 	VkDescriptorPool graphicsDescriptorPool;
 	VkDescriptorPool computeDescriptorPool;
@@ -46,7 +57,7 @@ class VulkanDevice : public IRHIDevice
 		SetupDebugMessenger();
 		PickPhysicalDevice();
 		CreateLogicalDevice();
-		CreateCommandPool();
+		CreateCommandPools();
 		CreateVmaAllocator();
 		CreateDescriptorPools();
 		CacheDynamicRenderingFunctions();
@@ -74,10 +85,18 @@ class VulkanDevice : public IRHIDevice
 			vkDestroyDescriptorPool(device, transferDescriptorPool, nullptr);
 		}
 
-		// Destroy command pool
-		if (commandPool != VK_NULL_HANDLE)
+		// Destroy command pools
+		if (graphicsCommandPool != VK_NULL_HANDLE)
 		{
-			vkDestroyCommandPool(device, commandPool, nullptr);
+			vkDestroyCommandPool(device, graphicsCommandPool, nullptr);
+		}
+		if (computeCommandPool != VK_NULL_HANDLE)
+		{
+			vkDestroyCommandPool(device, computeCommandPool, nullptr);
+		}
+		if (transferCommandPool != VK_NULL_HANDLE)
+		{
+			vkDestroyCommandPool(device, transferCommandPool, nullptr);
 		}
 
 		// IMPORTANT: VMA allocator must be destroyed AFTER all buffers/textures are destroyed
@@ -160,9 +179,15 @@ class VulkanDevice : public IRHIDevice
 		return std::make_unique<VulkanPipeline>(device, desc);
 	}
 
-	std::unique_ptr<IRHICommandList> CreateCommandList() override
+	std::unique_ptr<IRHIPipeline> CreateComputePipeline(const ComputePipelineDesc &desc) override
 	{
-		return std::make_unique<VulkanCommandList>(device, commandPool, vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR);
+		return std::make_unique<VulkanPipeline>(device, desc);
+	}
+
+	std::unique_ptr<IRHICommandList> CreateCommandList(QueueType queueType = QueueType::GRAPHICS) override
+	{
+		VkCommandPool commandPool = GetCommandPool(queueType);
+		return std::make_unique<VulkanCommandList>(device, commandPool, queueType, vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR);
 	}
 
 	std::unique_ptr<IRHISwapchain> CreateSwapchain(const SwapchainDesc &desc) override
@@ -214,8 +239,11 @@ class VulkanDevice : public IRHIDevice
 		return std::make_unique<VulkanDescriptorSet>(device, vkLayout, pool, descriptorSet);
 	}
 
-	void SubmitCommandLists(IRHICommandList **cmdLists, uint32_t count, IRHISemaphore *waitSemaphore,
-	                        IRHISemaphore *signalSemaphore, IRHIFence *signalFence) override
+	void SubmitCommandLists(IRHICommandList **cmdLists, uint32_t count,
+	                        QueueType      queueType       = QueueType::GRAPHICS,
+	                        IRHISemaphore *waitSemaphore   = nullptr,
+	                        IRHISemaphore *signalSemaphore = nullptr,
+	                        IRHIFence     *signalFence     = nullptr) override
 	{
 		std::vector<VkCommandBuffer> commandBuffers(count);
 		for (uint32_t i = 0; i < count; ++i)
@@ -256,10 +284,17 @@ class VulkanDevice : public IRHIDevice
 			fence         = vkFence->GetHandle();
 		}
 
-		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS)
+		VkQueue queue = GetQueue(queueType);
+		if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to submit command buffer");
 		}
+	}
+
+	void WaitQueueIdle(QueueType queueType) override
+	{
+		VkQueue queue = GetQueue(queueType);
+		vkQueueWaitIdle(queue);
 	}
 
 	void WaitIdle() override
@@ -283,6 +318,36 @@ class VulkanDevice : public IRHIDevice
 		}
 	}
 
+	VkQueue GetQueue(QueueType queueType)
+	{
+		switch (queueType)
+		{
+			case QueueType::GRAPHICS:
+				return graphicsQueue;
+			case QueueType::COMPUTE:
+				return computeQueue;
+			case QueueType::TRANSFER:
+				return transferQueue;
+			default:
+				return graphicsQueue;
+		}
+	}
+
+	VkCommandPool GetCommandPool(QueueType queueType)
+	{
+		switch (queueType)
+		{
+			case QueueType::GRAPHICS:
+				return graphicsCommandPool;
+			case QueueType::COMPUTE:
+				return computeCommandPool;
+			case QueueType::TRANSFER:
+				return transferCommandPool;
+			default:
+				return graphicsCommandPool;
+		}
+	}
+
 	void CreateInstance()
 	{
 		VkApplicationInfo appInfo{};
@@ -291,7 +356,7 @@ class VulkanDevice : public IRHIDevice
 		appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
 		appInfo.pEngineName        = "RHI";
 		appInfo.engineVersion      = VK_MAKE_VERSION(1, 0, 0);
-		appInfo.apiVersion         = VK_API_VERSION_1_3;  // Request 1.3 for dynamic rendering core support
+		appInfo.apiVersion         = VK_API_VERSION_1_3;        // Request 1.3 for dynamic rendering core support
 
 		VkInstanceCreateInfo createInfo{};
 		createInfo.sType            = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -327,8 +392,7 @@ class VulkanDevice : public IRHIDevice
 
 #if defined(DEBUG) || defined(_DEBUG)
 		const std::vector<const char *> validationLayers = {
-		    "VK_LAYER_KHRONOS_validation"
-		};
+		    "VK_LAYER_KHRONOS_validation"};
 
 		uint32_t layerCount;
 		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
@@ -379,7 +443,7 @@ class VulkanDevice : public IRHIDevice
 	{
 #if defined(DEBUG) || defined(_DEBUG)
 		VkDebugUtilsMessengerCreateInfoEXT createInfo{};
-		createInfo.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+		createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
 		// Enable all severity levels except verbose (too noisy)
 		createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
 		                             VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
@@ -390,9 +454,8 @@ class VulkanDevice : public IRHIDevice
 		createInfo.pfnUserCallback =
 		    [](VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType,
 		       const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData, void *pUserData) -> VkBool32 {
-
 			const char *severityStr = "";
-			const char *typeStr = "";
+			const char *typeStr     = "";
 
 			switch (messageSeverity)
 			{
@@ -436,7 +499,7 @@ class VulkanDevice : public IRHIDevice
 				{
 					const VkDebugUtilsObjectNameInfoEXT &obj = pCallbackData->pObjects[i];
 					fprintf(stderr, "    - Type: %d, Handle: 0x%llx",
-					        obj.objectType, (unsigned long long)obj.objectHandle);
+					        obj.objectType, (unsigned long long) obj.objectHandle);
 					if (obj.pObjectName)
 					{
 						fprintf(stderr, ", Name: %s", obj.pObjectName);
@@ -467,9 +530,9 @@ class VulkanDevice : public IRHIDevice
 
 			if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
 			{
-				#ifdef _WIN32
-					__debugbreak();
-				#endif
+#	ifdef _WIN32
+				__debugbreak();
+#	endif
 			}
 
 			return VK_FALSE;
@@ -512,7 +575,7 @@ class VulkanDevice : public IRHIDevice
 		// Pick first suitable device (can be improved)
 		physicalDevice = devices[0];
 
-		// Find graphics queue family
+		// Find queue families
 		uint32_t queueFamilyCount = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
 
@@ -520,11 +583,43 @@ class VulkanDevice : public IRHIDevice
 		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilies.data());
 
 		graphicsQueueFamily = UINT32_MAX;
+		computeQueueFamily  = UINT32_MAX;
+		transferQueueFamily = UINT32_MAX;
+
+		// Find dedicated compute queue (without graphics)
+		for (uint32_t i = 0; i < queueFamilyCount; i++)
+		{
+			if ((queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
+			    !(queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
+			{
+				computeQueueFamily = i;
+				break;
+			}
+		}
+
+		// Find dedicated transfer queue (without graphics and compute)
+		for (uint32_t i = 0; i < queueFamilyCount; i++)
+		{
+			if ((queueFamilies[i].queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+			    !(queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+			    !(queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT))
+			{
+				transferQueueFamily = i;
+				break;
+			}
+		}
+
+		// Find graphics queue (supports graphics, compute, and transfer)
 		for (uint32_t i = 0; i < queueFamilyCount; i++)
 		{
 			if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
 			{
 				graphicsQueueFamily = i;
+				// If we didn't find dedicated queues, use graphics queue for all
+				if (computeQueueFamily == UINT32_MAX)
+					computeQueueFamily = i;
+				if (transferQueueFamily == UINT32_MAX)
+					transferQueueFamily = i;
 				break;
 			}
 		}
@@ -537,12 +632,20 @@ class VulkanDevice : public IRHIDevice
 
 	void CreateLogicalDevice()
 	{
-		VkDeviceQueueCreateInfo queueCreateInfo{};
-		queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-		queueCreateInfo.queueFamilyIndex = graphicsQueueFamily;
-		queueCreateInfo.queueCount       = 1;
-		float queuePriority              = 1.0f;
-		queueCreateInfo.pQueuePriorities = &queuePriority;
+		std::set<uint32_t> uniqueQueueFamilies = {graphicsQueueFamily, computeQueueFamily, transferQueueFamily};
+
+		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+		float                                queuePriority = 1.0f;
+
+		for (uint32_t queueFamily : uniqueQueueFamilies)
+		{
+			VkDeviceQueueCreateInfo queueCreateInfo{};
+			queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+			queueCreateInfo.queueFamilyIndex = queueFamily;
+			queueCreateInfo.queueCount       = 1;
+			queueCreateInfo.pQueuePriorities = &queuePriority;
+			queueCreateInfos.push_back(queueCreateInfo);
+		}
 
 		VkPhysicalDeviceFeatures deviceFeatures{};
 
@@ -558,8 +661,8 @@ class VulkanDevice : public IRHIDevice
 
 		VkDeviceCreateInfo createInfo{};
 		createInfo.sType                = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-		createInfo.queueCreateInfoCount = 1;
-		createInfo.pQueueCreateInfos    = &queueCreateInfo;
+		createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+		createInfo.pQueueCreateInfos    = queueCreateInfos.data();
 		createInfo.pEnabledFeatures     = &deviceFeatures;
 
 		// Check available device extensions
@@ -573,7 +676,7 @@ class VulkanDevice : public IRHIDevice
 
 		hasDynamicRendering = false;
 
-		auto isExtensionAvailable = [&availableExtensions](const char* extensionName) {
+		auto isExtensionAvailable = [&availableExtensions](const char *extensionName) {
 			for (const auto &ext : availableExtensions)
 			{
 				if (strcmp(ext.extensionName, extensionName) == 0)
@@ -657,18 +760,43 @@ class VulkanDevice : public IRHIDevice
 		}
 
 		vkGetDeviceQueue(device, graphicsQueueFamily, 0, &graphicsQueue);
+		vkGetDeviceQueue(device, computeQueueFamily, 0, &computeQueue);
+		vkGetDeviceQueue(device, transferQueueFamily, 0, &transferQueue);
 	}
 
-	void CreateCommandPool()
+	void CreateCommandPools()
 	{
-		VkCommandPoolCreateInfo poolInfo{};
-		poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		poolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		poolInfo.queueFamilyIndex = graphicsQueueFamily;
+		// Create graphics command pool
+		VkCommandPoolCreateInfo graphicsPoolInfo{};
+		graphicsPoolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		graphicsPoolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		graphicsPoolInfo.queueFamilyIndex = graphicsQueueFamily;
 
-		if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS)
+		if (vkCreateCommandPool(device, &graphicsPoolInfo, nullptr, &graphicsCommandPool) != VK_SUCCESS)
 		{
-			throw std::runtime_error("Failed to create command pool");
+			throw std::runtime_error("Failed to create graphics command pool");
+		}
+
+		// Create compute command pool
+		VkCommandPoolCreateInfo computePoolInfo{};
+		computePoolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		computePoolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		computePoolInfo.queueFamilyIndex = computeQueueFamily;
+
+		if (vkCreateCommandPool(device, &computePoolInfo, nullptr, &computeCommandPool) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create compute command pool");
+		}
+
+		// Create transfer command pool
+		VkCommandPoolCreateInfo transferPoolInfo{};
+		transferPoolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		transferPoolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		transferPoolInfo.queueFamilyIndex = transferQueueFamily;
+
+		if (vkCreateCommandPool(device, &transferPoolInfo, nullptr, &transferCommandPool) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create transfer command pool");
 		}
 	}
 
@@ -755,7 +883,7 @@ class VulkanDevice : public IRHIDevice
 		VkCommandBufferAllocateInfo cmdAllocInfo{};
 		cmdAllocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		cmdAllocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		cmdAllocInfo.commandPool        = commandPool;
+		cmdAllocInfo.commandPool        = transferCommandPool;
 		cmdAllocInfo.commandBufferCount = 1;
 
 		VkCommandBuffer copyCmd;
@@ -783,10 +911,10 @@ class VulkanDevice : public IRHIDevice
 
 		// TODO: Async transfer? Because this is a one-time setup cost that happens when the
 		// user is already waiting for buffer creation, using vkQueueWaitIdle may be acceptable
-		vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-		vkQueueWaitIdle(graphicsQueue);
+		vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(transferQueue);
 
-		vkFreeCommandBuffers(device, commandPool, 1, &copyCmd);
+		vkFreeCommandBuffers(device, transferCommandPool, 1, &copyCmd);
 		vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
 	}
 
@@ -825,7 +953,7 @@ class VulkanDevice : public IRHIDevice
 		VkCommandBufferAllocateInfo cmdAllocInfo{};
 		cmdAllocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		cmdAllocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		cmdAllocInfo.commandPool        = commandPool;
+		cmdAllocInfo.commandPool        = transferCommandPool;
 		cmdAllocInfo.commandBufferCount = 1;
 
 		VkCommandBuffer copyCmd;
@@ -890,10 +1018,10 @@ class VulkanDevice : public IRHIDevice
 
 		// TODO: Async transfer? Same as buffer, because this is a one-time setup cost that happens when
 		// the user is already waiting for buffer creation, using vkQueueWaitIdle may be acceptable
-		vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-		vkQueueWaitIdle(graphicsQueue);
+		vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(transferQueue);
 
-		vkFreeCommandBuffers(device, commandPool, 1, &copyCmd);
+		vkFreeCommandBuffers(device, transferCommandPool, 1, &copyCmd);
 		vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
 	}
 

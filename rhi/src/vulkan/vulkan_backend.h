@@ -207,10 +207,12 @@ class VulkanPipeline : public IRHIPipeline
 	VkDevice              device;
 	VkPipeline            pipeline;
 	VkPipelineLayout      pipelineLayout;
+	PipelineType          pipelineType;
 	RenderTargetSignature targetSignature;
 
   public:
 	VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc);
+	VulkanPipeline(VkDevice device, const ComputePipelineDesc &desc);
 	~VulkanPipeline() override;
 
 	VulkanPipeline(const VulkanPipeline &)            = delete;
@@ -226,6 +228,14 @@ class VulkanPipeline : public IRHIPipeline
 	{
 		return pipelineLayout;
 	}
+	PipelineType GetPipelineType() const
+	{
+		return pipelineType;
+	}
+	VkPipelineBindPoint GetBindPoint() const
+	{
+		return pipelineType == PipelineType::GRAPHICS ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE;
+	}
 	const RenderTargetSignature &GetTargetSignature() const
 	{
 		return targetSignature;
@@ -240,13 +250,14 @@ class VulkanCommandList : public IRHICommandList
 	VkCommandBuffer commandBuffer;
 	VulkanPipeline *currentPipeline;
 	bool            inRendering;
+	QueueType       queueType;
 
 	// Cached function pointers
 	PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
 	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
 
   public:
-	VulkanCommandList(VkDevice device, VkCommandPool commandPool,
+	VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType,
 	                  PFN_vkCmdBeginRenderingKHR beginFunc,
 	                  PFN_vkCmdEndRenderingKHR   endFunc);
 	~VulkanCommandList() override;
@@ -275,6 +286,9 @@ class VulkanCommandList : public IRHICommandList
 	void Draw(uint32_t vertexCount, uint32_t firstVertex = 0) override;
 	void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0) override;
 	void DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, uint32_t drawCount, uint32_t stride = sizeof(DrawIndexedIndirectCommand)) override;
+
+	void Dispatch(uint32_t groupCountX, uint32_t groupCountY = 1, uint32_t groupCountZ = 1) override;
+	void DispatchIndirect(IRHIBuffer *buffer, size_t offset) override;
 
 	void Barrier(
 	    PipelineScope                         src_scope,

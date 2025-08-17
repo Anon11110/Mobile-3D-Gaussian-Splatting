@@ -339,7 +339,8 @@ int main()
 
 			// Submit
 			rhi::IRHICommandList *cmdListPtr = cmdList.get();
-			device->SubmitCommandLists(&cmdListPtr, 1, imageAvailableSemaphores[0].get(), renderFinishedSemaphores[imageIndex].get(),
+			device->SubmitCommandLists(&cmdListPtr, 1, rhi::QueueType::GRAPHICS,
+			                           imageAvailableSemaphores[0].get(), renderFinishedSemaphores[imageIndex].get(),
 			                           inFlightFence.get());
 
 			// Present

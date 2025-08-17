@@ -5,10 +5,10 @@
 namespace rhi::vulkan
 {
 
-VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool,
+VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType,
                                      PFN_vkCmdBeginRenderingKHR beginFunc,
                                      PFN_vkCmdEndRenderingKHR   endFunc) :
-    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc)
+    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), queueType(queueType), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc)
 {
 	// Allocate command buffer
 	VkCommandBufferAllocateInfo allocInfo{};
@@ -227,7 +227,7 @@ void VulkanCommandList::EndRendering()
 void VulkanCommandList::SetPipeline(IRHIPipeline *pipeline)
 {
 	currentPipeline = static_cast<VulkanPipeline *>(pipeline);
-	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, currentPipeline->GetHandle());
+	vkCmdBindPipeline(commandBuffer, currentPipeline->GetBindPoint(), currentPipeline->GetHandle());
 }
 
 void VulkanCommandList::SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, size_t offset)
@@ -304,6 +304,17 @@ void VulkanCommandList::DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, u
 {
 	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
 	vkCmdDrawIndexedIndirect(commandBuffer, vkBuffer->GetHandle(), offset, drawCount, stride);
+}
+
+void VulkanCommandList::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
+{
+	vkCmdDispatch(commandBuffer, groupCountX, groupCountY, groupCountZ);
+}
+
+void VulkanCommandList::DispatchIndirect(IRHIBuffer *buffer, size_t offset)
+{
+	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
+	vkCmdDispatchIndirect(commandBuffer, vkBuffer->GetHandle(), offset);
 }
 
 void VulkanCommandList::Barrier(

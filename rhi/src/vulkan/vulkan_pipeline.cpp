@@ -7,7 +7,7 @@ namespace rhi::vulkan
 {
 
 VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc) :
-    device(device), pipeline(VK_NULL_HANDLE), pipelineLayout(VK_NULL_HANDLE)
+    device(device), pipeline(VK_NULL_HANDLE), pipelineLayout(VK_NULL_HANDLE), pipelineType(PipelineType::GRAPHICS)
 {
 	auto *vertexShader   = static_cast<VulkanShader *>(desc.vertexShader);
 	auto *fragmentShader = static_cast<VulkanShader *>(desc.fragmentShader);
@@ -240,6 +240,62 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc
 	}
 }
 
+VulkanPipeline::VulkanPipeline(VkDevice device, const ComputePipelineDesc &desc) :
+    device(device), pipeline(VK_NULL_HANDLE), pipelineLayout(VK_NULL_HANDLE), pipelineType(PipelineType::COMPUTE)
+{
+	auto *computeShader = static_cast<VulkanShader *>(desc.computeShader);
+
+	// Shader stage
+	VkPipelineShaderStageCreateInfo computeShaderStageInfo{};
+	computeShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	computeShaderStageInfo.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
+	computeShaderStageInfo.module = computeShader->GetHandle();
+	computeShaderStageInfo.pName  = "main";
+
+	// Collect descriptor set layouts
+	std::vector<VkDescriptorSetLayout> descriptorSetLayouts;
+	for (auto *layout : desc.descriptorSetLayouts)
+	{
+		auto *vkLayout = static_cast<VulkanDescriptorSetLayout *>(layout);
+		descriptorSetLayouts.push_back(vkLayout->GetHandle());
+	}
+
+	// Collect push constant ranges
+	std::vector<VkPushConstantRange> pushConstantRanges;
+	for (const auto &range : desc.pushConstantRanges)
+	{
+		VkPushConstantRange vkRange{};
+		vkRange.stageFlags = ShaderStageFlagsToVulkan(range.stageFlags);
+		vkRange.offset     = range.offset;
+		vkRange.size       = range.size;
+		pushConstantRanges.push_back(vkRange);
+	}
+
+	// Pipeline layout
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+	pipelineLayoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutInfo.setLayoutCount         = static_cast<uint32_t>(descriptorSetLayouts.size());
+	pipelineLayoutInfo.pSetLayouts            = descriptorSetLayouts.data();
+	pipelineLayoutInfo.pushConstantRangeCount = static_cast<uint32_t>(pushConstantRanges.size());
+	pipelineLayoutInfo.pPushConstantRanges    = pushConstantRanges.data();
+
+	if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("Failed to create compute pipeline layout");
+	}
+
+	// Compute pipeline
+	VkComputePipelineCreateInfo pipelineInfo{};
+	pipelineInfo.sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	pipelineInfo.stage  = computeShaderStageInfo;
+	pipelineInfo.layout = pipelineLayout;
+
+	if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS)
+	{
+		throw std::runtime_error("Failed to create compute pipeline");
+	}
+}
+
 VulkanPipeline::~VulkanPipeline()
 {
 	if (pipeline != VK_NULL_HANDLE)
@@ -257,6 +313,7 @@ VulkanPipeline::VulkanPipeline(VulkanPipeline &&other) noexcept :
     device(other.device),
     pipeline(other.pipeline),
     pipelineLayout(other.pipelineLayout),
+    pipelineType(other.pipelineType),
     targetSignature(std::move(other.targetSignature))
 {
 	other.device         = VK_NULL_HANDLE;
@@ -280,6 +337,7 @@ VulkanPipeline &VulkanPipeline::operator=(VulkanPipeline &&other) noexcept
 		device          = other.device;
 		pipeline        = other.pipeline;
 		pipelineLayout  = other.pipelineLayout;
+		pipelineType    = other.pipelineType;
 		targetSignature = std::move(other.targetSignature);
 
 		other.device         = VK_NULL_HANDLE;

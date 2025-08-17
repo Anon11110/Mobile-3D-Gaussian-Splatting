@@ -16,7 +16,8 @@ class IRHIDevice
 	virtual std::unique_ptr<IRHITextureView>         CreateTextureView(const TextureViewDesc &desc)                 = 0;
 	virtual std::unique_ptr<IRHIShader>              CreateShader(const ShaderDesc &desc)                           = 0;
 	virtual std::unique_ptr<IRHIPipeline>            CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)       = 0;
-	virtual std::unique_ptr<IRHICommandList>         CreateCommandList()                                            = 0;
+	virtual std::unique_ptr<IRHIPipeline>            CreateComputePipeline(const ComputePipelineDesc &desc)         = 0;
+	virtual std::unique_ptr<IRHICommandList>         CreateCommandList(QueueType queueType = QueueType::GRAPHICS)   = 0;
 	virtual std::unique_ptr<IRHISwapchain>           CreateSwapchain(const SwapchainDesc &desc)                     = 0;
 	virtual std::unique_ptr<IRHISemaphore>           CreateSemaphore()                                              = 0;
 	virtual std::unique_ptr<IRHIFence>               CreateFence(bool signaled = false)                             = 0;
@@ -25,10 +26,14 @@ class IRHIDevice
 	                                                                     QueueType                queueType = QueueType::GRAPHICS) = 0;
 
 	// Queue operations
-	virtual void SubmitCommandLists(IRHICommandList **cmdLists, uint32_t count, IRHISemaphore *waitSemaphore = nullptr,
-	                                IRHISemaphore *signalSemaphore = nullptr, IRHIFence *signalFence = nullptr) = 0;
+	virtual void SubmitCommandLists(IRHICommandList **cmdLists, uint32_t count,
+	                                QueueType      queueType       = QueueType::GRAPHICS,
+	                                IRHISemaphore *waitSemaphore   = nullptr,
+	                                IRHISemaphore *signalSemaphore = nullptr,
+	                                IRHIFence     *signalFence     = nullptr) = 0;
 
-	virtual void WaitIdle() = 0;
+	virtual void WaitQueueIdle(QueueType queueType) = 0;
+	virtual void WaitIdle()                         = 0;
 };
 
 // Buffer interface
@@ -109,6 +114,9 @@ class IRHICommandList
 	virtual void Draw(uint32_t vertexCount, uint32_t firstVertex = 0)                                                                             = 0;
 	virtual void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0)                                              = 0;
 	virtual void DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, uint32_t drawCount, uint32_t stride = sizeof(DrawIndexedIndirectCommand)) = 0;
+
+	virtual void Dispatch(uint32_t groupCountX, uint32_t groupCountY = 1, uint32_t groupCountZ = 1) = 0;
+	virtual void DispatchIndirect(IRHIBuffer *buffer, size_t offset)                                = 0;
 
 	virtual void Barrier(
 	    PipelineScope                         src_scope,

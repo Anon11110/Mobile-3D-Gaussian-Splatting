@@ -208,6 +208,12 @@ enum class QueueType
 	TRANSFER
 };
 
+enum class PipelineType
+{
+	GRAPHICS,
+	COMPUTE
+};
+
 enum class SwapchainStatus
 {
 	SUCCESS,
@@ -572,6 +578,13 @@ struct GraphicsPipelineDesc
 	std::vector<PushConstantRange>         pushConstantRanges;
 };
 
+struct ComputePipelineDesc
+{
+	IRHIShader                            *computeShader;
+	std::vector<IRHIDescriptorSetLayout *> descriptorSetLayouts;
+	std::vector<PushConstantRange>         pushConstantRanges;
+};
+
 struct SwapchainDesc
 {
 	void         *windowHandle;        // HWND on Windows, NSWindow* on macOS
@@ -678,6 +691,13 @@ struct DrawIndexedIndirectCommand
 	uint32_t firstIndex;
 	int32_t  vertexOffset;
 	uint32_t firstInstance;
+};
+
+struct DispatchIndirectCommand
+{
+	uint32_t x;
+	uint32_t y;
+	uint32_t z;
 };
 
 }        // namespace rhi
