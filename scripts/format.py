@@ -14,8 +14,21 @@ ALLOWED_EXTENSIONS = {
     ".hpp",
     ".cpp",
 }
-THIRDPARTY_DIR_NAMES = {
+
+# Hardcoded directories to skip (takes priority over FORMAT_DIRS)
+SKIPPED_DIRS = {
     "third-party",
+    "build",
+    ".git",
+    ".vscode",
+    "CMakeFiles",
+}
+
+# Hardcoded files to skip (takes priority over other filters)
+SKIPPED_FILES = {
+    ".clang-format",
+    "CMakeLists.txt",
+    "unordered_dense.h",  # MIT licensed header
 }
 
 # Hardcoded whitelist of directories to format (relative to repo root).
@@ -24,7 +37,7 @@ FORMAT_DIRS = [
     "rhi/src/",
     "rhi/include/",
     "examples/triangle/",
-    "include/core",
+    "include/msplat/core",
     "src/core",
 ]
 
@@ -36,16 +49,24 @@ def get_ext(file_path: str) -> str:
 
 
 def is_allowed_source(path: Path) -> bool:
+    # Check file extension
     if get_ext(str(path)) not in ALLOWED_EXTENSIONS:
         return False
-    parts = set(path.parts)
-    if any(part in THIRDPARTY_DIR_NAMES for part in parts):
+
+    # Check if file name is in skip list (takes priority)
+    if path.name in SKIPPED_FILES:
         return False
+
+    # Check if any directory in path is in skip list (takes priority)
+    parts = set(path.parts)
+    if any(part in SKIPPED_DIRS for part in parts):
+        return False
+
     return True
 
 
 def is_in_format_dirs(path: Path, root: Path) -> bool:
-    # If FORMAT_DIRS is empty, treat as allow-all (except third-party)
+    # If FORMAT_DIRS is empty, treat as allow-all (skip lists still apply)
     if not FORMAT_DIRS:
         return True
     for rel_dir in FORMAT_DIRS:
@@ -169,15 +190,13 @@ def main() -> int:
 
     # Normalize and filter
     paths = [root / f for f in candidates]
-    # Exclude any path containing a third-party segment
-    paths = [
-        p for p in paths if all(seg not in THIRDPARTY_DIR_NAMES for seg in p.parts)
-    ]
 
-    # Apply hardcoded format dir whitelist
-    paths = [p for p in paths if is_in_format_dirs(p, root)]
+    # Apply filtering logic: skip lists take priority over allow lists
+    # First, apply hardcoded format dir whitelist (if specified)
+    if FORMAT_DIRS:
+        paths = [p for p in paths if is_in_format_dirs(p, root)]
 
-    # Keep only allowed extensions and existing files
+    # Keep only allowed extensions and existing files, applying skip lists
     files = [str(p) for p in paths if p.is_file() and is_allowed_source(p)]
 
     term.kv("Files detected", str(len(files)))

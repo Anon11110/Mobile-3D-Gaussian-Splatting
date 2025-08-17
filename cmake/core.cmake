@@ -3,25 +3,25 @@
 # Core library headers
 set(CORE_HEADERS
     # Math headers
-    ${CMAKE_SOURCE_DIR}/include/core/math/math.h
-    ${CMAKE_SOURCE_DIR}/include/core/math/basics.h
-    ${CMAKE_SOURCE_DIR}/include/core/math/vector.h
-    ${CMAKE_SOURCE_DIR}/include/core/math/matrix.h
-    ${CMAKE_SOURCE_DIR}/include/core/math/quaternion.h
-    ${CMAKE_SOURCE_DIR}/include/core/math/affine.h
-    ${CMAKE_SOURCE_DIR}/include/core/math/aabb.h
-    ${CMAKE_SOURCE_DIR}/include/core/math/sphere.h
-    ${CMAKE_SOURCE_DIR}/include/core/math/frustum.h
-    ${CMAKE_SOURCE_DIR}/include/core/math/color.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/math.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/basics.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/vector.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/matrix.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/quaternion.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/affine.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/aabb.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/sphere.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/frustum.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/color.h
     
     # Logging headers
-    ${CMAKE_SOURCE_DIR}/include/core/log.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/log.h
     
     # Timer headers
-    ${CMAKE_SOURCE_DIR}/include/core/timer.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/timer.h
     
     # VFS headers
-    ${CMAKE_SOURCE_DIR}/include/core/vfs.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/vfs.h
 )
 
 set(CORE_SOURCES
@@ -45,7 +45,9 @@ add_library(core STATIC ${CORE_SOURCES} ${CORE_HEADERS})
 # Public include directories
 target_include_directories(core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/include/msplat
     ${CMAKE_SOURCE_DIR}/third-party/glm
+    ${CMAKE_SOURCE_DIR}/third-party/spdlog/include
 )
 
 # Require C++20

@@ -34,10 +34,6 @@ std::vector<uint8_t> LoadShaderCode(const std::string &filename)
 
 int main()
 {
-	// Initialize logging system - automatically sets appropriate level for build type
-	LOG_INFO("Starting Triangle Example");
-	LOG_DEBUG("Logging system initialized");
-
 	// Initialize GLFW
 	if (!glfwInit())
 	{
@@ -47,7 +43,7 @@ int main()
 
 	// Create window
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	GLFWwindow *window = glfwCreateWindow(800, 600, "Simple Triangle", nullptr, nullptr);
+	GLFWwindow *window = glfwCreateWindow(800, 600, "Triangle Example", nullptr, nullptr);
 	if (!window)
 	{
 		LOG_FATAL("Failed to create window");
@@ -374,7 +370,7 @@ int main()
 			if (fpsCounter.shouldUpdate())
 			{
 				double fps = fpsCounter.getFPS();
-				LOG_INFO("FPS: " + std::to_string(static_cast<int>(fps + 0.5)));
+				LOG_INFO("FPS: {}", static_cast<int>(fps + 0.5));
 				fpsCounter.reset();
 			}
 		}
@@ -385,7 +381,7 @@ int main()
 	}
 	catch (const std::exception &e)
 	{
-		LOG_FATAL("Error: " + std::string(e.what()));
+		LOG_FATAL("Error: {}", e.what());
 		glfwDestroyWindow(window);
 		glfwTerminate();
 		return -1;
