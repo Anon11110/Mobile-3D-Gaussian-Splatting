@@ -2,29 +2,54 @@
 
 ## Cross-Platform Support
 
-Use `scripts/configure.py` to configure CMake for your platform. It selects sensible defaults (generator, flags, Vulkan/MoltenVK setup) and prints the exact build command to run next.
+Use `scripts/configure.py` to configure and build your project. It handles platform detection, CMake configuration, and provides convenient build commands with target management.
 
 ### Quick start
 
 ```bash
-# Default configuration (platform defaults, Release)
+# Configure with platform defaults (Release build)
 python3 scripts/configure.py
 
-# Clean Debug with validation layers
+# Configure Debug build with validation layers
 python3 scripts/configure.py --clean --build-type Debug --validation
 
-# Pick a generator explicitly
-python3 scripts/configure.py --generator "Unix Makefiles"
+# Build and run the triangle example
+python3 scripts/configure.py build --target triangle --run
+
+# Build and run all tests
+python3 scripts/configure.py build --tests --run
+
+# List all available build targets
+python3 scripts/configure.py build --list-targets
 ```
 
-After configuration:
+### Build Commands
+
+After configuration, use the integrated build system:
 
 ```bash
-cd build
+# Build specific targets
+python3 scripts/configure.py build --target triangle
+python3 scripts/configure.py build --target unit-tests --target perf-tests
+
+# Build shortcuts
+python3 scripts/configure.py build --all         # Build all targets
+python3 scripts/configure.py build --tests       # Build test targets only
+
+# Build and run (single target only)
+python3 scripts/configure.py build --target triangle --run
+
+# Advanced options
+python3 scripts/configure.py build --clean --parallel 8 --target triangle
+```
+
+Traditional CMake commands still work:
+
+```bash
 # For multi-config generators (Visual Studio, Xcode):
-cmake --build . --config Debug --parallel
+cmake --build build --config Debug --parallel
 # For single-config generators (Ninja, Unix Makefiles):
-cmake --build . --parallel
+cmake --build build --parallel
 ```
 
 ### Platform notes

@@ -10,6 +10,7 @@ import subprocess
 import shutil
 import argparse
 import re
+import time
 from pathlib import Path
 from utils import term
 
@@ -270,10 +271,196 @@ def run_cmake(config, source_dir, build_dir):
         return False
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Cross-platform CMake configuration for Mobile 3D Gaussian Splatting"
+def discover_build_targets(build_dir):
+    """Discover available CMake targets in the build directory."""
+    targets = []
+    
+    # Common targets we know exist
+    known_targets = [
+        "triangle",
+        "unit-tests", 
+        "perf-tests",
+        "msplat_core",
+        "vulkan_rhi"
+    ]
+    
+    # Try to get actual targets from CMake if available
+    try:
+        result = subprocess.run(
+            ["cmake", "--build", str(build_dir), "--target", "help"],
+            capture_output=True,
+            text=True,
+            cwd=build_dir
+        )
+        if result.returncode == 0:
+            # Parse the output for actual targets
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line and not line.startswith("..."):
+                    targets.append(line)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Fallback to known targets
+        targets = known_targets
+    
+    return targets if targets else known_targets
+
+
+def build_targets(config, source_dir, build_dir, targets, parallel_jobs=None, clean_first=False):
+    """Build specified targets using cmake --build."""
+    
+    if not build_dir.exists():
+        term.error(f"Build directory does not exist: {build_dir}")
+        term.info("Run configuration first with: python scripts/configure.py")
+        return False
+    
+    if clean_first:
+        term.section("Cleaning build directory")
+        try:
+            result = subprocess.run(
+                ["cmake", "--build", str(build_dir), "--target", "clean"],
+                cwd=build_dir,
+                check=True
+            )
+        except subprocess.CalledProcessError as e:
+            term.warn(f"Clean failed, continuing anyway: {e}")
+    
+    # Determine if this is a multi-config generator
+    generator = None
+    try:
+        # Try to detect generator from cache
+        cache_file = build_dir / "CMakeCache.txt"
+        if cache_file.exists():
+            content = cache_file.read_text()
+            for line in content.splitlines():
+                if line.startswith("CMAKE_GENERATOR:INTERNAL="):
+                    generator = line.split("=", 1)[1]
+                    break
+    except Exception:
+        pass
+    
+    generator_lower = (generator or "").lower()
+    is_multi_config = (
+        ("visual studio" in generator_lower) or
+        ("xcode" in generator_lower) or 
+        ("multi-config" in generator_lower)
     )
+    
+    # Get build type from cache if not multi-config
+    build_type = "Release"  # Default
+    if not is_multi_config:
+        try:
+            cache_file = build_dir / "CMakeCache.txt"
+            if cache_file.exists():
+                content = cache_file.read_text()
+                for line in content.splitlines():
+                    if line.startswith("CMAKE_BUILD_TYPE:STRING="):
+                        build_type = line.split("=", 1)[1]
+                        break
+        except Exception:
+            pass
+    else:
+        # For multi-config, assume Debug if build/bin/Debug exists, otherwise Release
+        if (build_dir / "bin" / "Debug").exists():
+            build_type = "Debug"
+        elif (build_dir / "bin" / "Release").exists():
+            build_type = "Release"
+    
+    term.section(f"Building targets: {', '.join(targets)}")
+    term.kv("Build directory", str(build_dir))
+    term.kv("Build type", build_type)
+    term.kv("Generator", generator or "Unknown")
+    
+    # Build each target
+    success_count = 0
+    for target in targets:
+        term.info(f"Building target: {target}")
+        
+        cmd = ["cmake", "--build", str(build_dir)]
+        if is_multi_config:
+            cmd.extend(["--config", build_type])
+        cmd.extend(["--target", target])
+        if parallel_jobs:
+            cmd.extend(["--parallel", str(parallel_jobs)])
+        else:
+            cmd.append("--parallel")
+        
+        term.kv("Command", " ".join(cmd))
+        
+        try:
+            start_time = time.time()
+            result = subprocess.run(cmd, cwd=build_dir, check=True)
+            end_time = time.time()
+            
+            build_time = end_time - start_time
+            term.success(f"Built {target} in {build_time:.1f}s")
+            success_count += 1
+            
+        except subprocess.CalledProcessError as e:
+            term.error(f"Failed to build target '{target}': {e}")
+            return False
+    
+    term.success(f"Successfully built {success_count}/{len(targets)} targets")
+    return True
+
+
+def run_executable(build_dir, target, build_type="Release"):
+    """Run an executable target from the proper working directory."""
+    # Determine executable path
+    if build_type == "Debug":
+        exe_dir = build_dir / "bin" / "Debug"
+    else:
+        exe_dir = build_dir / "bin" / "Release"
+    
+    exe_path = exe_dir / target
+    if platform.system().lower() == "windows":
+        exe_path = exe_path.with_suffix(".exe")
+    
+    if not exe_path.exists():
+        term.error(f"Executable not found: {exe_path}")
+        return False
+    
+    term.section(f"Running {target}")
+    term.kv("Executable", str(exe_path))
+    term.kv("Working directory", str(exe_dir))
+    
+    try:
+        # Run from the executable's directory (important for asset loading)
+        result = subprocess.run([f"./{target}"], cwd=exe_dir, check=False)
+        
+        if result.returncode == 0:
+            term.success(f"{target} completed successfully")
+        else:
+            term.warn(f"{target} exited with code {result.returncode}")
+        
+        return result.returncode == 0
+        
+    except subprocess.CalledProcessError as e:
+        term.error(f"Failed to run {target}: {e}")
+        return False
+    except FileNotFoundError:
+        term.error(f"Executable not found or not executable: {exe_path}")
+        return False
+
+
+def main():
+    # Create main parser
+    parser = argparse.ArgumentParser(
+        description="Cross-platform CMake configuration and build tool for Mobile 3D Gaussian Splatting",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python scripts/configure.py                    # Configure with defaults
+  python scripts/configure.py --clean --debug   # Clean configure for Debug
+  python scripts/configure.py build --target triangle  # Build triangle target
+  python scripts/configure.py build --tests --run      # Build and run tests
+  python scripts/configure.py build --list-targets     # Show available targets
+        """
+    )
+    
+    # Create subparsers for different commands
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    
+    # Configure command (default behavior, so these are also top-level args)
     parser.add_argument(
         "--build-type",
         choices=["Debug", "Release"],
@@ -292,6 +479,46 @@ def main():
     )
     parser.add_argument("--generator", help="Override CMake generator")
     parser.add_argument("--build-dir", default="build", help="Build directory path")
+    
+    # Build subcommand
+    build_parser = subparsers.add_parser("build", help="Build targets")
+    build_parser.add_argument(
+        "--target",
+        action="append",
+        dest="targets",
+        help="Build specific target (can be used multiple times)"
+    )
+    build_parser.add_argument(
+        "--list-targets",
+        action="store_true",
+        help="List available build targets"
+    )
+    build_parser.add_argument(
+        "--tests",
+        action="store_true", 
+        help="Build all test targets (unit-tests, perf-tests)"
+    )
+    build_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Build all targets"
+    )
+    build_parser.add_argument(
+        "--run",
+        action="store_true",
+        help="Run executable after building (for single target)"
+    )
+    build_parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Clean before building"
+    )
+    build_parser.add_argument(
+        "--parallel",
+        type=int,
+        help="Number of parallel build jobs"
+    )
+    build_parser.add_argument("--build-dir", default="build", help="Build directory path")
 
     args = parser.parse_args()
 
@@ -301,6 +528,51 @@ def main():
     source_dir = root_dir
     build_dir = (root_dir / args.build_dir).resolve()
 
+    # Handle build command
+    if args.command == "build":
+        # List targets mode
+        if args.list_targets:
+            term.section("Available Build Targets")
+            targets = discover_build_targets(build_dir)
+            for target in targets:
+                print(f"  • {target}")
+            return 0
+        
+        # Determine which targets to build
+        targets_to_build = []
+        
+        if args.all:
+            targets_to_build = discover_build_targets(build_dir)
+        elif args.tests:
+            targets_to_build = ["unit-tests", "perf-tests"]
+        elif args.targets:
+            targets_to_build = args.targets
+        else:
+            term.error("No targets specified. Use --target, --tests, --all, or --list-targets")
+            return 1
+        
+        # Build the targets
+        if not build_targets(None, source_dir, build_dir, targets_to_build, args.parallel, args.clean):
+            return 1
+        
+        # Run executable if requested
+        if args.run:
+            if len(targets_to_build) != 1:
+                term.error("--run can only be used with a single target")
+                return 1
+            
+            target = targets_to_build[0]
+            # Detect build type from build directory
+            build_type = "Release"
+            if (build_dir / "bin" / "Debug").exists():
+                build_type = "Debug"
+            
+            if not run_executable(build_dir, target, build_type):
+                return 1
+        
+        return 0
+    
+    # Default behavior: configure
     term.section("CMake Configuration Begins")
     term.kv("Platform", f"{platform.system()} {platform.machine()}")
     term.kv("Python", sys.version)
@@ -325,7 +597,7 @@ def main():
         # Remove existing generator arguments
         new_args = []
         skip_next = False
-        for i, arg in enumerate(config.cmake_args):
+        for arg in config.cmake_args:
             if skip_next:
                 skip_next = False
                 continue
@@ -353,6 +625,15 @@ def main():
     term.sep()
     term.info("Next steps:")
 
+    # Print build command suggestions
+    term.info("Build with the new build command:")
+    print(f"  python scripts/configure.py build --target triangle")
+    print(f"  python scripts/configure.py build --tests --run")
+    print(f"  python scripts/configure.py build --all")
+    print(f"  python scripts/configure.py build --list-targets")
+    
+    term.info("Or use traditional cmake commands:")
+    
     # Print a single copy-pasteable command for building
     generator = None
     try:
@@ -365,28 +646,28 @@ def main():
 
     generator_lower = (generator or "").lower()
     is_multi_config = (
-        ("visual studio" in generator_lower)
-        or ("xcode" in generator_lower)
-        or ("multi-config" in generator_lower)
+        ("visual studio" in generator_lower) or
+        ("xcode" in generator_lower) or 
+        ("multi-config" in generator_lower)
     )
 
     abs_build_dir = str(build_dir.resolve())
 
     if is_multi_config:
         print(
-            f"cd {abs_build_dir} && cmake --build . --config {args.build_type} --parallel"
+            f"  cmake --build {abs_build_dir} --config {args.build_type} --parallel"
         )
         if "visual studio" in generator_lower or platform.system().lower() == "windows":
             sln_path = build_dir / f"{project_name}.sln"
             term.info(f"Or open the generated .sln in Visual Studio:")
-            print(f'start "{sln_path}"')
+            print(f'  start "{sln_path}"')
         if "xcode" in generator_lower or platform.system().lower() == "darwin":
             xcodeproj_path = build_dir / f"{project_name}.xcodeproj"
             term.info(f"Or open the generated .xcodeproj in Xcode:")
-            print(f'open "{xcodeproj_path}"')
+            print(f'  open "{xcodeproj_path}"')
     else:
         # Single-config generators (e.g., Ninja, Unix Makefiles) use CMAKE_BUILD_TYPE set at configure time
-        print(f"cd {abs_build_dir} && cmake --build . --parallel")
+        print(f"  cmake --build {abs_build_dir} --parallel")
 
     return 0
 

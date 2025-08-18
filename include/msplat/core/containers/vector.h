@@ -24,7 +24,14 @@ using vector = std::vector<T>;
 
 #else
 // Custom vector implementation with allocator integration
-// Memory Layout: 32 bytes per vector instance (T* m_data: 8 bytes, m_size: 8 bytes, m_capacity: 8 bytes, Allocator*: 8 bytes)
+//
+// Memory Layout - vector<T> object:
+// +------------+----------+------------+-------------+
+// | T* m_data  | m_size   | m_capacity | Allocator*  |
+// | 8 bytes    | 8 bytes  | 8 bytes    | 8 bytes     |
+// +------------+----------+------------+-------------+
+// Total: 32 bytes per vector instance
+//
 // Design: Renderer-centric container optimized for 3D Gaussian Splatting data flow patterns
 // Growth Strategy: 2x capacity growth, first allocation: 8 elements or requested size
 // Performance Focus: Move-first semantics, trivial destructor optimization, zero-cost abstractions
