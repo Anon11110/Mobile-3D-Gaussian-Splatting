@@ -239,35 +239,33 @@ class VulkanDevice : public IRHIDevice
 		return std::make_unique<VulkanDescriptorSet>(device, vkLayout, pool, descriptorSet);
 	}
 
-	void SubmitCommandLists(IRHICommandList **cmdLists, uint32_t count,
-	                        QueueType      queueType       = QueueType::GRAPHICS,
-	                        IRHISemaphore *waitSemaphore   = nullptr,
-	                        IRHISemaphore *signalSemaphore = nullptr,
-	                        IRHIFence     *signalFence     = nullptr) override
+	void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
+	                        QueueType                         queueType       = QueueType::GRAPHICS,
+	                        IRHISemaphore                    *waitSemaphore   = nullptr,
+	                        IRHISemaphore                    *signalSemaphore = nullptr,
+	                        IRHIFence                        *signalFence     = nullptr) override
 	{
 		SubmitInfo submitInfo{};
 		if (waitSemaphore)
 		{
-			SemaphoreWaitInfo waitInfo{waitSemaphore, StageMask::RenderTarget};
-			submitInfo.waitSemaphores     = &waitInfo;
-			submitInfo.waitSemaphoreCount = 1;
+			static SemaphoreWaitInfo waitInfo{waitSemaphore, StageMask::RenderTarget};
+			submitInfo.waitSemaphores = std::span<const SemaphoreWaitInfo>(&waitInfo, 1);
 		}
 		if (signalSemaphore)
 		{
-			submitInfo.signalSemaphores     = &signalSemaphore;
-			submitInfo.signalSemaphoreCount = 1;
+			submitInfo.signalSemaphores = std::span<IRHISemaphore *const>(&signalSemaphore, 1);
 		}
 		submitInfo.signalFence = signalFence;
 
-		SubmitCommandLists(cmdLists, count, queueType, submitInfo);
+		SubmitCommandLists(cmdLists, queueType, submitInfo);
 	}
 
-	void SubmitCommandLists(IRHICommandList **cmdLists, uint32_t count,
-	                        QueueType         queueType,
-	                        const SubmitInfo &submitInfo) override
+	void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
+	                        QueueType                         queueType,
+	                        const SubmitInfo                 &submitInfo) override
 	{
-		std::vector<VkCommandBuffer> commandBuffers(count);
-		for (uint32_t i = 0; i < count; i++)
+		std::vector<VkCommandBuffer> commandBuffers(cmdLists.size());
+		for (size_t i = 0; i < cmdLists.size(); i++)
 		{
 			auto *vkCmdList   = static_cast<VulkanCommandList *>(cmdLists[i]);
 			commandBuffers[i] = vkCmdList->GetHandle();
@@ -275,40 +273,40 @@ class VulkanDevice : public IRHIDevice
 
 		VkSubmitInfo vkSubmitInfo{};
 		vkSubmitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		vkSubmitInfo.commandBufferCount = count;
+		vkSubmitInfo.commandBufferCount = static_cast<uint32_t>(cmdLists.size());
 		vkSubmitInfo.pCommandBuffers    = commandBuffers.data();
 
 		std::vector<VkSemaphore>          waitSemaphores;
 		std::vector<VkPipelineStageFlags> waitStages;
-		if (submitInfo.waitSemaphoreCount > 0)
+		if (!submitInfo.waitSemaphores.empty())
 		{
-			waitSemaphores.reserve(submitInfo.waitSemaphoreCount);
-			waitStages.reserve(submitInfo.waitSemaphoreCount);
+			waitSemaphores.reserve(submitInfo.waitSemaphores.size());
+			waitStages.reserve(submitInfo.waitSemaphores.size());
 
-			for (uint32_t i = 0; i < submitInfo.waitSemaphoreCount; i++)
+			for (const auto &waitInfo : submitInfo.waitSemaphores)
 			{
-				auto *vkSemaphore = static_cast<VulkanSemaphore *>(submitInfo.waitSemaphores[i].semaphore);
+				auto *vkSemaphore = static_cast<VulkanSemaphore *>(waitInfo.semaphore);
 				waitSemaphores.push_back(vkSemaphore->GetHandle());
-				waitStages.push_back(StageMaskToVulkan(submitInfo.waitSemaphores[i].waitStage));
+				waitStages.push_back(StageMaskToVulkan(waitInfo.waitStage));
 			}
 
-			vkSubmitInfo.waitSemaphoreCount = submitInfo.waitSemaphoreCount;
+			vkSubmitInfo.waitSemaphoreCount = static_cast<uint32_t>(submitInfo.waitSemaphores.size());
 			vkSubmitInfo.pWaitSemaphores    = waitSemaphores.data();
 			vkSubmitInfo.pWaitDstStageMask  = waitStages.data();
 		}
 
 		std::vector<VkSemaphore> signalSemaphores;
-		if (submitInfo.signalSemaphoreCount > 0)
+		if (!submitInfo.signalSemaphores.empty())
 		{
-			signalSemaphores.reserve(submitInfo.signalSemaphoreCount);
+			signalSemaphores.reserve(submitInfo.signalSemaphores.size());
 
-			for (uint32_t i = 0; i < submitInfo.signalSemaphoreCount; i++)
+			for (auto *semaphore : submitInfo.signalSemaphores)
 			{
-				auto *vkSemaphore = static_cast<VulkanSemaphore *>(submitInfo.signalSemaphores[i]);
+				auto *vkSemaphore = static_cast<VulkanSemaphore *>(semaphore);
 				signalSemaphores.push_back(vkSemaphore->GetHandle());
 			}
 
-			vkSubmitInfo.signalSemaphoreCount = submitInfo.signalSemaphoreCount;
+			vkSubmitInfo.signalSemaphoreCount = static_cast<uint32_t>(submitInfo.signalSemaphores.size());
 			vkSubmitInfo.pSignalSemaphores    = signalSemaphores.data();
 		}
 

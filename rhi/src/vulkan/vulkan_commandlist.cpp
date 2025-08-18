@@ -245,7 +245,7 @@ void VulkanCommandList::BindIndexBuffer(IRHIBuffer *buffer, size_t offset)
 }
 
 void VulkanCommandList::BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *descriptorSet,
-                                          const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount)
+                                          std::span<const uint32_t> dynamicOffsets)
 {
 	if (!currentPipeline)
 	{
@@ -256,10 +256,10 @@ void VulkanCommandList::BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *
 	VkDescriptorSet sets[]          = {vkDescriptorSet->GetHandle()};
 
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, currentPipeline->GetLayout(), setIndex, 1,
-	                        sets, dynamicOffsetCount, dynamicOffsets);
+	                        sets, static_cast<uint32_t>(dynamicOffsets.size()), dynamicOffsets.data());
 }
 
-void VulkanCommandList::PushConstants(ShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void *data)
+void VulkanCommandList::PushConstants(ShaderStageFlags stageFlags, uint32_t offset, std::span<const std::byte> data)
 {
 	if (!currentPipeline)
 	{
@@ -267,7 +267,8 @@ void VulkanCommandList::PushConstants(ShaderStageFlags stageFlags, uint32_t offs
 	}
 
 	VkShaderStageFlags vkStageFlags = ShaderStageFlagsToVulkan(stageFlags);
-	vkCmdPushConstants(commandBuffer, currentPipeline->GetLayout(), vkStageFlags, offset, size, data);
+	vkCmdPushConstants(commandBuffer, currentPipeline->GetLayout(), vkStageFlags, offset,
+	                   static_cast<uint32_t>(data.size()), data.data());
 }
 
 void VulkanCommandList::SetViewport(float x, float y, float width, float height)
@@ -318,11 +319,11 @@ void VulkanCommandList::DispatchIndirect(IRHIBuffer *buffer, size_t offset)
 }
 
 void VulkanCommandList::Barrier(
-    PipelineScope                         src_scope,
-    PipelineScope                         dst_scope,
-    const std::vector<BufferTransition>  &buffer_transitions,
-    const std::vector<TextureTransition> &texture_transitions,
-    const std::vector<MemoryBarrier>     &memory_barriers)
+    PipelineScope                      src_scope,
+    PipelineScope                      dst_scope,
+    std::span<const BufferTransition>  buffer_transitions,
+    std::span<const TextureTransition> texture_transitions,
+    std::span<const MemoryBarrier>     memory_barriers)
 {
 	std::vector<VkBufferMemoryBarrier> bufferBarriers;
 	std::vector<VkImageMemoryBarrier>  imageBarriers;

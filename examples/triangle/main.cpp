@@ -252,7 +252,7 @@ int main()
 			    rhi::PipelineScope::Graphics,
 			    rhi::PipelineScope::Graphics,
 			    {},
-			    {swapchainTransition},
+			    std::array{swapchainTransition},
 			    {});
 
 			// Mark this image as no longer first use
@@ -317,7 +317,8 @@ int main()
 			    time * 0.5f,         // rotation in radians
 			    aspect               // aspect ratio
 			};
-			cmdList->PushConstants(rhi::ShaderStageFlags::VERTEX, 0, sizeof(pushData), pushData);
+			cmdList->PushConstants(rhi::ShaderStageFlags::VERTEX, 0,
+			                       std::as_bytes(std::span(pushData)));
 
 			// Draw triangle
 			cmdList->Draw(3);
@@ -332,14 +333,14 @@ int main()
 			    rhi::PipelineScope::Graphics,
 			    rhi::PipelineScope::Graphics,
 			    {},
-			    {swapchainTransition},
+			    std::array{swapchainTransition},
 			    {});
 
 			cmdList->End();
 
 			// Submit
-			rhi::IRHICommandList *cmdListPtr = cmdList.get();
-			device->SubmitCommandLists(&cmdListPtr, 1, rhi::QueueType::GRAPHICS,
+			auto cmdListSpan = std::array{cmdList.get()};
+			device->SubmitCommandLists(cmdListSpan, rhi::QueueType::GRAPHICS,
 			                           imageAvailableSemaphores[0].get(), renderFinishedSemaphores[imageIndex].get(),
 			                           inFlightFence.get());
 

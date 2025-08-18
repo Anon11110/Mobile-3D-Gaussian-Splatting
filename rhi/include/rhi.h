@@ -26,15 +26,15 @@ class IRHIDevice
 	                                                                     QueueType                queueType = QueueType::GRAPHICS) = 0;
 
 	// Queue operations
-	virtual void SubmitCommandLists(IRHICommandList **cmdLists, uint32_t count,
-	                                QueueType      queueType       = QueueType::GRAPHICS,
-	                                IRHISemaphore *waitSemaphore   = nullptr,
-	                                IRHISemaphore *signalSemaphore = nullptr,
-	                                IRHIFence     *signalFence     = nullptr) = 0;
+	virtual void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
+	                                QueueType                         queueType       = QueueType::GRAPHICS,
+	                                IRHISemaphore                    *waitSemaphore   = nullptr,
+	                                IRHISemaphore                    *signalSemaphore = nullptr,
+	                                IRHIFence                        *signalFence     = nullptr) = 0;
 
-	virtual void SubmitCommandLists(IRHICommandList **cmdLists, uint32_t count,
-	                                QueueType         queueType,
-	                                const SubmitInfo &submitInfo) = 0;
+	virtual void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
+	                                QueueType                         queueType,
+	                                const SubmitInfo                 &submitInfo) = 0;
 
 	virtual void WaitQueueIdle(QueueType queueType) = 0;
 	virtual void WaitIdle()                         = 0;
@@ -110,8 +110,8 @@ class IRHICommandList
 	virtual void SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, size_t offset = 0)                     = 0;
 	virtual void BindIndexBuffer(IRHIBuffer *buffer, size_t offset = 0)                                       = 0;
 	virtual void BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *descriptorSet,
-	                               const uint32_t *dynamicOffsets = nullptr, uint32_t dynamicOffsetCount = 0) = 0;
-	virtual void PushConstants(ShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void *data) = 0;
+	                               std::span<const uint32_t> dynamicOffsets = {})                             = 0;
+	virtual void PushConstants(ShaderStageFlags stageFlags, uint32_t offset, std::span<const std::byte> data) = 0;
 	virtual void SetViewport(float x, float y, float width, float height)                                     = 0;
 	virtual void SetScissor(int32_t x, int32_t y, uint32_t width, uint32_t height)                            = 0;
 
@@ -123,11 +123,11 @@ class IRHICommandList
 	virtual void DispatchIndirect(IRHIBuffer *buffer, size_t offset)                                = 0;
 
 	virtual void Barrier(
-	    PipelineScope                         src_scope,
-	    PipelineScope                         dst_scope,
-	    const std::vector<BufferTransition>  &buffer_transitions,
-	    const std::vector<TextureTransition> &texture_transitions,
-	    const std::vector<MemoryBarrier>     &memory_barriers = {}) = 0;
+	    PipelineScope                      src_scope,
+	    PipelineScope                      dst_scope,
+	    std::span<const BufferTransition>  buffer_transitions,
+	    std::span<const TextureTransition> texture_transitions,
+	    std::span<const MemoryBarrier>     memory_barriers = {}) = 0;
 };
 
 // Swapchain interface

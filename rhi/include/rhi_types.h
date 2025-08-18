@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace rhi
@@ -717,11 +718,9 @@ struct SemaphoreWaitInfo
 
 struct SubmitInfo
 {
-	const SemaphoreWaitInfo *waitSemaphores       = nullptr;
-	uint32_t                 waitSemaphoreCount   = 0;
-	IRHISemaphore          **signalSemaphores     = nullptr;
-	uint32_t                 signalSemaphoreCount = 0;
-	IRHIFence               *signalFence          = nullptr;
+	std::span<const SemaphoreWaitInfo> waitSemaphores;
+	std::span<IRHISemaphore *const>    signalSemaphores;
+	IRHIFence                         *signalFence = nullptr;
 };
 
 }        // namespace rhi

@@ -278,8 +278,8 @@ class VulkanCommandList : public IRHICommandList
 	void SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, size_t offset = 0) override;
 	void BindIndexBuffer(IRHIBuffer *buffer, size_t offset = 0) override;
 	void BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *descriptorSet,
-	                       const uint32_t *dynamicOffsets = nullptr, uint32_t dynamicOffsetCount = 0) override;
-	void PushConstants(ShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void *data) override;
+	                       std::span<const uint32_t> dynamicOffsets = {}) override;
+	void PushConstants(ShaderStageFlags stageFlags, uint32_t offset, std::span<const std::byte> data) override;
 	void SetViewport(float x, float y, float width, float height) override;
 	void SetScissor(int32_t x, int32_t y, uint32_t width, uint32_t height) override;
 
@@ -291,11 +291,11 @@ class VulkanCommandList : public IRHICommandList
 	void DispatchIndirect(IRHIBuffer *buffer, size_t offset) override;
 
 	void Barrier(
-	    PipelineScope                         src_scope,
-	    PipelineScope                         dst_scope,
-	    const std::vector<BufferTransition>  &buffer_transitions,
-	    const std::vector<TextureTransition> &texture_transitions,
-	    const std::vector<MemoryBarrier>     &memory_barriers = {}) override;
+	    PipelineScope                      src_scope,
+	    PipelineScope                      dst_scope,
+	    std::span<const BufferTransition>  buffer_transitions,
+	    std::span<const TextureTransition> texture_transitions,
+	    std::span<const MemoryBarrier>     memory_barriers = {}) override;
 
 	VkCommandBuffer GetHandle() const
 	{
