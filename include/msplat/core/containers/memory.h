@@ -1,27 +1,20 @@
 #pragma once
 
+#include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <type_traits>
+#include <typeinfo>
 #include <unordered_map>
 #include <vector>
-#include <cassert>
-#include <algorithm>
-#include <typeinfo>
 
-// Include logging for debug output
 #include <msplat/core/log.h>
+#include <msplat/core/platform.h>
 
-// Forward declarations from platform.h
-namespace msplat::core
-{
-void  *aligned_malloc(size_t size, size_t alignment);
-void   aligned_free(void *ptr);
-}        // namespace msplat::core
-
-namespace msplat::core
+namespace msplat::container
 {
 
 // Abstract base class for all allocators
@@ -43,7 +36,13 @@ class Allocator
 	virtual const char *name() const = 0;
 };
 
-// High-performance heap allocator using rpmalloc
+// High-performance heap allocator using rpmalloc for general-purpose allocations
+//
+// Project Use Case: The default, general-purpose allocator for the 3D Gaussian Splatting engine.
+// - Long-lived objects in 'msplat::application' and 'msplat::engine' (e.g., Scene, Camera)
+// - Storing PLY asset data after being loaded from the VFS
+// - The fallback allocator for any container without a specified, specialized need
+// - Thread-safe with internal synchronization
 class HeapAllocator : public Allocator
 {
   public:
@@ -67,19 +66,24 @@ class HeapAllocator : public Allocator
 // Global heap allocator instance
 extern HeapAllocator &get_heap_allocator();
 
-// Linear allocator using bump pointer allocation
+// Linear allocator using bump pointer allocation for high-speed transient data
 // - Very fast O(1) allocation via pointer increment
 // - No individual deallocation (deallocate() is no-op)
 // - Use reset() to reclaim all memory at once
-// - Ideal for per-frame allocations or temporary objects
 // - NOT thread-safe
+//
+// Project Use Case: High-speed, transient allocations for the main render loop.
+// - A double-buffered instance should be used for per-frame data: one for the CPU to write to while the GPU reads from the other
+// - Storing the output of 'GpuVisibilityPass' (e.g., a list of visible splat cluster IDs)
+// - Temporary buffers for sorting and processing in the 'HybridTransparencyPass'
+// - Any CPU-side data that will be uploaded to the GPU for a single frame's use
 class LinearAllocator : public Allocator
 {
   private:
-	void   *m_buffer;      // Start of buffer
-	size_t  m_size;        // Total buffer size
-	size_t  m_offset;      // Current allocation offset
-	bool    m_owns_buffer; // Whether we own the buffer
+	void  *m_buffer;             // Start of buffer
+	size_t m_size;               // Total buffer size
+	size_t m_offset;             // Current allocation offset
+	bool   m_owns_buffer;        // Whether we own the buffer
 
   public:
 	// Constructor with buffer size - allocates own buffer
@@ -91,7 +95,7 @@ class LinearAllocator : public Allocator
 	~LinearAllocator();
 
 	void       *allocate(size_t size, size_t alignment = alignof(std::max_align_t)) override;
-	void        deallocate(void *ptr, size_t size) override; // No-op
+	void        deallocate(void *ptr, size_t size) override;        // No-op
 	const char *name() const override
 	{
 		return "LinearAllocator";
@@ -121,22 +125,26 @@ class LinearAllocator : public Allocator
 	LinearAllocator &operator=(LinearAllocator &&)      = delete;
 };
 
-// Stack allocator with LIFO deallocation and markers
+// Stack allocator with LIFO deallocation and markers for scoped allocations
 // - Fast O(1) allocation via pointer increment like LinearAllocator
 // - Supports LIFO deallocation to rewind to previous allocation points
 // - Use markers to save/restore allocation points
-// - Ideal for hierarchical temporary allocations
 // - NOT thread-safe
+//
+// Project Use Case: Scoped, temporary allocations within complex algorithms.
+// - Ideal for the offline tools that build the splat cluster hierarchies (DAGs). A recursive DAG construction function can push/pop its memory needs using markers
+// - Processing nested data structures where memory has a clear entry/exit scope
+// - Less critical for the real-time loop, which is better served by the LinearAllocator
 class StackAllocator : public Allocator
 {
   public:
-	using Marker = size_t; // Type for allocation markers
+	using Marker = size_t;        // Type for allocation markers
 
   private:
-	void   *m_buffer;      // Start of buffer
-	size_t  m_size;        // Total buffer size
-	size_t  m_offset;      // Current allocation offset
-	bool    m_owns_buffer; // Whether we own the buffer
+	void  *m_buffer;             // Start of buffer
+	size_t m_size;               // Total buffer size
+	size_t m_offset;             // Current allocation offset
+	bool   m_owns_buffer;        // Whether we own the buffer
 
   public:
 	// Constructor with buffer size - allocates own buffer
@@ -148,7 +156,7 @@ class StackAllocator : public Allocator
 	~StackAllocator();
 
 	void       *allocate(size_t size, size_t alignment = alignof(std::max_align_t)) override;
-	void        deallocate(void *ptr, size_t size) override; // Validates LIFO order
+	void        deallocate(void *ptr, size_t size) override;        // Validates LIFO order
 	const char *name() const override
 	{
 		return "StackAllocator";
@@ -188,12 +196,16 @@ class StackAllocator : public Allocator
 	StackAllocator &operator=(StackAllocator &&)      = delete;
 };
 
-// Pool allocator for fixed-size allocations
+// Pool allocator for fixed-size allocations with O(1) performance
 // - Very fast O(1) allocation and deallocation
 // - Pre-allocates chunks of fixed size
 // - Maintains free list for O(1) operations
-// - Ideal for high-frequency same-size allocations
 // - Thread-safe with internal synchronization
+//
+// Project Use Case: Managing the nodes for the Nanite-inspired virtualized geometry pipeline.
+// - An instance of 'PoolAllocator<SplatClusterNode>' would be perfect for the splat DAG
+// - As clusters are streamed in and out of memory at runtime, this provides extremely fast, fragmentation-free allocation and deallocation of the fixed-size node structures
+// - Essential for achieving high performance in the GPU-driven culling and LOD selection system
 template <typename T>
 class PoolAllocator : public Allocator
 {
@@ -203,12 +215,12 @@ class PoolAllocator : public Allocator
 		FreeNode *next;
 	};
 
-	void     *m_buffer;       // Start of buffer
-	size_t    m_chunk_size;   // Size of each chunk (>= sizeof(T))
-	size_t    m_chunk_count;  // Total number of chunks
-	FreeNode *m_free_head;    // Head of free list
-	bool      m_owns_buffer;  // Whether we own the buffer
-	size_t    m_allocated;    // Number of allocated chunks
+	void     *m_buffer;             // Start of buffer
+	size_t    m_chunk_size;         // Size of each chunk (>= sizeof(T))
+	size_t    m_chunk_count;        // Total number of chunks
+	FreeNode *m_free_head;          // Head of free list
+	bool      m_owns_buffer;        // Whether we own the buffer
+	size_t    m_allocated;          // Number of allocated chunks
 
   public:
 	// Constructor with chunk count - allocates own buffer
@@ -268,10 +280,8 @@ class PoolAllocator : public Allocator
 
 // PoolAllocator template implementation
 template <typename T>
-PoolAllocator<T>::PoolAllocator(size_t chunk_count)
-    :
-    m_buffer(nullptr), m_chunk_size(std::max(sizeof(T), sizeof(FreeNode))),
-    m_chunk_count(chunk_count), m_free_head(nullptr), m_owns_buffer(true), m_allocated(0)
+PoolAllocator<T>::PoolAllocator(size_t chunk_count) :
+    m_buffer(nullptr), m_chunk_size(std::max(sizeof(T), sizeof(FreeNode))), m_chunk_count(chunk_count), m_free_head(nullptr), m_owns_buffer(true), m_allocated(0)
 {
 	if (chunk_count == 0)
 	{
@@ -281,10 +291,10 @@ PoolAllocator<T>::PoolAllocator(size_t chunk_count)
 	// Ensure chunk size is properly aligned for the type, but also compatible with general allocator interface
 	// We want chunks to be at least sizeof(T) but properly aligned
 	size_t type_alignment = alignof(T);
-	m_chunk_size = ((m_chunk_size + type_alignment - 1) / type_alignment) * type_alignment;
+	m_chunk_size          = ((m_chunk_size + type_alignment - 1) / type_alignment) * type_alignment;
 
 	size_t buffer_size = m_chunk_size * m_chunk_count;
-	m_buffer           = msplat::core::aligned_malloc(buffer_size, type_alignment);
+	m_buffer           = ::msplat::core::aligned_malloc(buffer_size, type_alignment);
 	if (!m_buffer)
 	{
 		throw std::bad_alloc();
@@ -294,10 +304,8 @@ PoolAllocator<T>::PoolAllocator(size_t chunk_count)
 }
 
 template <typename T>
-PoolAllocator<T>::PoolAllocator(void *buffer, size_t buffer_size)
-    :
-    m_buffer(buffer), m_chunk_size(std::max(sizeof(T), sizeof(FreeNode))),
-    m_chunk_count(0), m_free_head(nullptr), m_owns_buffer(false), m_allocated(0)
+PoolAllocator<T>::PoolAllocator(void *buffer, size_t buffer_size) :
+    m_buffer(buffer), m_chunk_size(std::max(sizeof(T), sizeof(FreeNode))), m_chunk_count(0), m_free_head(nullptr), m_owns_buffer(false), m_allocated(0)
 {
 	if (!buffer || buffer_size == 0)
 	{
@@ -307,7 +315,7 @@ PoolAllocator<T>::PoolAllocator(void *buffer, size_t buffer_size)
 	// Ensure chunk size is properly aligned for the type, but also compatible with general allocator interface
 	// We want chunks to be at least sizeof(T) but properly aligned
 	size_t type_alignment = alignof(T);
-	m_chunk_size = ((m_chunk_size + type_alignment - 1) / type_alignment) * type_alignment;
+	m_chunk_size          = ((m_chunk_size + type_alignment - 1) / type_alignment) * type_alignment;
 
 	// Calculate how many chunks fit in the buffer
 	m_chunk_count = buffer_size / m_chunk_size;
@@ -324,7 +332,7 @@ PoolAllocator<T>::~PoolAllocator()
 {
 	if (m_owns_buffer && m_buffer)
 	{
-		msplat::core::aligned_free(m_buffer);
+		::msplat::core::aligned_free(m_buffer);
 	}
 }
 
@@ -337,8 +345,8 @@ void *PoolAllocator<T>::allocate(size_t size, size_t alignment)
 	{
 		return nullptr;
 	}
-	
-	// Since our chunks are aligned to at least alignof(T), we can handle any alignment 
+
+	// Since our chunks are aligned to at least alignof(T), we can handle any alignment
 	// that's compatible with our chunk alignment
 	if (alignment > m_chunk_size)
 	{
@@ -395,5 +403,4 @@ void PoolAllocator<T>::deallocate(void *ptr, size_t size)
 	--m_allocated;
 }
 
-
-}        // namespace msplat::core
+}        // namespace msplat::container

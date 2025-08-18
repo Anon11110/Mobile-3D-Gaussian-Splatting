@@ -5,6 +5,7 @@ add_executable(perf-tests
     main.cpp
     memory_performance.cpp
     allocator_performance.cpp
+    vector_performance.cpp
 )
 
 # Link with core library

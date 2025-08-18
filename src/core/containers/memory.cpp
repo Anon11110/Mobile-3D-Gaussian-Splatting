@@ -9,7 +9,7 @@
 #include <mutex>
 #include <new>
 
-namespace msplat::core
+namespace msplat::container
 {
 
 namespace
@@ -101,8 +101,7 @@ static size_t align_up(size_t value, size_t alignment)
 }
 
 // LinearAllocator implementation
-LinearAllocator::LinearAllocator(size_t buffer_size)
-    :
+LinearAllocator::LinearAllocator(size_t buffer_size) :
     m_buffer(nullptr), m_size(buffer_size), m_offset(0), m_owns_buffer(true)
 {
 	if (buffer_size == 0)
@@ -115,18 +114,15 @@ LinearAllocator::LinearAllocator(size_t buffer_size)
 	{
 		throw std::bad_alloc();
 	}
-
 }
 
-LinearAllocator::LinearAllocator(void *buffer, size_t buffer_size)
-    :
+LinearAllocator::LinearAllocator(void *buffer, size_t buffer_size) :
     m_buffer(buffer), m_size(buffer_size), m_offset(0), m_owns_buffer(false)
 {
 	if (!buffer || buffer_size == 0)
 	{
 		throw std::invalid_argument("LinearAllocator buffer and size must be valid");
 	}
-
 }
 
 LinearAllocator::~LinearAllocator()
@@ -166,8 +162,8 @@ void *LinearAllocator::allocate(size_t size, size_t alignment)
 void LinearAllocator::deallocate(void *ptr, size_t size)
 {
 	// No-op for linear allocator - memory is reclaimed via reset()
-	(void)ptr;
-	(void)size;
+	(void) ptr;
+	(void) size;
 }
 
 void LinearAllocator::reset()
@@ -176,8 +172,7 @@ void LinearAllocator::reset()
 }
 
 // StackAllocator implementation
-StackAllocator::StackAllocator(size_t buffer_size)
-    :
+StackAllocator::StackAllocator(size_t buffer_size) :
     m_buffer(nullptr), m_size(buffer_size), m_offset(0), m_owns_buffer(true)
 {
 	if (buffer_size == 0)
@@ -190,18 +185,15 @@ StackAllocator::StackAllocator(size_t buffer_size)
 	{
 		throw std::bad_alloc();
 	}
-
 }
 
-StackAllocator::StackAllocator(void *buffer, size_t buffer_size)
-    :
+StackAllocator::StackAllocator(void *buffer, size_t buffer_size) :
     m_buffer(buffer), m_size(buffer_size), m_offset(0), m_owns_buffer(false)
 {
 	if (!buffer || buffer_size == 0)
 	{
 		throw std::invalid_argument("StackAllocator buffer and size must be valid");
 	}
-
 }
 
 StackAllocator::~StackAllocator()
@@ -248,10 +240,10 @@ void StackAllocator::deallocate(void *ptr, size_t size)
 	// For StackAllocator, we need to maintain proper LIFO order
 	// Since allocations can have different alignments, we'll store allocation records
 	// For now, let's use a simple approach: only deallocate if it's the most recent
-	
+
 	char *buffer_start = static_cast<char *>(m_buffer);
-	char *ptr_char = static_cast<char *>(ptr);
-	
+	char *ptr_char     = static_cast<char *>(ptr);
+
 	// Check that the pointer is within our buffer
 	if (ptr_char < buffer_start || ptr_char >= buffer_start + m_offset)
 	{
@@ -260,9 +252,9 @@ void StackAllocator::deallocate(void *ptr, size_t size)
 	}
 
 	// Calculate where this allocation should end
-	size_t ptr_offset = ptr_char - buffer_start;
+	size_t ptr_offset   = ptr_char - buffer_start;
 	size_t expected_end = ptr_offset + size;
-	
+
 	// Allow some tolerance for alignment padding (up to max_align_t)
 	if (expected_end <= m_offset && expected_end >= m_offset - alignof(std::max_align_t))
 	{
@@ -289,4 +281,4 @@ void StackAllocator::reset_to_marker(Marker marker)
 	m_offset = marker;
 }
 
-}        // namespace msplat::core
+}        // namespace msplat::container

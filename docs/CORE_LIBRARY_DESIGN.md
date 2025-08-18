@@ -2,7 +2,7 @@
 
 ## Summary
 
-The core library serves as the foundational static library for the Mobile 3D Gaussian Splatting engine, providing essential utilities across five focused modules: Math, Logging, Timer, Virtual File System, and Memory Management.
+The core library serves as the foundational static library for the Mobile 3D Gaussian Splatting engine, providing essential utilities across a number of modules: Math, Logging, Timer, Virtual File System, etc.
 
 This dependency-free library targets high-performance 3D graphics applications with support for 500K Gaussians at 60fps on desktop and 100K at 30fps on mobile platforms. The architecture emphasizes zero-overhead abstractions, clean separation of concerns, and production-ready thread safety while maintaining minimal external dependencies beyond GLM and the standard library.
 
@@ -38,25 +38,6 @@ Current functionality includes file reading, existence checking, size queries, a
 
 Exception-based error handling provides descriptive messages for debugging, though the synchronous nature limits real-time streaming applications. The design prioritizes simplicity and extensibility over advanced features, making it suitable for asset loading during initialization phases.
 
-## Memory Management System
-
-The memory management system provides a comprehensive allocator architecture designed for high-performance 3D graphics applications with specialized allocation patterns through direct, explicit usage.
-
-The system features a polymorphic allocator interface with concrete implementations including HeapAllocator (rpmalloc wrapper), LinearAllocator (bump pointer allocation), StackAllocator (LIFO with markers), and PoolAllocator (fixed-size objects). Cross-platform support includes aligned memory allocation, page size detection, and cache line optimization for Windows, macOS, Linux, Android, and iOS.
-
-**Direct Integration Architecture**: The system employs a binary choice approach between pure STL (system allocators) and pure custom containers (future implementation). Container headers use conditional compilation to switch between standard library containers and future custom implementations, eliminating hybrid complexity.
-
-**Core Library Integration**: Utility functions accept optional `Allocator*` parameters for direct allocator control:
-- **VFS System**: `readFile()` accepts allocator parameters for buffer allocation
-- **Logging System**: LinearAllocator integration for per-frame log buffers and backtrace optimization
-- **Timer System**: PoolAllocator support for FPSCounter sample storage
-
-The explicit-only design avoids global operator overrides and STL adapter complexity, ensuring predictable memory behavior and eliminating recursive initialization issues. Performance characteristics include zero-fragmentation sequential allocation, O(1) pool operations, and mobile-optimized alignment patterns suitable for GPU data structures.
 
 # Architecture and Performance
 
-The library employs sophisticated design patterns including the facade pattern for math operations, template metaprogramming for logging, and composition over inheritance throughout.
-
-Zero-overhead abstractions are achieved through header-only math implementations, template-based operations, and direct standard library mapping. Thread safety is guaranteed through static local variable initialization for singletons and spdlog's multi-threaded sink support.
-
-The modular design prevents circular dependencies and enables parallel development, while minimal memory allocation patterns support mobile platform constraints. Performance characteristics include stack-allocated math operations, negligible logging overhead for disabled levels, and efficient file I/O suitable for startup scenarios.

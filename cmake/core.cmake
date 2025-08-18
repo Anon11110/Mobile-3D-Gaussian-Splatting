@@ -78,6 +78,11 @@ endif()
 # (we handle that in our own memory.cpp)
 target_compile_definitions(core PRIVATE ENABLE_OVERRIDE=0)
 
+# Container selection: use system STL if option is enabled
+if(MSPLAT_USE_SYSTEM_STL)
+    target_compile_definitions(core PUBLIC MSPLAT_USE_SYSTEM_STL)
+endif()
+
 # Link GLM (header-only, so just for interface)
 target_link_libraries(core PUBLIC)
 

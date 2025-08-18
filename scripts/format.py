@@ -37,6 +37,8 @@ FORMAT_DIRS = [
     "rhi/src/",
     "rhi/include/",
     "examples/triangle/",
+    "examples/unit-tests/",
+    "examples/perf-tests/",
     "include/msplat/core",
     "src/core",
 ]
@@ -155,7 +157,9 @@ def main() -> int:
         description="Format C/C++ files using clang-format"
     )
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("-i", "--input", nargs="+", help="Specific files to format")
+    group.add_argument(
+        "-i", "--input", nargs="+", help="Specific files or directories to format"
+    )
     group.add_argument(
         "-m",
         "--modified",
@@ -179,8 +183,17 @@ def main() -> int:
 
     # Gather candidate files
     if args.input:
-        candidates = [str(Path(p)) for p in args.input]
-        term.kv("Mode", "explicit files")
+        candidates = []
+        for item in args.input:
+            path = Path(item)
+            if path.is_file():
+                candidates.append(str(path))
+            elif path.is_dir():
+                # Recursively find all files in directory
+                for file_path in path.rglob("*"):
+                    if file_path.is_file():
+                        candidates.append(str(file_path))
+        term.kv("Mode", "explicit files/directories")
     elif args.modified:
         term.kv("Mode", "git dirty files")
         candidates = git_dirty_files()

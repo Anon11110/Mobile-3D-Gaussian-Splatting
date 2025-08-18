@@ -10,6 +10,9 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
+# Core library options
+option(MSPLAT_USE_SYSTEM_STL "Use system STL containers instead of custom implementations" OFF)
+
 # Include core library configuration
 include(cmake/core.cmake)
 

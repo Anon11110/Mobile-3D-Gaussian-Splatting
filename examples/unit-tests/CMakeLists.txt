@@ -8,6 +8,7 @@ add_executable(unit-tests
     main.cpp
     test_platform.cpp
     test_allocators.cpp
+    test_custom_vector.cpp
 )
 
 # Link with core library
