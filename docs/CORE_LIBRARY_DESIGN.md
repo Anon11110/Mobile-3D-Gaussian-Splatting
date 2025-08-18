@@ -40,26 +40,23 @@ Exception-based error handling provides descriptive messages for debugging, thou
 
 ## Memory Management System
 
-The memory management system provides a comprehensive allocator architecture designed for high-performance 3D graphics applications with specialized allocation patterns.
+The memory management system provides a comprehensive allocator architecture designed for high-performance 3D graphics applications with specialized allocation patterns through direct, explicit usage.
 
 The system features a polymorphic allocator interface with concrete implementations including HeapAllocator (rpmalloc wrapper), LinearAllocator (bump pointer allocation), StackAllocator (LIFO with markers), and PoolAllocator (fixed-size objects). Cross-platform support includes aligned memory allocation, page size detection, and cache line optimization for Windows, macOS, Linux, Android, and iOS.
 
-STL integration is achieved through StlAllocatorAdapter for seamless container usage, with container type aliases providing clean abstractions. The unordered_map implementation leverages ankerl::unordered_dense for superior performance, while vector containers maintain standard library compatibility for broad platform support.
+**Direct Integration Architecture**: The system employs a binary choice approach between pure STL (system allocators) and pure custom containers (future implementation). Container headers use conditional compilation to switch between standard library containers and future custom implementations, eliminating hybrid complexity.
 
-The explicit-only design avoids global operator overrides, ensuring predictable memory behavior and eliminating recursive initialization issues. Performance characteristics include zero-fragmentation sequential allocation, O(1) pool operations, and mobile-optimized alignment patterns suitable for GPU data structures.
+**Core Library Integration**: Utility functions accept optional `Allocator*` parameters for direct allocator control:
+- **VFS System**: `readFile()` accepts allocator parameters for buffer allocation
+- **Logging System**: LinearAllocator integration for per-frame log buffers and backtrace optimization
+- **Timer System**: PoolAllocator support for FPSCounter sample storage
 
-## Architecture and Performance
+The explicit-only design avoids global operator overrides and STL adapter complexity, ensuring predictable memory behavior and eliminating recursive initialization issues. Performance characteristics include zero-fragmentation sequential allocation, O(1) pool operations, and mobile-optimized alignment patterns suitable for GPU data structures.
+
+# Architecture and Performance
 
 The library employs sophisticated design patterns including the facade pattern for math operations, template metaprogramming for logging, and composition over inheritance throughout.
 
 Zero-overhead abstractions are achieved through header-only math implementations, template-based operations, and direct standard library mapping. Thread safety is guaranteed through static local variable initialization for singletons and spdlog's multi-threaded sink support.
 
 The modular design prevents circular dependencies and enables parallel development, while minimal memory allocation patterns support mobile platform constraints. Performance characteristics include stack-allocated math operations, negligible logging overhead for disabled levels, and efficient file I/O suitable for startup scenarios.
-
-## Future Direction
-
-Immediate priorities focus on build optimization through precompiled headers to manage compilation times and comprehensive unit testing for production readiness.
-
-Medium-term enhancements include asynchronous VFS APIs for real-time streaming, archive backend support for packaged assets, and platform-specific SIMD optimizations for math operations.
-
-Long-term goals encompass mobile platform optimization, web platform compatibility through Emscripten, and GPU compute shader integration points. The logging system's spdlog foundation already provides file backends and structured logging capabilities, while the memory management system enables specialized allocation strategies for performance-critical rendering pipelines and GPU data structures.
