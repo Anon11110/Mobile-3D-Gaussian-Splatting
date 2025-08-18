@@ -66,12 +66,19 @@ target_include_directories(core PUBLIC
     ${CMAKE_SOURCE_DIR}/third-party/rpmalloc/rpmalloc
 )
 
-# Require C++20
+# Require C++20 for C++ files and C11 for C files
 target_compile_features(core PUBLIC cxx_std_20)
+set_property(TARGET core PROPERTY C_STANDARD 11)
+set_property(TARGET core PROPERTY C_STANDARD_REQUIRED ON)
 
-# Add /utf-8 flag for MSVC to fix Unicode support in spdlog
+# Add MSVC-specific flags
 if(MSVC)
     target_compile_options(core PUBLIC /utf-8)
+    # Enable C11 support and atomics for rpmalloc.c
+    set_source_files_properties(
+        ${CMAKE_SOURCE_DIR}/third-party/rpmalloc/rpmalloc/rpmalloc.c
+        PROPERTIES COMPILE_FLAGS "/std:c11 /experimental:c11atomics"
+    )
 endif()
 
 # Configure rpmalloc to not override global new/delete
