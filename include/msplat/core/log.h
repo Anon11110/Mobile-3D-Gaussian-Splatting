@@ -28,8 +28,6 @@ enum class Severity
 	off
 };
 
-#ifndef USE_CUSTOM_LOGGER
-
 // Internal singleton logger class
 class Logger
 {
@@ -53,11 +51,11 @@ class Logger
 			logger->enable_backtrace(32);
 
 // Set default level based on build config
-#	ifdef NDEBUG
+#ifdef NDEBUG
 			logger->set_level(spdlog::level::info);
-#	else
+#else
 			logger->set_level(spdlog::level::debug);
-#	endif
+#endif
 
 			// Check environment variable override
 			if (const char *env_level = std::getenv("LOG_LEVEL"))
@@ -280,28 +278,6 @@ inline spdlog::sink_ptr create_sink_with_callback(std::function<void(const spdlo
 {
 	return std::make_shared<spdlog::sinks::callback_sink_mt>(callback);
 }
-
-#else
-// Custom logger implementation stubs
-template <typename... Args>
-inline void log_verbose(const std::string &fmt, Args &&...args) noexcept;
-
-template <typename... Args>
-inline void log_debug(const std::string &fmt, Args &&...args) noexcept;
-
-template <typename... Args>
-inline void log_info(const std::string &fmt, Args &&...args) noexcept;
-
-template <typename... Args>
-inline void log_warning(const std::string &fmt, Args &&...args) noexcept;
-
-template <typename... Args>
-inline void log_error(const std::string &fmt, Args &&...args) noexcept;
-
-template <typename... Args>
-inline void log_critical(const std::string &fmt, Args &&...args) noexcept;
-#endif
-
 }        // namespace msplat::log
 
 // Basic logging macros

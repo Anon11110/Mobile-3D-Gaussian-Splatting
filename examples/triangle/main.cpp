@@ -56,6 +56,7 @@ int main()
 		LOG_INFO("Initializing RHI device");
 		// Create RHI device
 		auto device = rhi::CreateRHIDevice();
+		LOG_ASSERT(device != nullptr, "Failed to create RHI device");
 
 		// Create swapchain
 		rhi::SwapchainDesc swapchainDesc{};
