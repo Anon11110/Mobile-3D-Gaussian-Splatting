@@ -271,6 +271,45 @@ def run_cmake(config, source_dir, build_dir):
         return False
 
 
+def is_project_configured(build_dir):
+    """Check if the project is properly configured."""
+    if not build_dir.exists():
+        return False
+    
+    # Check for CMakeCache.txt which indicates configuration has been run
+    cmake_cache = build_dir / "CMakeCache.txt"
+    return cmake_cache.exists()
+
+
+def auto_configure(source_dir, build_dir, build_type="Release"):
+    """Automatically configure the project with sensible defaults."""
+    term.section("Auto-configuring project")
+    term.info(f"Project not configured, running automatic configuration...")
+    term.kv("Build type", build_type)
+    
+    # Get platform configuration
+    config = get_platform_config()
+    if not config:
+        return False
+
+    # Setup configuration with defaults
+    config.setup_cmake_args(build_type, enable_validation=False)
+
+    # Platform-specific configuration
+    if not config.configure():
+        return False
+
+    # Create build directory
+    build_dir.mkdir(exist_ok=True)
+
+    # Run CMake configuration
+    if not run_cmake(config, source_dir, build_dir):
+        return False
+
+    term.success("Auto-configuration completed successfully")
+    return True
+
+
 def discover_build_targets(build_dir):
     """Discover available CMake targets in the build directory."""
     targets = []
@@ -308,8 +347,8 @@ def discover_build_targets(build_dir):
 def build_targets(config, source_dir, build_dir, targets, parallel_jobs=None, clean_first=False):
     """Build specified targets using cmake --build."""
     
-    if not build_dir.exists():
-        term.error(f"Build directory does not exist: {build_dir}")
+    if not is_project_configured(build_dir):
+        term.error(f"Project not configured in: {build_dir}")
         term.info("Run configuration first with: python scripts/configure.py")
         return False
     
@@ -530,6 +569,16 @@ Examples:
 
     # Handle build command
     if args.command == "build":
+        # Auto-configure if project is not configured
+        if not is_project_configured(build_dir):
+            # Determine build type for auto-configuration
+            # For build command, default to Debug if no specific preference is shown
+            auto_build_type = "Debug"  # Default for development workflow
+            
+            if not auto_configure(source_dir, build_dir, auto_build_type):
+                term.error("Auto-configuration failed")
+                return 1
+        
         # List targets mode
         if args.list_targets:
             term.section("Available Build Targets")
