@@ -46,6 +46,10 @@ class PlatformConfig:
             f"-DCMAKE_BUILD_TYPE={build_type_str}",
         ]
 
+        # Enable compile_commands.json generation for Debug builds (IDE integration)
+        if build_type_str == BuildType.DEBUG.value:
+            self.cmake_args.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+
         if enable_validation:
             self.cmake_args.append("-DENABLE_VULKAN_VALIDATION=ON")
 

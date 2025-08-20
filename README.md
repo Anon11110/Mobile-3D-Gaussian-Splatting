@@ -2,10 +2,232 @@
 
 Cross-platform 3D Gaussian Splatting implementation with Vulkan/MoltenVK backend, targeting desktop and mobile platforms.
 
-## Quick Start
+## Available Targets
+
+The project provides several runnable targets:
+
+- **`triangle`** - Main Vulkan triangle example showcasing the RHI (Rendering Hardware Interface) and core library integration
+- **`unit-tests`** - Core library unit tests for platform utilities, memory allocators, and math functions
+- **`perf-tests`** - Performance benchmarks for memory allocation, vector operations, and core library components
+
+## Windows
+
+### Dependencies
+
+- **CMake** v3.20+ (required by project)
+- **Visual Studio 2022** - Primary supported IDE and build tools
+- **Vulkan SDK** - Download and install from [LunarG](https://vulkan.lunarg.com/) with default options
+  - Ensure the `VULKAN_SDK` environment variable is set automatically by the installer
+- **Python 3.7+** - Required for build configuration scripts
+
+### Build Instructions
+
+**Step 1.** Clone the repository and navigate to the project directory:
+```bash
+git clone <repository-url>
+cd Mobile-3D-Gaussian-Splatting
+```
+
+**Step 2.** Configure the project (Release build by default):
+```bash
+python scripts/configure.py
+```
+
+**Step 3.** Build and run the triangle example:
+```bash
+python scripts/configure.py build --target triangle --run
+```
+
+**Step 4.** (Optional) Build and run tests:
+```bash
+python scripts/configure.py build --tests --run
+```
+
+For Debug builds with validation layers:
+```bash
+python scripts/configure.py --clean --build-type Debug --validation
+python scripts/configure.py build --target triangle --run
+```
+
+### Using Visual Studio (Alternative)
+
+After configuring with the script, you can open the project in Visual Studio:
+
+**Step 1.** Configure the project (generates Visual Studio solution):
+```bash
+python scripts/configure.py --build-type Debug --validation
+```
+
+**Step 2.** Open the generated solution file:
+```bash
+# Open in Visual Studio
+start build/Mobile-3D-Gaussian-Splatting.sln
+```
+
+**Step 3.** Set the startup project to `triangle` and build/run directly from the IDE.
+
+The configure script automatically sets `triangle` as the startup project for Visual Studio.
+
+## Linux
+
+### Dependencies
+
+- **CMake** v3.20+ (install via package manager: `apt install cmake` or `dnf install cmake`)
+- **GCC** 9+ or **Clang** 10+ with C++20 support
+- **Vulkan development packages**:
+  - Ubuntu/Debian: `sudo apt install libvulkan-dev vulkan-tools vulkan-validationlayers-dev`
+  - Fedora/RHEL: `sudo dnf install vulkan-devel vulkan-tools vulkan-validation-layers-devel`
+  - Arch: `sudo pacman -S vulkan-devel vulkan-tools vulkan-validation-layers`
+- **Additional dependencies**:
+  - `pkg-config`, `libglfw3-dev` (or equivalent for your distribution)
+- **Python 3.7+** - Required for build configuration scripts
+
+### Build Instructions
+
+**Step 1.** Clone the repository and install dependencies:
+```bash
+git clone <repository-url>
+cd Mobile-3D-Gaussian-Splatting
+
+# Ubuntu/Debian
+sudo apt update
+sudo apt install build-essential cmake libvulkan-dev vulkan-tools vulkan-validationlayers-dev libglfw3-dev pkg-config
+
+# Fedora/RHEL
+sudo dnf install gcc-c++ cmake vulkan-devel vulkan-tools vulkan-validation-layers-devel glfw-devel pkgconfig
+```
+
+**Step 2.** Configure the project:
+```bash
+python3 scripts/configure.py
+```
+
+**Step 3.** Build and run the triangle example:
+```bash
+python3 scripts/configure.py build --target triangle --run
+```
+
+**Step 4.** (Optional) Build and run tests:
+```bash
+python3 scripts/configure.py build --tests --run
+```
+
+For Debug builds with validation:
+```bash
+python3 scripts/configure.py --clean --build-type Debug --validation
+python3 scripts/configure.py build --target triangle --run
+```
+
+## macOS
+
+### Dependencies
+
+- **CMake** v3.20+ (Apple Silicon requires at least v3.19.2)
+  - Install via Homebrew: `brew install cmake`
+  - Or download from [CMake.org](https://cmake.org/download/)
+- **Xcode** v12+ for Apple Silicon, v11+ for Intel
+  - Install from Mac App Store or Apple Developer site
+- **Command Line Tools (CLT) for Xcode**:
+  ```bash
+  xcode-select --install
+  ```
+- **Vulkan SDK** - Download and install from [LunarG](https://vulkan.lunarg.com/) with default options
+  - Includes MoltenVK for Vulkan-on-Metal translation
+  - Alternative: Install via Homebrew: `brew install vulkan-loader vulkan-headers`
+- **Python 3.7+** - Pre-installed on macOS 10.15+, or install via Homebrew
+
+### Build Instructions
+
+**Step 1.** Clone the repository and navigate to the project directory:
+```bash
+git clone <repository-url>
+cd Mobile-3D-Gaussian-Splatting
+```
+
+**Step 2.** Configure the project:
+```bash
+python3 scripts/configure.py
+```
+
+**Step 3.** Build and run the triangle example:
+```bash
+python3 scripts/configure.py build --target triangle --run
+```
+
+**Step 4.** (Optional) Build and run tests:
+```bash
+python3 scripts/configure.py build --tests --run
+```
+
+For Debug builds with validation layers:
+```bash
+python3 scripts/configure.py --clean --build-type Debug --validation
+python3 scripts/configure.py build --target triangle --run
+```
+
+**Note**: For Debug builds, the script automatically generates `compile_commands.json` for IDE integration when using Unix Makefiles or Ninja generators.
+
+### Using Xcode (Alternative)
+
+After configuring with the script, you can open the project in Xcode:
+
+**Step 1.** Configure the project (generates Xcode project):
+```bash
+python3 scripts/configure.py --generator "Xcode" --build-type Debug --validation
+```
+
+**Step 2.** Open the generated Xcode project:
+```bash
+# Open in Xcode
+open build/Mobile-3D-Gaussian-Splatting.xcodeproj
+```
+
+**Step 3.** Select the `triangle` scheme and build/run directly from Xcode.
+
+**Alternative IDEs:**
+- **VS Code**: Use `--generator "Unix Makefiles"` and open with `code .`
+- **CLion**: Open the project directory after configuration
+
+## iOS
+
+*Coming Soon* - iOS support is planned for future releases.
+
+## Android
+
+*Coming Soon* - Android support is planned for future releases.
+
+## Configure Script Options
+
+### Configuration Options
+```bash
+python3 scripts/configure.py [OPTIONS]
+```
+
+- `--build-type {Debug,Release}` - Set build configuration (default: Release)
+- `--clean` - Clean build directory before configuring
+- `--validation` - Enable Vulkan validation layers (recommended for Debug builds)
+- `--generator GENERATOR` - Override CMake generator (e.g., "Ninja", "Unix Makefiles")
+- `--build-dir BUILD_DIR` - Specify build directory (default: "build")
+- `--verbose` - Show detailed configuration output
+- `--debug-mode` - Enable debug logging for configuration process
+
+### Build Command Options
+```bash
+python3 scripts/configure.py build [OPTIONS]
+```
+
+- `--target TARGET` - Build specific target (can be repeated). Use `all` to build all targets
+- `--tests` - Build test targets only (unit-tests, perf-tests)
+- `--list-targets` - List all available build targets
+- `--run` - Run executable after building (single target only)
+- `--clean` - Clean before building
+- `--parallel N` - Number of parallel build jobs
+- `--verbose` - Show detailed build output (all compiler/linker messages)
+
+### Examples
 
 ```bash
-# Configure and build triangle example (most common workflow)
+# Quick start with triangle example
 python3 scripts/configure.py
 python3 scripts/configure.py build --target triangle --run
 
@@ -13,108 +235,54 @@ python3 scripts/configure.py build --target triangle --run
 python3 scripts/configure.py --clean --build-type Debug --validation
 python3 scripts/configure.py build --target triangle --run
 
-# Build and run tests
-python3 scripts/configure.py build --tests --run
+# Build all targets
+python3 scripts/configure.py build --target all
 
-# Show detailed build output (useful for debugging)
-python3 scripts/configure.py --verbose --build-type Debug
-python3 scripts/configure.py build --target triangle --verbose
-```
+# Build and run tests with detailed output
+python3 scripts/configure.py build --tests --run --verbose
 
-## Cross-Platform Usage
-
-The `scripts/configure.py` handles platform detection, CMake configuration, and provides unified build commands across Windows, macOS, and Linux.
-
-### Configuration
-
-```bash
-# Default Release build
-python3 scripts/configure.py
-
-# Debug build with fresh configuration
-python3 scripts/configure.py --clean --build-type Debug --validation
-
-# Override generator (useful for Ninja builds)
+# Use Ninja generator for faster builds
 python3 scripts/configure.py --generator "Ninja" --build-type Debug
+python3 scripts/configure.py build --target triangle --parallel 8
 ```
 
-### Building
+## Alternative Build Methods
+
+While the configure script is the recommended approach, you can also build the project using other methods:
+
+### Direct CMake Commands
+
+For users familiar with CMake who prefer direct control:
 
 ```bash
+# Configure (replace with your preferred generator and options)
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DENABLE_VULKAN_VALIDATION=ON
+
 # Build specific targets
-python3 scripts/configure.py build --target triangle
-python3 scripts/configure.py build --target unit-tests --target perf-tests
+cmake --build build --target triangle --parallel
 
-# Build shortcuts
-python3 scripts/configure.py build --all         # All targets
-python3 scripts/configure.py build --tests       # Test targets only
-
-# Build and run (single target)
-python3 scripts/configure.py build --target triangle --run
-
-# List available targets
-python3 scripts/configure.py build --list-targets
-
-# Advanced build options
-python3 scripts/configure.py build --clean --parallel 8 --target triangle
-```
-
-### Build Output Control
-
-By default, build commands use quiet mode for cleaner output:
-
-```bash
-# Quiet mode (default) - shows minimal output and build progress
-python3 scripts/configure.py build --target triangle
-# Output: 🔨 Building target: triangle
-#         ✅ Built triangle in 2.3s
-
-# Verbose mode - shows all build tool output (CMake, Xcode, MSBuild, etc.)
-python3 scripts/configure.py build --target triangle --verbose
-# Output: [Full xcodebuild/cmake output with all compilation details]
-```
-
-**Important**: Error messages are **always displayed** regardless of verbose setting, ensuring you never miss build failures.
-
-### Platform Requirements
-
-- **Windows**: Visual Studio 2022, Vulkan SDK with `VULKAN_SDK` environment variable
-- **macOS**: Xcode, Vulkan SDK (MoltenVK auto-detected), or Vulkan loader via Homebrew
-- **Linux**: GCC/Clang, Vulkan development packages (detected via pkg-config or `VULKAN_SDK`)
-
-### Configuration Options
-
-```bash
-python3 scripts/configure.py \
-  [--build-type Debug|Release] \
-  [--clean] \
-  [--validation] \
-  [--generator "Generator Name"] \
-  [--build-dir build] \
-  [--verbose]
-
-python3 scripts/configure.py build \
-  [--target TARGET] \
-  [--tests|--all|--list-targets] \
-  [--run] \
-  [--clean] \
-  [--parallel N] \
-  [--verbose]
-```
-
-**Available generators by platform:**
-- Windows: "Visual Studio 17 2022", "Ninja"
-- macOS: "Xcode", "Ninja", "Unix Makefiles"
-- Linux: "Unix Makefiles", "Ninja"
-
-### CMake Fallback
-
-Traditional CMake commands work for advanced scenarios:
-
-```bash
-# Multi-config (Visual Studio, Xcode)
-cmake --build build --config Debug --parallel
-
-# Single-config (Ninja, Unix Makefiles)
+# Build all targets
 cmake --build build --parallel
+
+# Run (requires proper working directory)
+cd build/bin/Debug && ./triangle
 ```
+
+### IDE Project Generation
+
+Generate project files for your preferred IDE:
+
+```bash
+# Visual Studio (Windows)
+cmake -B build -S . -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Debug
+start build/Mobile-3D-Gaussian-Splatting.sln
+
+# Xcode (macOS)
+cmake -B build -S . -G "Xcode" -DCMAKE_BUILD_TYPE=Debug
+open build/Mobile-3D-Gaussian-Splatting.xcodeproj
+
+# Unix Makefiles (Linux/macOS) with compile_commands.json for IDEs
+cmake -B build -S . -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+```
+
+**Note**: The configure script handles platform detection, dependency verification, and proper environment setup automatically. Direct CMake usage requires manual environment configuration and may not work on all systems without additional setup.

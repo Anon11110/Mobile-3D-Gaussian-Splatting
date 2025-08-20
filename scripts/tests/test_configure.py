@@ -7,6 +7,8 @@ import unittest
 import tempfile
 import argparse
 import sys
+import subprocess
+import re
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 
@@ -28,6 +30,12 @@ from utils.configure_utils import (
     BuildType,
     Generator,
     GeneratorInfo,
+    # Target discovery functions
+    discover_cmake_targets,
+    discover_build_targets,
+    # Output filtering
+    OutputConfig,
+    filter_build_output,
 )
 from configure import (
     create_argument_parser,
@@ -221,7 +229,6 @@ class TestCreateArgumentParser(unittest.TestCase):
         self.assertEqual(args.command, "build")
         self.assertEqual(args.targets, ["triangle"])
         self.assertFalse(args.tests)
-        self.assertFalse(args.all)
         self.assertFalse(args.run)
 
     def test_build_command_multiple_targets(self):
@@ -238,9 +245,9 @@ class TestCreateArgumentParser(unittest.TestCase):
         self.assertTrue(args.run)
 
     def test_build_command_all(self):
-        """Test build command with all flag."""
-        args = self.parser.parse_args(["build", "--all", "--parallel", "8"])
-        self.assertTrue(args.all)
+        """Test build command with all target."""
+        args = self.parser.parse_args(["build", "--target", "all", "--parallel", "8"])
+        self.assertEqual(args.targets, ["all"])
         self.assertEqual(args.parallel, 8)
 
     def test_build_command_list_targets(self):
@@ -457,7 +464,6 @@ class TestBuildCommand(unittest.TestCase):
         self.mock_args = MagicMock()
         self.mock_args.targets = None
         self.mock_args.tests = False
-        self.mock_args.all = False
         self.mock_args.list_targets = False
         self.mock_args.run = False
         self.mock_args.parallel = None
@@ -504,10 +510,10 @@ class TestBuildCommand(unittest.TestCase):
         )
 
     def test_determine_targets_all(self):
-        """Test determining targets with --all flag."""
-        self.mock_args.all = True
+        """Test determining targets with 'all' target."""
+        self.mock_args.targets = ["all"]
 
-        with patch("configure.discover_build_targets") as mock_discover_targets:
+        with patch("configure.discover_cmake_targets") as mock_discover_targets:
             mock_discover_targets.return_value = [
                 "triangle",
                 "unit-tests",
@@ -518,9 +524,9 @@ class TestBuildCommand(unittest.TestCase):
             result = command._determine_targets()
 
             self.assertTrue(result.success)
-            # The result should match what discover_build_targets returns
+            # The result should match what discover_cmake_targets returns
             self.assertEqual(result.value, ["triangle", "unit-tests", "perf-tests"])
-            mock_discover_targets.assert_called_once_with(self.build_dir)
+            mock_discover_targets.assert_called_once_with(self.source_dir, self.build_dir)
 
     def test_determine_targets_tests(self):
         """Test determining targets with --tests flag."""
@@ -541,6 +547,234 @@ class TestBuildCommand(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.value, ["triangle", "vulkan_rhi"])
+
+    def test_determine_targets_all_with_warning(self):
+        """Test determining targets with 'all' plus other targets (shows warning)."""
+        self.mock_args.targets = ["all", "triangle", "other"]
+
+        with patch("configure.discover_cmake_targets") as mock_discover_targets:
+            mock_discover_targets.return_value = ["triangle", "unit-tests"]
+            with patch("utils.term.warn") as mock_warn:
+                command = BuildCommand(self.mock_args, self.source_dir, self.build_dir)
+                result = command._determine_targets()
+
+                self.assertTrue(result.success)
+                self.assertEqual(result.value, ["triangle", "unit-tests"])
+                mock_warn.assert_called_once_with("When using 'all' target, other targets are ignored.")
+
+    def test_determine_targets_improved_error_message(self):
+        """Test improved error message when no targets specified."""
+        command = BuildCommand(self.mock_args, self.source_dir, self.build_dir)
+        result = command._determine_targets()
+
+        self.assertFalse(result.success)
+        self.assertIsInstance(result.error, ValidationError)
+        self.assertIn("No targets specified. Use '--target <name>', '--target all', or '--tests'", result.error.message)
+
+
+# New tests for recent changes
+
+class TestOutputFiltering(unittest.TestCase):
+    """Test output filtering functionality."""
+
+    def test_output_config_patterns(self):
+        """Test OutputConfig pattern definitions."""
+        self.assertIn("error", OutputConfig.ERROR_PATTERNS)
+        self.assertIn("failed", OutputConfig.ERROR_PATTERNS)
+        self.assertIn("warning", OutputConfig.WARNING_PATTERNS)
+        self.assertIn("warn", OutputConfig.WARNING_PATTERNS)
+
+    def test_get_active_patterns_errors(self):
+        """Test getting active patterns for errors only."""
+        original_level = OutputConfig.OUTPUT_LEVEL
+        OutputConfig.OUTPUT_LEVEL = "errors"
+        try:
+            patterns = OutputConfig.get_active_patterns()
+            self.assertEqual(patterns, OutputConfig.ERROR_PATTERNS)
+        finally:
+            OutputConfig.OUTPUT_LEVEL = original_level
+
+    def test_get_active_patterns_warnings(self):
+        """Test getting active patterns for warnings level."""
+        original_level = OutputConfig.OUTPUT_LEVEL
+        OutputConfig.OUTPUT_LEVEL = "warnings"
+        try:
+            patterns = OutputConfig.get_active_patterns()
+            expected = OutputConfig.ERROR_PATTERNS + OutputConfig.WARNING_PATTERNS
+            self.assertEqual(patterns, expected)
+        finally:
+            OutputConfig.OUTPUT_LEVEL = original_level
+
+    def test_get_active_patterns_all(self):
+        """Test getting active patterns for all level."""
+        original_level = OutputConfig.OUTPUT_LEVEL
+        OutputConfig.OUTPUT_LEVEL = "all"
+        try:
+            patterns = OutputConfig.get_active_patterns()
+            expected = OutputConfig.ERROR_PATTERNS + OutputConfig.WARNING_PATTERNS + OutputConfig.INFO_PATTERNS
+            self.assertEqual(patterns, expected)
+        finally:
+            OutputConfig.OUTPUT_LEVEL = original_level
+
+    def test_filter_build_output_with_errors(self):
+        """Test filtering build output with error patterns."""
+        stdout = """
+Building target triangle
+This is an error message
+This is a regular line
+Another failed operation occurred
+Warning: deprecated function
+This is another regular line
+"""
+        stderr = "Critical stderr message"
+        patterns = ["error", "failed", "warning"]
+        
+        filtered_stdout, filtered_stderr = filter_build_output(stdout, stderr, patterns)
+        
+        self.assertIn("error message", filtered_stdout)
+        self.assertIn("failed operation", filtered_stdout)
+        self.assertIn("Warning: deprecated", filtered_stdout)
+        self.assertNotIn("regular line", filtered_stdout)
+        self.assertEqual(filtered_stderr, stderr)  # stderr should be preserved
+
+    def test_filter_build_output_empty(self):
+        """Test filtering with empty input."""
+        filtered_stdout, filtered_stderr = filter_build_output("", "", ["error"])
+        self.assertEqual(filtered_stdout, "")
+        self.assertEqual(filtered_stderr, "")
+
+    def test_filter_build_output_no_matches(self):
+        """Test filtering with no matching patterns."""
+        stdout = "Just some regular build output\nNothing special here"
+        stderr = "Some stderr"
+        patterns = ["error", "failed"]
+        
+        filtered_stdout, filtered_stderr = filter_build_output(stdout, stderr, patterns)
+        
+        self.assertEqual(filtered_stdout, "")
+        self.assertEqual(filtered_stderr, stderr)
+
+    def test_filter_build_output_line_limit(self):
+        """Test output line limiting."""
+        # Create output with more lines than the limit
+        original_limit = OutputConfig.MAX_OUTPUT_LINES
+        OutputConfig.MAX_OUTPUT_LINES = 3
+        try:
+            stdout = "\n".join([f"error line {i}" for i in range(10)])
+            patterns = ["error"]
+            
+            filtered_stdout, _ = filter_build_output(stdout, "", patterns)
+            
+            lines = filtered_stdout.splitlines()
+            self.assertEqual(len(lines), 4)  # 3 lines + truncation message
+            self.assertIn("output truncated", lines[-1])
+        finally:
+            OutputConfig.MAX_OUTPUT_LINES = original_limit
+
+
+class TestTargetDiscovery(unittest.TestCase):
+    """Test target discovery functionality."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.source_dir = Path(self.temp_dir) / "source"
+        self.build_dir = Path(self.temp_dir) / "build"
+        self.source_dir.mkdir()
+        self.build_dir.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    @patch("subprocess.run")
+    def test_discover_cmake_targets_with_cmake_help(self, mock_run):
+        """Test target discovery using cmake --build --target help."""
+        # Mock successful cmake help output
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "triangle\nunit-tests\nperf-tests\nmsplat_core"
+        mock_run.return_value = mock_result
+
+        targets = discover_cmake_targets(self.source_dir, self.build_dir)
+        
+        self.assertEqual(targets, ["triangle", "unit-tests", "perf-tests", "msplat_core"])
+        mock_run.assert_called_once()
+
+    @patch("subprocess.run")
+    def test_discover_cmake_targets_cmake_fails(self, mock_run):
+        """Test target discovery fallback when cmake fails."""
+        # Mock cmake failure
+        mock_run.side_effect = subprocess.CalledProcessError(1, "cmake")
+
+        # Create a CMakeLists.txt with targets
+        cmake_file = self.source_dir / "CMakeLists.txt"
+        cmake_file.write_text("""
+project(TestProject)
+add_executable(triangle main.cpp)
+add_library(core src/core.cpp)
+""")
+
+        targets = discover_cmake_targets(self.source_dir, self.build_dir)
+        
+        self.assertIn("triangle", targets)
+        self.assertIn("core", targets)
+
+    def test_discover_cmake_targets_no_build_dir(self):
+        """Test target discovery when build directory doesn't exist."""
+        non_existent_build = Path(self.temp_dir) / "nonexistent"
+        
+        # Create a CMakeLists.txt with targets
+        cmake_file = self.source_dir / "CMakeLists.txt"
+        cmake_file.write_text("""
+project(TestProject)
+add_executable(my_app main.cpp)
+add_library(my_lib STATIC src/lib.cpp)
+""")
+
+        targets = discover_cmake_targets(self.source_dir, non_existent_build)
+        
+        self.assertIn("my_app", targets)
+        self.assertIn("my_lib", targets)
+
+    def test_discover_cmake_targets_fallback_to_defaults(self):
+        """Test target discovery fallback to default targets."""
+        # No CMakeLists.txt files, no cmake help - should use fallback
+        targets = discover_cmake_targets(self.source_dir, self.build_dir)
+        
+        # Should contain fallback targets
+        expected_fallbacks = ["triangle", "unit-tests", "perf-tests"]
+        for target in expected_fallbacks:
+            self.assertIn(target, targets)
+
+    def test_discover_cmake_targets_skips_third_party(self):
+        """Test that third-party directories are skipped."""
+        # Create third-party directory with CMakeLists.txt
+        third_party_dir = self.source_dir / "third-party" / "some-lib"
+        third_party_dir.mkdir(parents=True)
+        third_party_cmake = third_party_dir / "CMakeLists.txt"
+        third_party_cmake.write_text("add_executable(third_party_target main.cpp)")
+
+        # Create main CMakeLists.txt
+        main_cmake = self.source_dir / "CMakeLists.txt"
+        main_cmake.write_text("add_executable(main_target main.cpp)")
+
+        targets = discover_cmake_targets(self.source_dir, self.build_dir)
+        
+        self.assertIn("main_target", targets)
+        self.assertNotIn("third_party_target", targets)
+
+    def test_discover_build_targets_backward_compatibility(self):
+        """Test that discover_build_targets still works for backward compatibility."""
+        # This should call discover_cmake_targets internally
+        with patch("utils.configure_utils.discover_cmake_targets") as mock_discover:
+            mock_discover.return_value = ["test_target"]
+            
+            targets = discover_build_targets(self.build_dir)
+            
+            self.assertEqual(targets, ["test_target"])
+            # Should infer source directory from build directory
+            expected_source = self.build_dir.parent if self.build_dir.name == "build" else self.build_dir
+            mock_discover.assert_called_once_with(expected_source, self.build_dir)
 
 
 # Phase 3 successfully replaced old handle functions with command pattern architecture

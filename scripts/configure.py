@@ -30,6 +30,7 @@ from utils.configure_utils import (
     is_project_configured,
     auto_configure,
     discover_build_targets,
+    discover_cmake_targets,
     build_targets,
     run_executable,
     clean_build_dir,
@@ -184,7 +185,6 @@ class BuildCommand(Command):
             target_options = [
                 bool(self.args.targets),
                 self.args.tests,
-                self.args.all,
                 self.args.list_targets,
             ]
 
@@ -274,7 +274,7 @@ class BuildCommand(Command):
         """List available build targets."""
         try:
             term.section("Available Build Targets")
-            targets = discover_build_targets(self.build_dir)
+            targets = discover_cmake_targets(self.source_dir, self.build_dir)
             for target in targets:
                 print(f"  • {target}")
             return Result.ok(0)
@@ -284,14 +284,18 @@ class BuildCommand(Command):
     def _determine_targets(self) -> Result[List[str]]:
         """Determine which targets to build."""
         try:
-            if self.args.all:
-                return Result.ok(discover_build_targets(self.build_dir))
-            elif self.args.tests:
+            if self.args.tests:
                 return Result.ok(["unit-tests", "perf-tests"])
             elif self.args.targets:
-                return Result.ok(self.args.targets)
+                # Check if 'all' is in the targets list
+                if "all" in self.args.targets:
+                    if len(self.args.targets) > 1:
+                        term.warn("When using 'all' target, other targets are ignored.")
+                    return Result.ok(discover_cmake_targets(self.source_dir, self.build_dir))
+                else:
+                    return Result.ok(self.args.targets)
             else:
-                return Result.fail(ValidationError("No targets specified"))
+                return Result.fail(ValidationError("No targets specified. Use '--target <name>', '--target all', or '--tests'"))
         except Exception as e:
             return Result.fail(BuildError(f"Failed to determine targets: {e}"))
 
@@ -327,6 +331,7 @@ Examples:
   python scripts/configure.py                    # Configure with defaults
   python scripts/configure.py --clean --debug   # Clean configure for Debug
   python scripts/configure.py build --target triangle  # Build triangle target
+  python scripts/configure.py build --target all       # Build all targets
   python scripts/configure.py build --tests --run      # Build and run tests
   python scripts/configure.py build --list-targets     # Show available targets
         """,
@@ -371,7 +376,7 @@ Examples:
         "--target",
         action="append",
         dest="targets",
-        help="Build specific target (can be used multiple times)",
+        help="Build specific target (can be used multiple times). Use 'all' to build all targets.",
     )
     build_parser.add_argument(
         "--list-targets", action="store_true", help="List available build targets"
@@ -381,7 +386,6 @@ Examples:
         action="store_true",
         help="Build all test targets (unit-tests, perf-tests)",
     )
-    build_parser.add_argument("--all", action="store_true", help="Build all targets")
     build_parser.add_argument(
         "--run",
         action="store_true",

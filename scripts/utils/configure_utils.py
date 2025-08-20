@@ -20,6 +20,80 @@ from . import term
 
 
 # ============================================================================
+# OUTPUT CONFIGURATION SECTION
+# ============================================================================
+
+
+class OutputConfig:
+    """Internal configuration for output filtering when verbose=False"""
+
+    # Easy toggle - just change this value to control non-verbose output
+    # Options: "errors", "warnings", "all", "custom"
+    OUTPUT_LEVEL = "warnings"  # Default: only show errors (current behavior)
+
+    # Pattern definitions for different output levels
+    ERROR_PATTERNS = ["error", "failed", "fatal", "failure", "cannot", "abort"]
+    WARNING_PATTERNS = ["warning", "warn", "deprecated", "notice", "caution"]
+    INFO_PATTERNS = ["note", "info", "hint", "suggestion"]
+
+    # Custom configuration (when OUTPUT_LEVEL = "custom")
+    CUSTOM_PATTERNS = ["error", "warning", "failed", "fatal", "linking"]
+
+    # Advanced options
+    SHOW_STDERR = True  # Always show stderr regardless of level
+    MAX_OUTPUT_LINES = 200  # Limit output to N lines to prevent overwhelming
+
+    @classmethod
+    def get_active_patterns(cls) -> List[str]:
+        """Get the active filtering patterns based on OUTPUT_LEVEL."""
+        if cls.OUTPUT_LEVEL == "errors":
+            return cls.ERROR_PATTERNS
+        elif cls.OUTPUT_LEVEL == "warnings":
+            return cls.ERROR_PATTERNS + cls.WARNING_PATTERNS
+        elif cls.OUTPUT_LEVEL == "all":
+            return cls.ERROR_PATTERNS + cls.WARNING_PATTERNS + cls.INFO_PATTERNS
+        elif cls.OUTPUT_LEVEL == "custom":
+            return cls.CUSTOM_PATTERNS
+        else:
+            # Default fallback to errors only
+            return cls.ERROR_PATTERNS
+
+
+def filter_build_output(stdout: str, stderr: str, patterns: List[str]) -> tuple[str, str]:
+    """Filter build output based on configured patterns.
+
+    Args:
+        stdout: Standard output from build process
+        stderr: Standard error from build process
+        patterns: List of patterns to match (case-insensitive)
+
+    Returns:
+        Tuple of (filtered_stdout, filtered_stderr)
+    """
+    filtered_stdout = ""
+    filtered_stderr = stderr if OutputConfig.SHOW_STDERR else ""
+
+    if stdout:
+        stdout_lines = stdout.splitlines()
+        matching_lines = []
+
+        # Apply pattern filtering
+        for line in stdout_lines:
+            line_lower = line.lower()
+            if any(pattern in line_lower for pattern in patterns):
+                matching_lines.append(line)
+
+        # Apply line limit to prevent overwhelming output
+        if len(matching_lines) > OutputConfig.MAX_OUTPUT_LINES:
+            matching_lines = matching_lines[:OutputConfig.MAX_OUTPUT_LINES]
+            matching_lines.append(f"... (output truncated after {OutputConfig.MAX_OUTPUT_LINES} lines)")
+
+        filtered_stdout = '\n'.join(matching_lines) if matching_lines else ""
+
+    return filtered_stdout, filtered_stderr
+
+
+# ============================================================================
 # ERROR HANDLING SECTION
 # ============================================================================
 
@@ -282,13 +356,17 @@ def run_cmake(config, source_dir: Path, build_dir: Path, verbose: bool = True) -
 
             if result.returncode != 0:
                 term.error("CMake configuration failed!")
-                if result.stderr:
-                    print(result.stderr)
-                if result.stdout and (
-                    "error" in result.stdout.lower()
-                    or "failed" in result.stdout.lower()
-                ):
-                    print(result.stdout)
+
+                # Use new filtering system for non-verbose output
+                active_patterns = OutputConfig.get_active_patterns()
+                filtered_stdout, filtered_stderr = filter_build_output(
+                    result.stdout or "", result.stderr or "", active_patterns
+                )
+
+                if filtered_stderr:
+                    print(filtered_stderr)
+                if filtered_stdout:
+                    print(filtered_stdout)
                 return False
             else:
                 term.success("CMake configuration completed")
@@ -348,38 +426,77 @@ def auto_configure(
     return True
 
 
-def discover_build_targets(build_dir: Path) -> List[str]:
-    """Discover available CMake targets in the build directory."""
+def discover_cmake_targets(source_dir: Path, build_dir: Path) -> List[str]:
+    """Discover available CMake targets by scanning CMakeLists.txt files and querying CMake."""
     targets = []
 
-    # Common targets we know exist
-    known_targets = [
-        "triangle",
-        "unit-tests",
-        "perf-tests",
-        "msplat_core",
-        "vulkan_rhi",
-    ]
+    # First try to get actual targets from CMake if available
+    if build_dir.exists():
+        try:
+            result = subprocess.run(
+                ["cmake", "--build", str(build_dir), "--target", "help"],
+                capture_output=True,
+                text=True,
+                cwd=build_dir,
+            )
+            if result.returncode == 0:
+                # Parse the output for actual targets
+                for line in result.stdout.splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("..."):
+                        targets.append(line)
+                if targets:
+                    return targets
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
 
-    # Try to get actual targets from CMake if available
+    # Fallback: scan CMakeLists.txt files for add_executable and add_library
+    discovered_targets = []
     try:
-        result = subprocess.run(
-            ["cmake", "--build", str(build_dir), "--target", "help"],
-            capture_output=True,
-            text=True,
-            cwd=build_dir,
-        )
-        if result.returncode == 0:
-            # Parse the output for actual targets
-            for line in result.stdout.splitlines():
-                line = line.strip()
-                if line and not line.startswith("..."):
-                    targets.append(line)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # Fallback to known targets
-        targets = known_targets
+        # Find all CMakeLists.txt files, excluding third-party directories
+        for cmake_file in source_dir.glob("**/CMakeLists.txt"):
+            if "third-party" in str(cmake_file):
+                continue
+            
+            try:
+                content = cmake_file.read_text()
+                
+                # Find add_executable and add_library calls
+                for line in content.splitlines():
+                    line = line.strip()
+                    if line.startswith(("add_executable(", "add_library(")):
+                        # Extract target name (first argument after opening parenthesis)
+                        match = re.search(r"add_(?:executable|library)\s*\(\s*([^\s)]+)", line)
+                        if match:
+                            target_name = match.group(1)
+                            if target_name not in discovered_targets:
+                                discovered_targets.append(target_name)
+            except Exception:
+                # Skip files that can't be read or parsed
+                continue
+                
+        if discovered_targets:
+            return discovered_targets
+    except Exception:
+        pass
 
-    return targets if targets else known_targets
+    # Final fallback to known project targets if all else fails
+    fallback_targets = [
+        "triangle",
+        "unit-tests", 
+        "perf-tests",
+        "core",
+        "RHI",
+    ]
+    
+    return fallback_targets
+
+
+def discover_build_targets(build_dir: Path) -> List[str]:
+    """Legacy function for backward compatibility. Use discover_cmake_targets() instead."""
+    # Try to infer source directory from build directory
+    source_dir = build_dir.parent if build_dir.name == "build" else build_dir
+    return discover_cmake_targets(source_dir, build_dir)
 
 
 def build_targets(
@@ -462,14 +579,17 @@ def build_targets(
 
                 if result.returncode != 0:
                     term.error(f"Failed to build target '{target}'!")
-                    if result.stderr:
-                        print(result.stderr)
-                    if result.stdout and (
-                        "error" in result.stdout.lower()
-                        or "failed" in result.stdout.lower()
-                        or "fatal" in result.stdout.lower()
-                    ):
-                        print(result.stdout)
+
+                    # Use new filtering system for non-verbose output
+                    active_patterns = OutputConfig.get_active_patterns()
+                    filtered_stdout, filtered_stderr = filter_build_output(
+                        result.stdout or "", result.stderr or "", active_patterns
+                    )
+
+                    if filtered_stderr:
+                        print(filtered_stderr)
+                    if filtered_stdout:
+                        print(filtered_stdout)
                     return False
 
             end_time = time.time()
@@ -567,6 +687,19 @@ def print_success_instructions(args, source_dir: Path, build_dir: Path) -> None:
     project_name = get_project_name(source_dir)
 
     term.success("Configuration completed successfully")
+
+    # Note about compile_commands.json for Debug builds
+    if hasattr(args, 'build_type') and args.build_type == "Debug":
+        # Check which generator is being used
+        generator_info = GeneratorInfo.detect(build_dir)
+        generator_lower = (generator_info.name or "").lower()
+
+        if "xcode" in generator_lower:
+            term.info("Note: Use --generator \"Unix Makefiles\" or \"Ninja\" to generate compile_commands.json")
+        else:
+            compile_commands_path = build_dir / "compile_commands.json"
+            term.info(f"Compile commands database will be at: {compile_commands_path.resolve()}")
+
     term.sep()
     term.info("Next steps:")
 
@@ -574,7 +707,7 @@ def print_success_instructions(args, source_dir: Path, build_dir: Path) -> None:
     term.info("Build with the new build command:")
     print(f"  python scripts/configure.py build --target triangle")
     print(f"  python scripts/configure.py build --tests --run")
-    print(f"  python scripts/configure.py build --all")
+    print(f"  python scripts/configure.py build --target all")
     print(f"  python scripts/configure.py build --list-targets")
 
     term.info("Or use traditional cmake commands:")

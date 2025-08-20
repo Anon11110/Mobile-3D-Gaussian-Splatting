@@ -60,7 +60,6 @@ class LinuxConfig(PlatformConfig):
             [
                 "-G",
                 Generator.UNIX_MAKEFILES.value,
-                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",  # For IDE support
             ]
         )
 
