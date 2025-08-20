@@ -12,6 +12,7 @@ from .platformBase import PlatformConfig
 
 class Generator(Enum):
     """CMake generator enumeration."""
+
     VISUAL_STUDIO_2022 = "Visual Studio 17 2022"
     XCODE = "Xcode"
     UNIX_MAKEFILES = "Unix Makefiles"

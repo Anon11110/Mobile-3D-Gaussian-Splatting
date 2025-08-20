@@ -60,5 +60,3 @@ def error(message: str) -> None:
 def kv(key: str, value: str) -> None:
     k = colorize(key, BOLD)
     print(f"  {k}: {value}")
-
-

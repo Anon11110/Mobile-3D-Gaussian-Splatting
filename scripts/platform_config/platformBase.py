@@ -12,6 +12,7 @@ from enum import Enum
 
 class BuildType(Enum):
     """Build type enumeration."""
+
     DEBUG = "Debug"
     RELEASE = "Release"
 
@@ -32,9 +33,15 @@ class PlatformConfig:
             return Path(vulkan_sdk)
         return None
 
-    def setup_cmake_args(self, build_type: Union[BuildType, str] = BuildType.RELEASE, enable_validation: bool = False):
+    def setup_cmake_args(
+        self,
+        build_type: Union[BuildType, str] = BuildType.RELEASE,
+        enable_validation: bool = False,
+    ):
         """Setup basic CMake arguments."""
-        build_type_str = build_type.value if isinstance(build_type, BuildType) else build_type
+        build_type_str = (
+            build_type.value if isinstance(build_type, BuildType) else build_type
+        )
         self.cmake_args = [
             f"-DCMAKE_BUILD_TYPE={build_type_str}",
         ]
