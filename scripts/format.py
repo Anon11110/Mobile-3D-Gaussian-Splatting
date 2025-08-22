@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from shutil import which
 from subprocess import CalledProcessError, check_output
-from utils import term
+from utils.terminal import term
 
 
 ALLOWED_EXTENSIONS = {

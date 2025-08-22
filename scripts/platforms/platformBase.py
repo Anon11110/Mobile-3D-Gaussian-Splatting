@@ -6,18 +6,13 @@ Base platform configuration class.
 import os
 import platform
 from pathlib import Path
-from typing import Union
-from enum import Enum
+from typing import Union, List
+from abc import ABC, abstractmethod
+
+from utils.configure.types import BuildType
 
 
-class BuildType(Enum):
-    """Build type enumeration."""
-
-    DEBUG = "Debug"
-    RELEASE = "Release"
-
-
-class PlatformConfig:
+class PlatformConfig(ABC):
     """Base class for platform-specific configurations."""
 
     def __init__(self):
@@ -25,6 +20,20 @@ class PlatformConfig:
         self.build_dir = Path("build")
         self.cmake_args = []
         self.env_vars = {}
+
+    @abstractmethod
+    def get_default_generator(self) -> str:
+        """Get the default CMake generator for this platform."""
+        pass
+
+    @abstractmethod
+    def get_supported_generators(self) -> List[str]:
+        """Get list of supported CMake generators for this platform."""
+        pass
+
+    def validate_generator(self, generator: str) -> bool:
+        """Validate if a generator is supported on this platform."""
+        return generator in self.get_supported_generators()
 
     def detect_vulkan_sdk(self):
         """Detect Vulkan SDK installation."""

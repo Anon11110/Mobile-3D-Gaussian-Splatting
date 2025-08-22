@@ -4,24 +4,27 @@ macOS-specific platform configuration with MoltenVK support.
 """
 
 from pathlib import Path
+from typing import List
 
-from enum import Enum
-
-from utils import term
+from utils.terminal import term
 from .platformBase import PlatformConfig
-
-
-class Generator(Enum):
-    """CMake generator enumeration."""
-
-    VISUAL_STUDIO_2022 = "Visual Studio 17 2022"
-    XCODE = "Xcode"
-    UNIX_MAKEFILES = "Unix Makefiles"
-    NINJA = "Ninja"
 
 
 class MacOSConfig(PlatformConfig):
     """macOS-specific configuration with MoltenVK support."""
+
+    # macOS-specific CMake generators
+    XCODE = "Xcode"
+    UNIX_MAKEFILES = "Unix Makefiles"
+    NINJA = "Ninja"
+
+    def get_default_generator(self) -> str:
+        """Get the default CMake generator for macOS."""
+        return self.XCODE
+
+    def get_supported_generators(self) -> List[str]:
+        """Get list of supported CMake generators for macOS."""
+        return [self.XCODE, self.UNIX_MAKEFILES, self.NINJA]
 
     def detect_moltenvk(self):
         """Detect MoltenVK installation paths."""
@@ -82,7 +85,7 @@ class MacOSConfig(PlatformConfig):
         self.cmake_args.extend(
             [
                 "-G",
-                Generator.XCODE.value,  # Use Xcode generator by default
+                self.get_default_generator(),  # Use Xcode generator by default
                 f"-DCMAKE_OSX_DEPLOYMENT_TARGET=10.15",  # Minimum macOS version
             ]
         )

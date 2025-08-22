@@ -8,35 +8,28 @@ import platform
 import argparse
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional, Union
+from argparse import Namespace
 
-from utils import term
-from utils.configure_utils import (
-    # Error handling
-    ConfigureError,
-    ValidationError,
-    BuildError,
-    PlatformError,
-    CMakeError,
-    Result,
-    handle_error,
-    log_environment_info,
-    # Types
-    BuildType,
-    Generator,
-    GeneratorInfo,
-    # CMake utilities
-    run_cmake,
-    is_project_configured,
-    auto_configure,
-    discover_build_targets,
-    discover_cmake_targets,
-    build_targets,
-    run_executable,
-    clean_build_dir,
-    print_success_instructions,
+from utils.terminal import term
+from utils.configure.types import (
+    ConfigureError, ValidationError, BuildError, PlatformError, CMakeError,
+    Result, handle_error, BuildType
 )
-from platform_config import get_platform_config
+from utils.configure.cmake_core import (
+    log_environment_info, run_cmake, is_project_configured, auto_configure,
+    discover_cmake_targets, build_targets, run_executable, clean_build_dir,
+    print_success_instructions
+)
+from utils.configure.constants import BuildConstants
+from platforms import get_platform_config
+
+# Type aliases for better readability (defined after imports)
+CommandArgs = Namespace
+TargetList = List[str]
+ValidationResult = Result[None]
+ExecutionResult = Result[int]
+BuildTypeInput = Union[BuildType, str]
 
 
 # ============================================================================
@@ -48,12 +41,12 @@ class Command(ABC):
     """Base command interface."""
 
     @abstractmethod
-    def execute(self) -> Result[int]:
+    def execute(self) -> ExecutionResult:
         """Execute the command and return a result."""
         pass
 
     @abstractmethod
-    def validate(self) -> Result[None]:
+    def validate(self) -> ValidationResult:
         """Validate command parameters."""
         pass
 
@@ -61,96 +54,111 @@ class Command(ABC):
 class ConfigureCommand(Command):
     """Command for configuring the project."""
 
-    def __init__(self, args, source_dir: Path, build_dir: Path):
+    def __init__(self, args: CommandArgs, source_dir: Path, build_dir: Path):
         self.args = args
         self.source_dir = source_dir
         self.build_dir = build_dir
 
-    def validate(self) -> Result[None]:
-        """Validate configure command parameters."""
-        try:
-            if not self.source_dir.exists():
-                return Result.fail(
-                    ValidationError(f"Source directory not found: {self.source_dir}")
-                )
+    def validate(self) -> ValidationResult:
+        """Validate configure command parameters using ValidationFramework."""
+        from utils.configure.validation import validate_configure_context
 
-            cmake_file = self.source_dir / "CMakeLists.txt"
-            if not cmake_file.exists():
-                return Result.fail(
-                    ValidationError(f"CMakeLists.txt not found in: {self.source_dir}")
-                )
+        return validate_configure_context(self.source_dir, self.build_dir, self.args)
 
-            # Validate build type
-            if self.args.build_type not in [
-                BuildType.DEBUG.value,
-                BuildType.RELEASE.value,
-            ]:
-                return Result.fail(
-                    ValidationError(f"Invalid build type: {self.args.build_type}")
-                )
-
-            return Result.ok(None)
-
-        except Exception as e:
-            return Result.fail(ValidationError(f"Validation failed: {e}"))
-
-    def execute(self) -> Result[int]:
+    def execute(self) -> ExecutionResult:
         """Execute configure command with error handling."""
+        validation_result = self._validate_configuration()
+        if not validation_result.success:
+            return validation_result
+
+        config_result = self._setup_platform_configuration()
+        if not config_result.success:
+            return config_result
+
+        preparation_result = self._prepare_build_environment(config_result.value)
+        if not preparation_result.success:
+            return preparation_result
+
+        return self._execute_cmake_configuration(config_result.value)
+
+    def _validate_configuration(self) -> ExecutionResult:
+        """Validate configuration parameters and environment."""
         try:
-            # Validate first
             validation_result = self.validate()
             if not validation_result.success:
                 return Result.fail(validation_result.error)
 
-            term.section("CMake Configuration Begins")
-            term.kv("Platform", f"{platform.system()} {platform.machine()}")
-            term.kv("Python", sys.version)
-            term.kv("Source directory", str(self.source_dir))
-            term.kv("Build directory", str(self.build_dir))
-            term.kv("Build type", self.args.build_type)
+            self._display_configuration_info()
+            return Result.ok(0)
+        except Exception as e:
+            return Result.fail(ValidationError(f"Configuration validation failed: {e}"))
 
-            # Get platform configuration
+    def _setup_platform_configuration(self) -> Result:
+        """Setup platform-specific configuration."""
+        try:
             config = get_platform_config()
             if not config:
                 return Result.fail(
                     PlatformError(f"Unsupported platform: {platform.system()}")
                 )
 
-            # Setup configuration
             config.setup_cmake_args(self.args.build_type, self.args.validation)
 
-            # Platform-specific configuration
             if not config.configure():
                 return Result.fail(PlatformError("Platform configuration failed"))
 
-            # Override generator if specified
             if self.args.generator:
                 self._override_generator(config)
 
-            # Clean build directory if requested
+            return Result.ok(config)
+        except Exception as e:
+            return Result.fail(PlatformError(f"Platform configuration failed: {e}"))
+
+    def _prepare_build_environment(self, config) -> ExecutionResult:
+        """Prepare build environment and directories."""
+        try:
             if self.args.clean:
                 clean_build_dir(self.build_dir)
             else:
                 self.build_dir.mkdir(exist_ok=True)
 
-            # Run CMake
+            return Result.ok(0)
+        except Exception as e:
+            return Result.fail(ConfigureError(f"Build environment preparation failed: {e}"))
+
+    def _execute_cmake_configuration(self, config) -> ExecutionResult:
+        """Execute CMake configuration and display results."""
+        try:
             if not run_cmake(
                 config, self.source_dir, self.build_dir, self.args.verbose
             ):
                 return Result.fail(CMakeError("CMake configuration failed"))
 
-            # Print success instructions
             print_success_instructions(self.args, self.source_dir, self.build_dir)
-
             return Result.ok(0)
-
         except Exception as e:
-            return Result.fail(
-                ConfigureError(f"Configuration failed: {e}", details=str(e))
-            )
+            return Result.fail(CMakeError(f"CMake execution failed: {e}", details=str(e)))
+
+    def _display_configuration_info(self) -> None:
+        """Display configuration information."""
+        term.section("CMake Configuration Begins")
+        term.kv("Platform", f"{platform.system()} {platform.machine()}")
+        term.kv("Python", sys.version)
+        term.kv("Source directory", str(self.source_dir))
+        term.kv("Build directory", str(self.build_dir))
+        term.kv("Build type", self.args.build_type)
 
     def _override_generator(self, config):
-        """Override the CMake generator."""
+        """Override the CMake generator with validation."""
+        # Validate that the generator is supported on this platform
+        if not config.validate_generator(self.args.generator):
+            supported = ", ".join(config.get_supported_generators())
+            raise ValidationError(
+                f"Generator '{self.args.generator}' is not supported on {config.platform_name}. "
+                f"Supported generators: {supported}"
+            )
+        
+        # Remove existing generator arguments
         new_args = []
         skip_next = False
         for arg in config.cmake_args:
@@ -168,70 +176,49 @@ class ConfigureCommand(Command):
 class BuildCommand(Command):
     """Command for building targets."""
 
-    def __init__(self, args, source_dir: Path, build_dir: Path):
+    def __init__(self, args: CommandArgs, source_dir: Path, build_dir: Path):
         self.args = args
         self.source_dir = source_dir
         self.build_dir = build_dir
 
-    def validate(self) -> Result[None]:
-        """Validate build command parameters."""
-        try:
-            if not self.source_dir.exists():
-                return Result.fail(
-                    ValidationError(f"Source directory not found: {self.source_dir}")
-                )
+    def validate(self) -> ValidationResult:
+        """Validate build command parameters using ValidationFramework."""
+        from utils.configure.validation import validate_build_context
 
-            # Check for conflicting target selection options
-            target_options = [
-                bool(self.args.targets),
-                self.args.tests,
-                self.args.list_targets,
-            ]
+        return validate_build_context(self.source_dir, self.build_dir, self.args)
 
-            if sum(target_options) > 1:
-                return Result.fail(
-                    ValidationError(
-                        "Only one target selection option can be used at a time"
-                    )
-                )
-
-            if not any(target_options):
-                return Result.fail(
-                    ValidationError(
-                        "No targets specified. Use --target, --tests, --all, or --list-targets"
-                    )
-                )
-
-            # Validate run option
-            if self.args.run:
-                if not self.args.targets or len(self.args.targets) != 1:
-                    return Result.fail(
-                        ValidationError("--run can only be used with a single target")
-                    )
-
-            return Result.ok(None)
-
-        except Exception as e:
-            return Result.fail(ValidationError(f"Validation failed: {e}"))
-
-    def execute(self) -> Result[int]:
+    def execute(self) -> ExecutionResult:
         """Execute build command with error handling."""
+        auto_config_result = self._handle_auto_configuration()
+        if not auto_config_result.success:
+            return auto_config_result
+
+        if self.args.list_targets:
+            return self._list_targets()
+
+        targets_result = self._validate_and_determine_targets()
+        if not targets_result.success:
+            return targets_result
+
+        return self._build_and_run_targets(targets_result.value)
+
+    def _handle_auto_configuration(self) -> ExecutionResult:
+        """Handle automatic project configuration if needed."""
         try:
-            # Auto-configure if project is not configured
             if not is_project_configured(self.build_dir):
                 auto_build_type = BuildType.DEBUG
-                verbose = getattr(
-                    self.args, "verbose", True
-                )  # Handle case where verbose might not exist
+                verbose = getattr(self.args, "verbose", True)
                 if not auto_configure(
                     self.source_dir, self.build_dir, auto_build_type, verbose
                 ):
                     return Result.fail(ConfigureError("Auto-configuration failed"))
+            return Result.ok(0)
+        except Exception as e:
+            return Result.fail(ConfigureError(f"Auto-configuration failed: {e}"))
 
-            # Handle list targets first (no validation needed)
-            if self.args.list_targets:
-                return self._list_targets()
-
+    def _validate_and_determine_targets(self) -> Result[TargetList]:
+        """Validate command and determine targets to build."""
+        try:
             # Validate after auto-configure
             validation_result = self.validate()
             if not validation_result.success:
@@ -242,17 +229,20 @@ class BuildCommand(Command):
             if not targets_result.success:
                 return Result.fail(targets_result.error)
 
-            targets_to_build = targets_result.value
+            return targets_result
+        except Exception as e:
+            return Result.fail(ValidationError(f"Validation failed: {e}"))
 
+    def _build_and_run_targets(self, targets: TargetList) -> ExecutionResult:
+        """Build targets and optionally run executable."""
+        try:
             # Build the targets
-            verbose = getattr(
-                self.args, "verbose", True
-            )  # Handle case where verbose might not exist
+            verbose = getattr(self.args, "verbose", True)
             if not build_targets(
                 None,
                 self.source_dir,
                 self.build_dir,
-                targets_to_build,
+                targets,
                 self.args.parallel,
                 self.args.clean,
                 verbose,
@@ -261,16 +251,15 @@ class BuildCommand(Command):
 
             # Run executable if requested
             if self.args.run:
-                target = targets_to_build[0]
+                target = targets[0]
                 if not run_executable(self.build_dir, target):
                     return Result.fail(BuildError(f"Failed to run {target}"))
 
             return Result.ok(0)
-
         except Exception as e:
-            return Result.fail(BuildError(f"Build failed: {e}", details=str(e)))
+            return Result.fail(BuildError(f"Build execution failed: {e}", details=str(e)))
 
-    def _list_targets(self) -> Result[int]:
+    def _list_targets(self) -> ExecutionResult:
         """List available build targets."""
         try:
             term.section("Available Build Targets")
@@ -281,11 +270,11 @@ class BuildCommand(Command):
         except Exception as e:
             return Result.fail(BuildError(f"Failed to list targets: {e}"))
 
-    def _determine_targets(self) -> Result[List[str]]:
+    def _determine_targets(self) -> Result[TargetList]:
         """Determine which targets to build."""
         try:
             if self.args.tests:
-                return Result.ok(["unit-tests", "perf-tests"])
+                return Result.ok(BuildConstants.DEFAULT_TEST_TARGETS)
             elif self.args.targets:
                 # Check if 'all' is in the targets list
                 if "all" in self.args.targets:
@@ -295,7 +284,15 @@ class BuildCommand(Command):
                 else:
                     return Result.ok(self.args.targets)
             else:
-                return Result.fail(ValidationError("No targets specified. Use '--target <name>', '--target all', or '--tests'"))
+                # Show available targets in error message
+                available_targets = discover_cmake_targets(self.source_dir, self.build_dir)
+                target_list = ", ".join(available_targets[:5])
+                if len(available_targets) > 5:
+                    target_list += "..."
+                return Result.fail(ValidationError(
+                    f"No targets specified. Use '--target <name>', '--target all', or '--tests'. "
+                    f"Available targets: {target_list}"
+                ))
         except Exception as e:
             return Result.fail(BuildError(f"Failed to determine targets: {e}"))
 
@@ -324,7 +321,7 @@ class CommandFactory:
 def create_argument_parser() -> argparse.ArgumentParser:
     """Create and configure the argument parser."""
     parser = argparse.ArgumentParser(
-        description="Cross-platform CMake configuration and build tool for Mobile 3D Gaussian Splatting",
+        description="Cross-platform CMake configuration and build tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -358,7 +355,7 @@ Examples:
         help="Enable Vulkan validation layers (Debug builds)",
     )
     parser.add_argument("--generator", help="Override CMake generator")
-    parser.add_argument("--build-dir", default="build", help="Build directory path")
+    parser.add_argument("--build-dir", default=BuildConstants.DEFAULT_BUILD_DIR, help="Build directory path")
     parser.add_argument(
         "--debug-mode",
         action="store_true",
@@ -398,7 +395,7 @@ Examples:
         "--parallel", type=int, help="Number of parallel build jobs"
     )
     build_parser.add_argument(
-        "--build-dir", default="build", help="Build directory path"
+        "--build-dir", default=BuildConstants.DEFAULT_BUILD_DIR, help="Build directory path"
     )
     build_parser.add_argument(
         "--verbose",
@@ -447,7 +444,7 @@ def main() -> int:
 
     except KeyboardInterrupt:
         term.warn("Operation cancelled by user")
-        return 130  # Standard exit code for SIGINT
+        return BuildConstants.EXIT_SIGINT
     except Exception as e:
         error = ConfigureError(f"Unexpected error: {e}", details=str(e))
         try:

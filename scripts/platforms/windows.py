@@ -4,24 +4,26 @@ Windows-specific platform configuration.
 """
 
 from pathlib import Path
+from typing import List
 
-from enum import Enum
-
-from utils import term
+from utils.terminal import term
 from .platformBase import PlatformConfig
-
-
-class Generator(Enum):
-    """CMake generator enumeration."""
-
-    VISUAL_STUDIO_2022 = "Visual Studio 17 2022"
-    XCODE = "Xcode"
-    UNIX_MAKEFILES = "Unix Makefiles"
-    NINJA = "Ninja"
 
 
 class WindowsConfig(PlatformConfig):
     """Windows-specific configuration."""
+
+    # Windows-specific CMake generators
+    VISUAL_STUDIO_2022 = "Visual Studio 17 2022"
+    NINJA = "Ninja"
+
+    def get_default_generator(self) -> str:
+        """Get the default CMake generator for Windows."""
+        return self.VISUAL_STUDIO_2022
+
+    def get_supported_generators(self) -> List[str]:
+        """Get list of supported CMake generators for Windows."""
+        return [self.VISUAL_STUDIO_2022, self.NINJA]
 
     def configure(self):
         term.section("Configuring for Windows")
@@ -47,7 +49,7 @@ class WindowsConfig(PlatformConfig):
         self.cmake_args.extend(
             [
                 "-G",
-                Generator.VISUAL_STUDIO_2022.value,  # Default to VS 2022, can be overridden
+                self.get_default_generator(),  # Default to VS 2022, can be overridden
                 "-A",
                 "x64",
                 "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",

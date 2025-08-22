@@ -1,7 +1,51 @@
 #!/usr/bin/env python3
 """
-Utility functions for the configure.py script.
-Consolidated error handling, types, and CMake utilities.
+CMake core utilities for the build system.
+Core CMake-specific functionality and utilities.
+
+Module Dependency Diagram:
+=========================
+
+                           configure.py
+                          (Main Entry Point)
+                                 |
+                    ┌────────────┼────────────┐
+                    │            │            │
+                    ▼            ▼            ▼
+              validation.py  cmake_core.py  orchestrator.py
+             (Rules & Checks)  (This File)   (Build Control)
+                    │            │            │
+                    │       ┌────┼────┐       │
+                    │       │    │    │       │
+                    ▼       ▼    ▼    ▼       ▼
+               types.py ◄─────────┼─────► output_strategies.py
+            (Core Types)          │      (Output Filtering)
+                    │             │            │
+                    │             │            │
+                    ▼             ▼            ▼
+              terminal/term.py  constants.py   │
+             (UI Formatting)   (Build Config)  │
+                    ▲                          │
+                    └──────────────────────────┘
+
+Dependency Flow:
+- constants.py & terminal/term.py: Base modules (no dependencies)
+- types.py: Depends on terminal/term.py
+- output_strategies.py: Depends on types.py, constants.py
+- validation.py: Depends on types.py, constants.py
+- orchestrator.py: Depends on types.py, constants.py, output_strategies.py
+- cmake_core.py: Depends on all above modules
+- configure.py: Orchestrates all modules
+
+Module Purposes:
+- constants.py: Build constants, messages, patterns
+- types.py: Error classes, Result<T> type, enums
+- terminal/term.py: Terminal formatting and colors
+- output_strategies.py: Output filtering strategies
+- validation.py: Validation rules framework
+- orchestrator.py: Build process orchestration
+- cmake_core.py: CMake operations and utilities
+- configure.py: Command-line interface and coordination
 """
 
 import os
@@ -12,11 +56,17 @@ import shutil
 import re
 import time
 from pathlib import Path
-from dataclasses import dataclass
-from enum import Enum
-from typing import Optional, List, Dict, Union, Generic, TypeVar
+from typing import Optional, List, Dict, Union
 
-from . import term
+from ..terminal import term
+from .constants import BuildConstants, Messages
+from .types import (
+    Result,
+    ConfigureError,
+    BuildType,
+    GeneratorInfo,
+    handle_error,
+)
 
 
 # ============================================================================
@@ -24,181 +74,59 @@ from . import term
 # ============================================================================
 
 
+# Legacy OutputConfig class - replaced by OutputStrategy pattern
+# Kept for backward compatibility during migration
 class OutputConfig:
-    """Internal configuration for output filtering when verbose=False"""
+    """DEPRECATED: Use OutputStrategy pattern instead.
 
-    # Easy toggle - just change this value to control non-verbose output
-    # Options: "errors", "warnings", "all", "custom"
-    OUTPUT_LEVEL = "warnings"  # Default: only show errors (current behavior)
+    This class is kept for backward compatibility during migration to strategy patterns.
+    """
 
-    # Pattern definitions for different output levels
-    ERROR_PATTERNS = ["error", "failed", "fatal", "failure", "cannot", "abort"]
-    WARNING_PATTERNS = ["warning", "warn", "deprecated", "notice", "caution"]
-    INFO_PATTERNS = ["note", "info", "hint", "suggestion"]
-
-    # Custom configuration (when OUTPUT_LEVEL = "custom")
-    CUSTOM_PATTERNS = ["error", "warning", "failed", "fatal", "linking"]
-
-    # Advanced options
-    SHOW_STDERR = True  # Always show stderr regardless of level
-    MAX_OUTPUT_LINES = 200  # Limit output to N lines to prevent overwhelming
+    OUTPUT_LEVEL = "warnings"
+    SHOW_STDERR = True
+    MAX_OUTPUT_LINES = BuildConstants.MAX_OUTPUT_LINES
 
     @classmethod
     def get_active_patterns(cls) -> List[str]:
-        """Get the active filtering patterns based on OUTPUT_LEVEL."""
-        if cls.OUTPUT_LEVEL == "errors":
-            return cls.ERROR_PATTERNS
-        elif cls.OUTPUT_LEVEL == "warnings":
-            return cls.ERROR_PATTERNS + cls.WARNING_PATTERNS
-        elif cls.OUTPUT_LEVEL == "all":
-            return cls.ERROR_PATTERNS + cls.WARNING_PATTERNS + cls.INFO_PATTERNS
-        elif cls.OUTPUT_LEVEL == "custom":
-            return cls.CUSTOM_PATTERNS
-        else:
-            # Default fallback to errors only
-            return cls.ERROR_PATTERNS
+        """Get active patterns - delegates to OutputStrategy."""
+        from .output_strategies import OutputStrategyFactory
+
+        strategy = OutputStrategyFactory.create_strategy(cls.OUTPUT_LEVEL)
+        if hasattr(strategy, "ERROR_PATTERNS"):
+            if cls.OUTPUT_LEVEL == "errors":
+                return strategy.ERROR_PATTERNS
+            elif cls.OUTPUT_LEVEL == "warnings":
+                return strategy.ERROR_PATTERNS + strategy.WARNING_PATTERNS
+
+        # Fallback to legacy patterns
+        return ["error", "failed", "fatal", "failure", "cannot", "abort"]
 
 
-def filter_build_output(stdout: str, stderr: str, patterns: List[str]) -> tuple[str, str]:
-    """Filter build output based on configured patterns.
+def filter_build_output(
+    stdout: str, stderr: str, patterns: List[str] = None
+) -> tuple[str, str]:
+    """Filter build output using OutputStrategy pattern.
 
     Args:
         stdout: Standard output from build process
         stderr: Standard error from build process
-        patterns: List of patterns to match (case-insensitive)
+        patterns: Legacy parameter for backward compatibility (ignored)
 
     Returns:
         Tuple of (filtered_stdout, filtered_stderr)
     """
-    filtered_stdout = ""
-    filtered_stderr = stderr if OutputConfig.SHOW_STDERR else ""
+    from .output_strategies import OutputStrategyFactory, OutputManager
 
-    if stdout:
-        stdout_lines = stdout.splitlines()
-        matching_lines = []
+    # Use new OutputStrategy pattern
+    strategy = OutputStrategyFactory.create_strategy(OutputConfig.OUTPUT_LEVEL)
+    manager = OutputManager(strategy)
 
-        # Apply pattern filtering
-        for line in stdout_lines:
-            line_lower = line.lower()
-            if any(pattern in line_lower for pattern in patterns):
-                matching_lines.append(line)
-
-        # Apply line limit to prevent overwhelming output
-        if len(matching_lines) > OutputConfig.MAX_OUTPUT_LINES:
-            matching_lines = matching_lines[:OutputConfig.MAX_OUTPUT_LINES]
-            matching_lines.append(f"... (output truncated after {OutputConfig.MAX_OUTPUT_LINES} lines)")
-
-        filtered_stdout = '\n'.join(matching_lines) if matching_lines else ""
-
-    return filtered_stdout, filtered_stderr
+    return manager.filter_output(stdout, stderr)
 
 
 # ============================================================================
-# ERROR HANDLING SECTION
+# ENVIRONMENT AND LOGGING SECTION
 # ============================================================================
-
-
-class ConfigureError(Exception):
-    """Base class for configuration errors."""
-
-    def __init__(self, message: str, exit_code: int = 1, details: Optional[str] = None):
-        self.message = message
-        self.exit_code = exit_code
-        self.details = details
-        super().__init__(message)
-
-
-class PlatformError(ConfigureError):
-    """Platform-specific configuration error."""
-
-    pass
-
-
-class CMakeError(ConfigureError):
-    """CMake execution error."""
-
-    pass
-
-
-class BuildError(ConfigureError):
-    """Build execution error."""
-
-    pass
-
-
-class ValidationError(ConfigureError):
-    """Input validation error."""
-
-    pass
-
-
-T = TypeVar("T")
-
-
-@dataclass
-class Result(Generic[T]):
-    """Result type for operations that can succeed or fail."""
-
-    success: bool
-    value: Optional[T] = None
-    error: Optional[ConfigureError] = None
-
-    @classmethod
-    def ok(cls, value: T) -> "Result[T]":
-        """Create a successful result."""
-        return cls(success=True, value=value)
-
-    @classmethod
-    def fail(cls, error: ConfigureError) -> "Result[T]":
-        """Create a failed result."""
-        return cls(success=False, error=error)
-
-    def unwrap(self) -> T:
-        """Get the value or raise the error."""
-        if self.success and self.value is not None:
-            return self.value
-        if self.error:
-            raise self.error
-        raise ConfigureError("Result has no value or error")
-
-
-def handle_error(error: ConfigureError) -> int:
-    """Centralized error handling with logging and recovery suggestions."""
-    term.error(error.message)
-    if error.details:
-        term.info(f"Details: {error.details}")
-
-    # Provide context-specific recovery suggestions
-    if isinstance(error, PlatformError):
-        term.info("Recovery suggestions:")
-        if "Vulkan" in error.message:
-            print("  • Install Vulkan SDK from https://vulkan.lunarg.com/")
-            print("  • Set VULKAN_SDK environment variable")
-        elif "MoltenVK" in error.message:
-            print("  • Install MoltenVK via Vulkan SDK or Homebrew")
-            print("  • Check VK_ICD_FILENAMES environment variable")
-
-    elif isinstance(error, CMakeError):
-        term.info("Recovery suggestions:")
-        print("  • Check CMakeLists.txt for syntax errors")
-        print("  • Verify all dependencies are installed")
-        print("  • Try cleaning the build directory with --clean")
-        print("  • Check CMake version compatibility")
-
-    elif isinstance(error, BuildError):
-        term.info("Recovery suggestions:")
-        print("  • Configure the project first if not already done")
-        print("  • Check for compilation errors in the output above")
-        print("  • Verify all dependencies are available")
-        print("  • Try building individual targets")
-
-    elif isinstance(error, ValidationError):
-        term.info("Recovery suggestions:")
-        print("  • Check command syntax with --help")
-        print("  • Verify file paths exist and are accessible")
-        print("  • Ensure arguments are compatible")
-
-    return error.exit_code
 
 
 def log_environment_info():
@@ -215,7 +143,10 @@ def log_environment_info():
         # Check CMake version
         try:
             cmake_result = subprocess.run(
-                ["cmake", "--version"], capture_output=True, text=True, timeout=10
+                [BuildConstants.CMAKE_EXECUTABLE, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=BuildConstants.CMAKE_TIMEOUT_SECONDS,
             )
             if cmake_result.returncode == 0:
                 cmake_version = cmake_result.stdout.split("\n")[0]
@@ -232,59 +163,6 @@ def log_environment_info():
 
     except Exception as e:
         term.warn(f"Could not gather environment info: {e}")
-
-
-# ============================================================================
-# TYPES SECTION
-# ============================================================================
-
-
-class BuildType(Enum):
-    """Build type enumeration."""
-
-    DEBUG = "Debug"
-    RELEASE = "Release"
-
-
-class Generator(Enum):
-    """CMake generator enumeration."""
-
-    VISUAL_STUDIO_2022 = "Visual Studio 17 2022"
-    XCODE = "Xcode"
-    UNIX_MAKEFILES = "Unix Makefiles"
-    NINJA = "Ninja"
-
-
-@dataclass
-class GeneratorInfo:
-    """Information about the detected CMake generator."""
-
-    name: Optional[str]
-    is_multi_config: bool
-
-    @classmethod
-    def detect(cls, build_dir: Path) -> "GeneratorInfo":
-        """Detect generator type from CMake cache."""
-        generator = None
-        try:
-            cache_file = build_dir / "CMakeCache.txt"
-            if cache_file.exists():
-                content = cache_file.read_text()
-                for line in content.splitlines():
-                    if line.startswith("CMAKE_GENERATOR:INTERNAL="):
-                        generator = line.split("=", 1)[1]
-                        break
-        except Exception:
-            pass
-
-        generator_lower = (generator or "").lower()
-        is_multi_config = (
-            ("visual studio" in generator_lower)
-            or ("xcode" in generator_lower)
-            or ("multi-config" in generator_lower)
-        )
-
-        return cls(name=generator, is_multi_config=is_multi_config)
 
 
 # ============================================================================
@@ -313,14 +191,16 @@ def get_project_name(source_dir: Path) -> str:
 def clean_build_dir(build_dir: Path) -> None:
     """Clean the build directory."""
     if build_dir.exists():
-        print(f"🧹 Cleaning build directory: {build_dir}")
+        print(Messages.CLEANING_BUILD_DIR.format(path=build_dir))
         shutil.rmtree(build_dir)
     build_dir.mkdir(exist_ok=True)
 
 
 def run_cmake(config, source_dir: Path, build_dir: Path, verbose: bool = True) -> bool:
     """Run CMake configuration."""
-    cmake_cmd = ["cmake"] + config.cmake_args + [str(source_dir)]
+    cmake_cmd = (
+        [BuildConstants.CMAKE_EXECUTABLE] + config.cmake_args + [str(source_dir)]
+    )
 
     term.section("Running CMake configuration")
     if verbose:
@@ -383,7 +263,7 @@ def is_project_configured(build_dir: Path) -> bool:
         return False
 
     # Check for CMakeCache.txt which indicates configuration has been run
-    cmake_cache = build_dir / "CMakeCache.txt"
+    cmake_cache = build_dir / BuildConstants.CMAKE_CACHE_FILE
     return cmake_cache.exists()
 
 
@@ -422,7 +302,7 @@ def auto_configure(
     if not run_cmake(config, source_dir, build_dir, verbose):
         return False
 
-    term.success("Auto-configuration completed successfully")
+    term.success(Messages.AUTO_CONFIG_COMPLETE)
     return True
 
 
@@ -434,7 +314,13 @@ def discover_cmake_targets(source_dir: Path, build_dir: Path) -> List[str]:
     if build_dir.exists():
         try:
             result = subprocess.run(
-                ["cmake", "--build", str(build_dir), "--target", "help"],
+                [
+                    BuildConstants.CMAKE_EXECUTABLE,
+                    "--build",
+                    str(build_dir),
+                    "--target",
+                    "help",
+                ],
                 capture_output=True,
                 text=True,
                 cwd=build_dir,
@@ -454,19 +340,21 @@ def discover_cmake_targets(source_dir: Path, build_dir: Path) -> List[str]:
     discovered_targets = []
     try:
         # Find all CMakeLists.txt files, excluding third-party directories
-        for cmake_file in source_dir.glob("**/CMakeLists.txt"):
-            if "third-party" in str(cmake_file):
+        for cmake_file in source_dir.glob(BuildConstants.CMAKE_FILES_PATTERN):
+            if BuildConstants.THIRD_PARTY_EXCLUDE in str(cmake_file):
                 continue
-            
+
             try:
                 content = cmake_file.read_text()
-                
+
                 # Find add_executable and add_library calls
                 for line in content.splitlines():
                     line = line.strip()
                     if line.startswith(("add_executable(", "add_library(")):
                         # Extract target name (first argument after opening parenthesis)
-                        match = re.search(r"add_(?:executable|library)\s*\(\s*([^\s)]+)", line)
+                        match = re.search(
+                            r"add_(?:executable|library)\s*\(\s*([^\s)]+)", line
+                        )
                         if match:
                             target_name = match.group(1)
                             if target_name not in discovered_targets:
@@ -474,28 +362,24 @@ def discover_cmake_targets(source_dir: Path, build_dir: Path) -> List[str]:
             except Exception:
                 # Skip files that can't be read or parsed
                 continue
-                
+
         if discovered_targets:
             return discovered_targets
     except Exception:
         pass
 
     # Final fallback to known project targets if all else fails
-    fallback_targets = [
-        "triangle",
-        "unit-tests", 
-        "perf-tests",
-        "core",
-        "RHI",
-    ]
-    
-    return fallback_targets
+    return BuildConstants.FALLBACK_TARGETS
 
 
 def discover_build_targets(build_dir: Path) -> List[str]:
     """Legacy function for backward compatibility. Use discover_cmake_targets() instead."""
     # Try to infer source directory from build directory
-    source_dir = build_dir.parent if build_dir.name == "build" else build_dir
+    source_dir = (
+        build_dir.parent
+        if build_dir.name == BuildConstants.DEFAULT_BUILD_DIR
+        else build_dir
+    )
     return discover_cmake_targets(source_dir, build_dir)
 
 
@@ -508,116 +392,46 @@ def build_targets(
     clean_first: bool = False,
     verbose: bool = True,
 ) -> bool:
-    """Build specified targets using cmake --build."""
+    """Build specified targets using cmake --build.
 
-    if not is_project_configured(build_dir):
-        term.error(f"Project not configured in: {build_dir}")
-        term.info("Run configuration first with: python scripts/configure.py")
+    Legacy wrapper around BuildOrchestrator for backward compatibility.
+    """
+    from .orchestrator import BuildConfiguration, BuildOrchestrator
+
+    try:
+        # Create build configuration
+        build_config = BuildConfiguration.create(
+            source_dir=source_dir,
+            build_dir=build_dir,
+            parallel_jobs=parallel_jobs,
+            clean_first=clean_first,
+            verbose=verbose,
+            output_level="warnings",
+        )
+
+        # Create orchestrator and build targets
+        orchestrator = BuildOrchestrator(build_config)
+        result = orchestrator.build_targets(targets)
+
+        return result.success
+
+    except Exception as e:
+        term.error(f"Build orchestration failed: {e}")
         return False
-
-    if clean_first:
-        term.section("Cleaning build directory")
-        try:
-            result = subprocess.run(
-                ["cmake", "--build", str(build_dir), "--target", "clean"],
-                cwd=build_dir,
-                check=True,
-            )
-        except subprocess.CalledProcessError as e:
-            term.warn(f"Clean failed, continuing anyway: {e}")
-
-    # Determine if this is a multi-config generator
-    generator_info = GeneratorInfo.detect(build_dir)
-
-    # Get build type from cache
-    # Even for multi-config generators, CMAKE_BUILD_TYPE can be set during configuration
-    build_type = get_build_type_from_cache(build_dir)
-
-    # For multi-config generators, if we couldn't get it from cache or it's empty,
-    # fall back to directory existence check
-    if generator_info.is_multi_config and build_type == "Release":
-        if (build_dir / "bin" / "Debug").exists():
-            build_type = "Debug"
-
-    term.section(f"Building targets: {', '.join(targets)}")
-    if verbose:
-        term.kv("Build directory", str(build_dir))
-        term.kv("Build type", build_type)
-        term.kv("Generator", generator_info.name or "Unknown")
-
-    # Build each target
-    success_count = 0
-    for target in targets:
-        if verbose:
-            term.info(f"Building target: {target}")
-        else:
-            term.info(f"🔨 Building target: {target}")
-
-        cmd = ["cmake", "--build", str(build_dir)]
-        if generator_info.is_multi_config:
-            cmd.extend(["--config", build_type])
-        cmd.extend(["--target", target])
-        if parallel_jobs:
-            cmd.extend(["--parallel", str(parallel_jobs)])
-        else:
-            cmd.append("--parallel")
-
-        if verbose:
-            term.kv("Command", " ".join(cmd))
-
-        try:
-            start_time = time.time()
-
-            if verbose:
-                # Stream output in real-time (current behavior)
-                result = subprocess.run(cmd, cwd=build_dir, check=True)
-            else:
-                # Capture output, show only on error
-                result = subprocess.run(
-                    cmd, cwd=build_dir, capture_output=True, text=True, check=False
-                )
-
-                if result.returncode != 0:
-                    term.error(f"Failed to build target '{target}'!")
-
-                    # Use new filtering system for non-verbose output
-                    active_patterns = OutputConfig.get_active_patterns()
-                    filtered_stdout, filtered_stderr = filter_build_output(
-                        result.stdout or "", result.stderr or "", active_patterns
-                    )
-
-                    if filtered_stderr:
-                        print(filtered_stderr)
-                    if filtered_stdout:
-                        print(filtered_stdout)
-                    return False
-
-            end_time = time.time()
-            build_time = end_time - start_time
-
-            if verbose:
-                term.success(f"Built {target} in {build_time:.1f}s")
-            else:
-                term.success(f"✅ Built {target} in {build_time:.1f}s")
-            success_count += 1
-
-        except subprocess.CalledProcessError as e:
-            term.error(f"Failed to build target '{target}': {e}")
-            return False
-
-    term.success(f"Successfully built {success_count}/{len(targets)} targets")
-    return True
 
 
 def get_build_type_from_cache(build_dir: Path) -> str:
     """Extract build type from CMakeCache.txt."""
     try:
-        cache_file = build_dir / "CMakeCache.txt"
+        cache_file = build_dir / BuildConstants.CMAKE_CACHE_FILE
         if cache_file.exists():
             content = cache_file.read_text()
             for line in content.splitlines():
                 # Handle both STRING and UNINITIALIZED types
-                if line.startswith("CMAKE_BUILD_TYPE:") and "=" in line:
+                if (
+                    line.startswith(BuildConstants.CMAKE_BUILD_TYPE_CACHE_PREFIX)
+                    and "=" in line
+                ):
                     build_type = line.split("=", 1)[1]
                     if build_type:  # Only use if not empty
                         return build_type
@@ -641,14 +455,14 @@ def run_executable(
         # For multi-config generators, if we couldn't get it from cache or it's empty,
         # fall back to directory existence check
         if generator_info.is_multi_config and build_type == "Release":
-            if (build_dir / "bin" / "Debug").exists():
+            if (build_dir / BuildConstants.BIN_SUBDIR_DEBUG).exists():
                 build_type = "Debug"
 
     # Determine executable path
     if build_type == "Debug":
-        exe_dir = build_dir / "bin" / "Debug"
+        exe_dir = build_dir / BuildConstants.BIN_SUBDIR_DEBUG
     else:
-        exe_dir = build_dir / "bin" / "Release"
+        exe_dir = build_dir / BuildConstants.BIN_SUBDIR_RELEASE
 
     exe_path = exe_dir / target
     if platform.system().lower() == "windows":
@@ -686,19 +500,23 @@ def print_success_instructions(args, source_dir: Path, build_dir: Path) -> None:
     # Get project name
     project_name = get_project_name(source_dir)
 
-    term.success("Configuration completed successfully")
+    term.success(Messages.CONFIGURATION_COMPLETE)
 
     # Note about compile_commands.json for Debug builds
-    if hasattr(args, 'build_type') and args.build_type == "Debug":
+    if hasattr(args, "build_type") and args.build_type == "Debug":
         # Check which generator is being used
         generator_info = GeneratorInfo.detect(build_dir)
         generator_lower = (generator_info.name or "").lower()
 
         if "xcode" in generator_lower:
-            term.info("Note: Use --generator \"Unix Makefiles\" or \"Ninja\" to generate compile_commands.json")
+            term.info(
+                'Note: Use --generator "Unix Makefiles" or "Ninja" to generate compile_commands.json'
+            )
         else:
             compile_commands_path = build_dir / "compile_commands.json"
-            term.info(f"Compile commands database will be at: {compile_commands_path.resolve()}")
+            term.info(
+                f"Compile commands database will be at: {compile_commands_path.resolve()}"
+            )
 
     term.sep()
     term.info("Next steps:")

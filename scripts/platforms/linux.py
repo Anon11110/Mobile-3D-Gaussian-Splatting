@@ -4,23 +4,26 @@ Linux-specific platform configuration.
 """
 
 import subprocess
-from enum import Enum
+from typing import List
 
-from utils import term
+from utils.terminal import term
 from .platformBase import PlatformConfig
-
-
-class Generator(Enum):
-    """CMake generator enumeration."""
-
-    VISUAL_STUDIO_2022 = "Visual Studio 17 2022"
-    XCODE = "Xcode"
-    UNIX_MAKEFILES = "Unix Makefiles"
-    NINJA = "Ninja"
 
 
 class LinuxConfig(PlatformConfig):
     """Linux-specific configuration."""
+
+    # Linux-specific CMake generators
+    UNIX_MAKEFILES = "Unix Makefiles"
+    NINJA = "Ninja"
+
+    def get_default_generator(self) -> str:
+        """Get the default CMake generator for Linux."""
+        return self.UNIX_MAKEFILES
+
+    def get_supported_generators(self) -> List[str]:
+        """Get list of supported CMake generators for Linux."""
+        return [self.UNIX_MAKEFILES, self.NINJA]
 
     def detect_vulkan_packages(self):
         """Detect Vulkan packages on Linux."""
@@ -59,7 +62,7 @@ class LinuxConfig(PlatformConfig):
         self.cmake_args.extend(
             [
                 "-G",
-                Generator.UNIX_MAKEFILES.value,
+                self.get_default_generator(),
             ]
         )
 

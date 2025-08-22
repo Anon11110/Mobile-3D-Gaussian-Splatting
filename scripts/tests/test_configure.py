@@ -15,8 +15,11 @@ from unittest.mock import patch, MagicMock, mock_open
 # Add parent directory to path to import from scripts/
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils import term
-from utils.configure_utils import (
+from utils.terminal import term
+from platforms.windows import WindowsConfig
+from platforms.macos import MacOSConfig  
+from platforms.linux import LinuxConfig
+from utils.configure.types import (
     # Error handling and Result types
     ConfigureError,
     PlatformError,
@@ -25,17 +28,19 @@ from utils.configure_utils import (
     ValidationError,
     Result,
     handle_error,
-    log_environment_info,
     # Types
     BuildType,
-    Generator,
     GeneratorInfo,
+)
+from utils.configure.cmake_core import (
     # Target discovery functions
     discover_cmake_targets,
     discover_build_targets,
     # Output filtering
     OutputConfig,
     filter_build_output,
+    # Environment
+    log_environment_info,
 )
 from configure import (
     create_argument_parser,
@@ -62,23 +67,53 @@ class TestBuildTypeEnum(unittest.TestCase):
         self.assertIn(BuildType.RELEASE, BuildType)
 
 
-class TestGeneratorEnum(unittest.TestCase):
-    """Test Generator enum functionality."""
+class TestPlatformGenerators(unittest.TestCase):
+    """Test platform-specific generator functionality."""
 
-    def test_visual_studio_value(self):
-        self.assertEqual(Generator.VISUAL_STUDIO_2022.value, "Visual Studio 17 2022")
+    def test_windows_generators(self):
+        """Test Windows platform generator configuration."""
+        config = WindowsConfig()
+        self.assertEqual(config.get_default_generator(), "Visual Studio 17 2022")
+        supported = config.get_supported_generators()
+        self.assertIn("Visual Studio 17 2022", supported)
+        self.assertIn("Ninja", supported)
+        self.assertEqual(len(supported), 2)
 
-    def test_xcode_value(self):
-        self.assertEqual(Generator.XCODE.value, "Xcode")
+    def test_macos_generators(self):
+        """Test macOS platform generator configuration."""
+        config = MacOSConfig()
+        self.assertEqual(config.get_default_generator(), "Xcode")
+        supported = config.get_supported_generators()
+        self.assertIn("Xcode", supported)
+        self.assertIn("Unix Makefiles", supported)
+        self.assertIn("Ninja", supported)
+        self.assertEqual(len(supported), 3)
 
-    def test_unix_makefiles_value(self):
-        self.assertEqual(Generator.UNIX_MAKEFILES.value, "Unix Makefiles")
+    def test_linux_generators(self):
+        """Test Linux platform generator configuration."""
+        config = LinuxConfig()
+        self.assertEqual(config.get_default_generator(), "Unix Makefiles")
+        supported = config.get_supported_generators()
+        self.assertIn("Unix Makefiles", supported)
+        self.assertIn("Ninja", supported)
+        self.assertEqual(len(supported), 2)
 
-    def test_ninja_value(self):
-        self.assertEqual(Generator.NINJA.value, "Ninja")
+    def test_generator_validation(self):
+        """Test generator validation across platforms."""
+        windows_config = WindowsConfig()
+        self.assertTrue(windows_config.validate_generator("Visual Studio 17 2022"))
+        self.assertTrue(windows_config.validate_generator("Ninja"))
+        self.assertFalse(windows_config.validate_generator("Xcode"))
 
-    def test_enum_members(self):
-        self.assertEqual(len(Generator), 4)
+        macos_config = MacOSConfig()
+        self.assertTrue(macos_config.validate_generator("Xcode"))
+        self.assertTrue(macos_config.validate_generator("Unix Makefiles"))
+        self.assertFalse(macos_config.validate_generator("Visual Studio 17 2022"))
+
+        linux_config = LinuxConfig()
+        self.assertTrue(linux_config.validate_generator("Unix Makefiles"))
+        self.assertTrue(linux_config.validate_generator("Ninja"))
+        self.assertFalse(linux_config.validate_generator("Visual Studio 17 2022"))
 
 
 class TestGeneratorInfo(unittest.TestCase):
@@ -261,7 +296,7 @@ class TestCreateArgumentParser(unittest.TestCase):
             self.parser.parse_args(["--build-type", "Invalid"])
 
 
-# Phase 3 Tests - Command Pattern and Error Handling
+# Command Pattern and Error Handling Tests
 class TestErrorHandling(unittest.TestCase):
     """Test error handling and result types."""
 
@@ -526,7 +561,9 @@ class TestBuildCommand(unittest.TestCase):
             self.assertTrue(result.success)
             # The result should match what discover_cmake_targets returns
             self.assertEqual(result.value, ["triangle", "unit-tests", "perf-tests"])
-            mock_discover_targets.assert_called_once_with(self.source_dir, self.build_dir)
+            mock_discover_targets.assert_called_once_with(
+                self.source_dir, self.build_dir
+            )
 
     def test_determine_targets_tests(self):
         """Test determining targets with --tests flag."""
@@ -560,7 +597,9 @@ class TestBuildCommand(unittest.TestCase):
 
                 self.assertTrue(result.success)
                 self.assertEqual(result.value, ["triangle", "unit-tests"])
-                mock_warn.assert_called_once_with("When using 'all' target, other targets are ignored.")
+                mock_warn.assert_called_once_with(
+                    "When using 'all' target, other targets are ignored."
+                )
 
     def test_determine_targets_improved_error_message(self):
         """Test improved error message when no targets specified."""
@@ -569,10 +608,14 @@ class TestBuildCommand(unittest.TestCase):
 
         self.assertFalse(result.success)
         self.assertIsInstance(result.error, ValidationError)
-        self.assertIn("No targets specified. Use '--target <name>', '--target all', or '--tests'", result.error.message)
+        self.assertIn(
+            "No targets specified. Use '--target <name>', '--target all', or '--tests'",
+            result.error.message,
+        )
 
 
 # New tests for recent changes
+
 
 class TestOutputFiltering(unittest.TestCase):
     """Test output filtering functionality."""
@@ -611,7 +654,11 @@ class TestOutputFiltering(unittest.TestCase):
         OutputConfig.OUTPUT_LEVEL = "all"
         try:
             patterns = OutputConfig.get_active_patterns()
-            expected = OutputConfig.ERROR_PATTERNS + OutputConfig.WARNING_PATTERNS + OutputConfig.INFO_PATTERNS
+            expected = (
+                OutputConfig.ERROR_PATTERNS
+                + OutputConfig.WARNING_PATTERNS
+                + OutputConfig.INFO_PATTERNS
+            )
             self.assertEqual(patterns, expected)
         finally:
             OutputConfig.OUTPUT_LEVEL = original_level
@@ -628,9 +675,9 @@ This is another regular line
 """
         stderr = "Critical stderr message"
         patterns = ["error", "failed", "warning"]
-        
+
         filtered_stdout, filtered_stderr = filter_build_output(stdout, stderr, patterns)
-        
+
         self.assertIn("error message", filtered_stdout)
         self.assertIn("failed operation", filtered_stdout)
         self.assertIn("Warning: deprecated", filtered_stdout)
@@ -648,9 +695,9 @@ This is another regular line
         stdout = "Just some regular build output\nNothing special here"
         stderr = "Some stderr"
         patterns = ["error", "failed"]
-        
+
         filtered_stdout, filtered_stderr = filter_build_output(stdout, stderr, patterns)
-        
+
         self.assertEqual(filtered_stdout, "")
         self.assertEqual(filtered_stderr, stderr)
 
@@ -662,9 +709,9 @@ This is another regular line
         try:
             stdout = "\n".join([f"error line {i}" for i in range(10)])
             patterns = ["error"]
-            
+
             filtered_stdout, _ = filter_build_output(stdout, "", patterns)
-            
+
             lines = filtered_stdout.splitlines()
             self.assertEqual(len(lines), 4)  # 3 lines + truncation message
             self.assertIn("output truncated", lines[-1])
@@ -684,6 +731,7 @@ class TestTargetDiscovery(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.temp_dir)
 
     @patch("subprocess.run")
@@ -696,8 +744,10 @@ class TestTargetDiscovery(unittest.TestCase):
         mock_run.return_value = mock_result
 
         targets = discover_cmake_targets(self.source_dir, self.build_dir)
-        
-        self.assertEqual(targets, ["triangle", "unit-tests", "perf-tests", "msplat_core"])
+
+        self.assertEqual(
+            targets, ["triangle", "unit-tests", "perf-tests", "msplat_core"]
+        )
         mock_run.assert_called_once()
 
     @patch("subprocess.run")
@@ -708,31 +758,35 @@ class TestTargetDiscovery(unittest.TestCase):
 
         # Create a CMakeLists.txt with targets
         cmake_file = self.source_dir / "CMakeLists.txt"
-        cmake_file.write_text("""
+        cmake_file.write_text(
+            """
 project(TestProject)
 add_executable(triangle main.cpp)
 add_library(core src/core.cpp)
-""")
+"""
+        )
 
         targets = discover_cmake_targets(self.source_dir, self.build_dir)
-        
+
         self.assertIn("triangle", targets)
         self.assertIn("core", targets)
 
     def test_discover_cmake_targets_no_build_dir(self):
         """Test target discovery when build directory doesn't exist."""
         non_existent_build = Path(self.temp_dir) / "nonexistent"
-        
+
         # Create a CMakeLists.txt with targets
         cmake_file = self.source_dir / "CMakeLists.txt"
-        cmake_file.write_text("""
+        cmake_file.write_text(
+            """
 project(TestProject)
 add_executable(my_app main.cpp)
 add_library(my_lib STATIC src/lib.cpp)
-""")
+"""
+        )
 
         targets = discover_cmake_targets(self.source_dir, non_existent_build)
-        
+
         self.assertIn("my_app", targets)
         self.assertIn("my_lib", targets)
 
@@ -740,7 +794,7 @@ add_library(my_lib STATIC src/lib.cpp)
         """Test target discovery fallback to default targets."""
         # No CMakeLists.txt files, no cmake help - should use fallback
         targets = discover_cmake_targets(self.source_dir, self.build_dir)
-        
+
         # Should contain fallback targets
         expected_fallbacks = ["triangle", "unit-tests", "perf-tests"]
         for target in expected_fallbacks:
@@ -759,7 +813,7 @@ add_library(my_lib STATIC src/lib.cpp)
         main_cmake.write_text("add_executable(main_target main.cpp)")
 
         targets = discover_cmake_targets(self.source_dir, self.build_dir)
-        
+
         self.assertIn("main_target", targets)
         self.assertNotIn("third_party_target", targets)
 
@@ -768,16 +822,20 @@ add_library(my_lib STATIC src/lib.cpp)
         # This should call discover_cmake_targets internally
         with patch("utils.configure_utils.discover_cmake_targets") as mock_discover:
             mock_discover.return_value = ["test_target"]
-            
+
             targets = discover_build_targets(self.build_dir)
-            
+
             self.assertEqual(targets, ["test_target"])
             # Should infer source directory from build directory
-            expected_source = self.build_dir.parent if self.build_dir.name == "build" else self.build_dir
+            expected_source = (
+                self.build_dir.parent
+                if self.build_dir.name == "build"
+                else self.build_dir
+            )
             mock_discover.assert_called_once_with(expected_source, self.build_dir)
 
 
-# Phase 3 successfully replaced old handle functions with command pattern architecture
+# Command pattern architecture successfully replaced old handle functions
 
 
 if __name__ == "__main__":
