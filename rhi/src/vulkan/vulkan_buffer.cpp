@@ -7,7 +7,7 @@ namespace rhi::vulkan
 {
 
 VulkanBuffer::VulkanBuffer(VmaAllocator allocator, const BufferDesc &desc) :
-    allocator(allocator), buffer(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), size(desc.size), mappedData(nullptr)
+    allocator(allocator), buffer(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), size(desc.size), mappedData(nullptr), isPersistentlyMapped(false)
 {
 	// Create buffer info
 	VkBufferCreateInfo bufferInfo{};
@@ -32,6 +32,7 @@ VulkanBuffer::VulkanBuffer(VmaAllocator allocator, const BufferDesc &desc) :
 			if (desc.hints.persistently_mapped)
 			{
 				allocInfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
+				isPersistentlyMapped = true;
 			}
 			break;
 
@@ -42,6 +43,7 @@ VulkanBuffer::VulkanBuffer(VmaAllocator allocator, const BufferDesc &desc) :
 			if (desc.hints.persistently_mapped)
 			{
 				allocInfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
+				isPersistentlyMapped = true;
 			}
 			break;
 
@@ -87,6 +89,9 @@ VulkanBuffer::~VulkanBuffer()
 {
 	if (buffer != VK_NULL_HANDLE && allocation != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE)
 	{
+		// Unmap memory if it was manually mapped
+		Unmap();
+
 		vmaDestroyBuffer(allocator, buffer, allocation);
 		buffer     = VK_NULL_HANDLE;
 		allocation = VK_NULL_HANDLE;
@@ -98,13 +103,15 @@ VulkanBuffer::VulkanBuffer(VulkanBuffer &&other) noexcept :
     buffer(other.buffer),
     allocation(other.allocation),
     size(other.size),
-    mappedData(other.mappedData)
+    mappedData(other.mappedData),
+    isPersistentlyMapped(other.isPersistentlyMapped)
 {
-	other.allocator  = VK_NULL_HANDLE;
-	other.buffer     = VK_NULL_HANDLE;
-	other.allocation = VK_NULL_HANDLE;
-	other.size       = 0;
-	other.mappedData = nullptr;
+	other.allocator            = VK_NULL_HANDLE;
+	other.buffer               = VK_NULL_HANDLE;
+	other.allocation           = VK_NULL_HANDLE;
+	other.size                 = 0;
+	other.mappedData           = nullptr;
+	other.isPersistentlyMapped = false;
 }
 
 VulkanBuffer &VulkanBuffer::operator=(VulkanBuffer &&other) noexcept
@@ -116,17 +123,19 @@ VulkanBuffer &VulkanBuffer::operator=(VulkanBuffer &&other) noexcept
 			vmaDestroyBuffer(allocator, buffer, allocation);
 		}
 
-		allocator  = other.allocator;
-		buffer     = other.buffer;
-		allocation = other.allocation;
-		size       = other.size;
-		mappedData = other.mappedData;
+		allocator            = other.allocator;
+		buffer               = other.buffer;
+		allocation           = other.allocation;
+		size                 = other.size;
+		mappedData           = other.mappedData;
+		isPersistentlyMapped = other.isPersistentlyMapped;
 
-		other.allocator  = VK_NULL_HANDLE;
-		other.buffer     = VK_NULL_HANDLE;
-		other.allocation = VK_NULL_HANDLE;
-		other.size       = 0;
-		other.mappedData = nullptr;
+		other.allocator            = VK_NULL_HANDLE;
+		other.buffer               = VK_NULL_HANDLE;
+		other.allocation           = VK_NULL_HANDLE;
+		other.size                 = 0;
+		other.mappedData           = nullptr;
+		other.isPersistentlyMapped = false;
 	}
 	return *this;
 }
@@ -148,18 +157,11 @@ void *VulkanBuffer::Map()
 
 void VulkanBuffer::Unmap()
 {
-	// Only unmap if not persistently mapped
-	// If persistently mapped, keep the pointer valid
-	if (mappedData != nullptr && allocation != VK_NULL_HANDLE)
+	// If the buffer has a mapped pointer AND it was NOT persistently mapped
+	if (mappedData != nullptr && !isPersistentlyMapped)
 	{
-		VmaAllocationInfo allocInfo;
-		vmaGetAllocationInfo(allocator, allocation, &allocInfo);
-
-		if (allocInfo.pMappedData == nullptr)
-		{
-			vmaUnmapMemory(allocator, allocation);
-			mappedData = nullptr;
-		}
+		vmaUnmapMemory(allocator, allocation);
+		mappedData = nullptr;
 	}
 }
 

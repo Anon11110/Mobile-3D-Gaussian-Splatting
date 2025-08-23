@@ -32,6 +32,39 @@ enum class BufferUsage : uint32_t
 	STORAGE = 1 << 3
 };
 
+// Bitwise operators for BufferUsage
+inline BufferUsage operator|(BufferUsage lhs, BufferUsage rhs)
+{
+	return static_cast<BufferUsage>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
+}
+
+inline BufferUsage operator&(BufferUsage lhs, BufferUsage rhs)
+{
+	return static_cast<BufferUsage>(static_cast<uint32_t>(lhs) & static_cast<uint32_t>(rhs));
+}
+
+inline BufferUsage operator~(BufferUsage usage)
+{
+	return static_cast<BufferUsage>(~static_cast<uint32_t>(usage));
+}
+
+inline BufferUsage &operator|=(BufferUsage &lhs, BufferUsage rhs)
+{
+	lhs = lhs | rhs;
+	return lhs;
+}
+
+inline BufferUsage &operator&=(BufferUsage &lhs, BufferUsage rhs)
+{
+	lhs = lhs & rhs;
+	return lhs;
+}
+
+inline bool operator!(BufferUsage usage)
+{
+	return static_cast<uint32_t>(usage) == 0;
+}
+
 enum class ResourceUsage
 {
 	Static,               // Immutable after initialization (textures, static meshes)

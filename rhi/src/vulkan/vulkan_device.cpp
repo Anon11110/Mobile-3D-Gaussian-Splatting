@@ -198,7 +198,7 @@ class VulkanDevice : public IRHIDevice
 		{
 			throw std::runtime_error("Failed to create window surface");
 		}
-		return std::make_unique<VulkanSwapchain>(device, physicalDevice, allocator, surface, graphicsQueue, desc);
+		return std::make_unique<VulkanSwapchain>(instance, device, physicalDevice, allocator, surface, graphicsQueue, desc);
 	}
 
 	std::unique_ptr<IRHISemaphore> CreateSemaphore() override

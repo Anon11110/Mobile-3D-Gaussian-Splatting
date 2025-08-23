@@ -9,9 +9,9 @@
 namespace rhi::vulkan
 {
 
-VulkanSwapchain::VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator,
+VulkanSwapchain::VulkanSwapchain(VkInstance instance, VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator,
                                  VkSurfaceKHR surface, VkQueue graphicsQueue, const SwapchainDesc &desc) :
-    device(device), physicalDevice(physicalDevice), allocator(allocator), surface(surface), graphicsQueue(graphicsQueue), swapchain(VK_NULL_HANDLE), renderPass(VK_NULL_HANDLE)
+    instance(instance), device(device), physicalDevice(physicalDevice), allocator(allocator), surface(surface), graphicsQueue(graphicsQueue), swapchain(VK_NULL_HANDLE), renderPass(VK_NULL_HANDLE)
 {
 	// Query surface capabilities
 	VkSurfaceCapabilitiesKHR capabilities;
@@ -191,6 +191,11 @@ VulkanSwapchain::~VulkanSwapchain()
 	if (swapchain != VK_NULL_HANDLE)
 	{
 		vkDestroySwapchainKHR(device, swapchain, nullptr);
+	}
+
+	if (surface != VK_NULL_HANDLE)
+	{
+		vkDestroySurfaceKHR(instance, surface, nullptr);
 	}
 }
 

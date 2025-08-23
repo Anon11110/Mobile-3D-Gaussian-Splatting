@@ -55,3 +55,4 @@ CLAUDE.md
 
 # Ignore all compiled SPIR-V shader binaries
 shaders/compiled/*.spv
+examples/particles/shaders/compiled/*.spv

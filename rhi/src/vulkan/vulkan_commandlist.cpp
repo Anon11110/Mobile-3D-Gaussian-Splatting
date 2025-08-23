@@ -255,7 +255,7 @@ void VulkanCommandList::BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *
 	auto           *vkDescriptorSet = static_cast<VulkanDescriptorSet *>(descriptorSet);
 	VkDescriptorSet sets[]          = {vkDescriptorSet->GetHandle()};
 
-	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, currentPipeline->GetLayout(), setIndex, 1,
+	vkCmdBindDescriptorSets(commandBuffer, currentPipeline->GetBindPoint(), currentPipeline->GetLayout(), setIndex, 1,
 	                        sets, static_cast<uint32_t>(dynamicOffsets.size()), dynamicOffsets.data());
 }
 

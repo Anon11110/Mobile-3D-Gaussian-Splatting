@@ -25,34 +25,31 @@ function(compile_shaders SHADER_SRC_DIR TARGET_NAME)
         "${SHADER_SRC_DIR}/*.tese"
     )
 
-    # Create a custom target for shader compilation
+    # Create a custom target for shader compilation that always runs
     set(SHADER_TARGET_NAME "${TARGET_NAME}_shaders")
-    add_custom_target(${SHADER_TARGET_NAME} ALL)
+    add_custom_target(${SHADER_TARGET_NAME} ALL
+        COMMAND ${CMAKE_COMMAND} -E echo "Force recompiling all shaders..."
+    )
 
     # Keep track of all SPIRV files
     set(ALL_SPIRV_FILES "")
 
-    # Compile each shader file
+    # Add compilation commands directly to the target
     foreach(SHADER_FILE ${SHADER_FILES})
         get_filename_component(SHADER_NAME ${SHADER_FILE} NAME)
         set(SPIRV_FILE "${SHADER_COMPILED_DIR}/${SHADER_NAME}.spv")
 
-        # Add compilation command
+        # Add compilation command to the target
         add_custom_command(
-            OUTPUT ${SPIRV_FILE}
+            TARGET ${SHADER_TARGET_NAME}
             COMMAND ${GLSLC_EXECUTABLE} ${SHADER_FILE} -o ${SPIRV_FILE}
-            DEPENDS ${SHADER_FILE}
             COMMENT "Compiling shader: ${SHADER_NAME} -> ${SHADER_NAME}.spv"
             VERBATIM
         )
 
-        # Add to list of SPIRV files
+        # Add to list of SPIRV files for copying
         list(APPEND ALL_SPIRV_FILES ${SPIRV_FILE})
     endforeach()
-
-    # Create a single target that depends on all SPIRV files
-    add_custom_target(${SHADER_TARGET_NAME}_compile DEPENDS ${ALL_SPIRV_FILES})
-    add_dependencies(${SHADER_TARGET_NAME} ${SHADER_TARGET_NAME}_compile)
 
     # Copy all compiled shaders to the appropriate build configuration directory
     # This uses a generator expression to resolve at build time

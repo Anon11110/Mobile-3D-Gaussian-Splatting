@@ -35,6 +35,7 @@ class VulkanBuffer : public IRHIBuffer
 	VmaAllocation allocation;
 	size_t        size;
 	void         *mappedData;
+	bool          isPersistentlyMapped;
 
   public:
 	VulkanBuffer(VmaAllocator allocator, const BufferDesc &desc);
@@ -307,6 +308,7 @@ class VulkanCommandList : public IRHICommandList
 class VulkanSwapchain : public IRHISwapchain
 {
   private:
+	VkInstance                                      instance;
 	VkDevice                                        device;
 	VkPhysicalDevice                                physicalDevice;
 	VmaAllocator                                    allocator;
@@ -325,7 +327,7 @@ class VulkanSwapchain : public IRHISwapchain
 	uint32_t                                        requestedBufferCount;
 
   public:
-	VulkanSwapchain(VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator, VkSurfaceKHR surface,
+	VulkanSwapchain(VkInstance instance, VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator, VkSurfaceKHR surface,
 	                VkQueue graphicsQueue, const SwapchainDesc &desc);
 	~VulkanSwapchain() override;
 

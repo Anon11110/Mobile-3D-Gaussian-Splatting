@@ -1,0 +1,74 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct Particle
+{
+    vec3 position;
+    float padding1;
+    vec3 velocity;
+    float padding2;
+};
+
+layout(set = 0, binding = 0) uniform SimulationParams
+{
+    float deltaTime;
+    float gravity;
+    vec2 bounds;
+} params;
+
+layout(set = 0, binding = 1) readonly buffer ParticlesIn
+{
+    Particle particles[];
+} particlesIn;
+
+layout(set = 0, binding = 2) buffer ParticlesOut
+{
+    Particle particles[];
+} particlesOut;
+
+void main()
+{
+    uint index = gl_GlobalInvocationID.x;
+
+    if (index >= particlesIn.particles.length())
+        return;
+
+    Particle p = particlesIn.particles[index];
+
+    // Update velocity using gravity and damping
+    p.velocity.y += params.gravity * params.deltaTime;
+    p.velocity *= 0.999;
+
+    // Update position using symplectic Euler integration
+    p.position += p.velocity * params.deltaTime;
+
+    // Bounce off floor (y = -1.0)
+    if (p.position.y < -1.0)
+    {
+        // Reflect position based on penetration depth
+        p.position.y = -2.0 - p.position.y;
+        p.velocity.y = -p.velocity.y * 0.8; // Energy loss on bounce
+    }
+
+    // Bounce off walls (x bounds)
+    if (abs(p.position.x) > params.bounds.x)
+    {
+        p.position.x = 2.0 * sign(p.position.x) * params.bounds.x - p.position.x;
+        p.velocity.x = -p.velocity.x * 0.8;
+    }
+
+    // Bounce off walls (z bounds)
+    if (abs(p.position.z) > params.bounds.y)
+    {
+        p.position.z = 2.0 * sign(p.position.z) * params.bounds.y - p.position.z;
+        p.velocity.z = -p.velocity.z * 0.8;
+    }
+
+    // Add some random turbulence for more interesting motion
+    float turbulence = 0.5;
+    p.velocity.x += (fract(sin(float(index) * 12.9898 + params.deltaTime * 78.233)) - 0.5) * turbulence * params.deltaTime;
+    p.velocity.z += (fract(sin(float(index) * 45.164 + params.deltaTime * 94.673)) - 0.5) * turbulence * params.deltaTime;
+
+    particlesOut.particles[index] = p;
+}
