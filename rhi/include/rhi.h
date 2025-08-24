@@ -128,6 +128,16 @@ class IRHICommandList
 	    std::span<const BufferTransition>  buffer_transitions,
 	    std::span<const TextureTransition> texture_transitions,
 	    std::span<const MemoryBarrier>     memory_barriers = {}) = 0;
+
+	virtual void ReleaseToQueue(
+	    QueueType                          dstQueue,
+	    std::span<const BufferTransition>  buffer_transitions,
+	    std::span<const TextureTransition> texture_transitions) = 0;
+
+	virtual void AcquireFromQueue(
+	    QueueType                          srcQueue,
+	    std::span<const BufferTransition>  buffer_transitions,
+	    std::span<const TextureTransition> texture_transitions) = 0;
 };
 
 // Swapchain interface

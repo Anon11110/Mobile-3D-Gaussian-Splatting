@@ -187,7 +187,25 @@ class VulkanDevice : public IRHIDevice
 	std::unique_ptr<IRHICommandList> CreateCommandList(QueueType queueType = QueueType::GRAPHICS) override
 	{
 		VkCommandPool commandPool = GetCommandPool(queueType);
-		return std::make_unique<VulkanCommandList>(device, commandPool, queueType, vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR);
+		uint32_t      queueFamily = GetQueueFamily(queueType);
+		return std::make_unique<VulkanCommandList>(device, commandPool, queueType, queueFamily,
+		                                           graphicsQueueFamily, computeQueueFamily, transferQueueFamily,
+		                                           vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR);
+	}
+
+	uint32_t GetQueueFamily(QueueType queueType) const
+	{
+		switch (queueType)
+		{
+			case QueueType::GRAPHICS:
+				return graphicsQueueFamily;
+			case QueueType::COMPUTE:
+				return computeQueueFamily;
+			case QueueType::TRANSFER:
+				return transferQueueFamily;
+			default:
+				return graphicsQueueFamily;
+		}
 	}
 
 	std::unique_ptr<IRHISwapchain> CreateSwapchain(const SwapchainDesc &desc) override

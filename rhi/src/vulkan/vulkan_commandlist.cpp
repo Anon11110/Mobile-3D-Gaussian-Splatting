@@ -5,10 +5,11 @@
 namespace rhi::vulkan
 {
 
-VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType,
+VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType, uint32_t queueFamily,
+                                     uint32_t graphicsFamily, uint32_t computeFamily, uint32_t transferFamily,
                                      PFN_vkCmdBeginRenderingKHR beginFunc,
                                      PFN_vkCmdEndRenderingKHR   endFunc) :
-    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), queueType(queueType), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc)
+    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), queueType(queueType), queueFamily(queueFamily), graphicsQueueFamily(graphicsFamily), computeQueueFamily(computeFamily), transferQueueFamily(transferFamily), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc)
 {
 	// Allocate command buffer
 	VkCommandBufferAllocateInfo allocInfo{};
@@ -353,6 +354,13 @@ void VulkanCommandList::Barrier(
 		{
 			srcStages = StageMaskToVulkan(transition.src_stages);
 			srcAccess = AccessMaskToVulkan(transition.src_access);
+
+			// If user provided stages but not access, infer access from the state
+			if (srcAccess == 0 && transition.src_access == AccessMask::Auto)
+			{
+				VkPipelineStageFlags tempStages;        // Unused
+				GetVulkanStagesAndAccess(transition.before, src_scope, tempStages, srcAccess);
+			}
 		}
 		else
 		{
@@ -363,6 +371,13 @@ void VulkanCommandList::Barrier(
 		{
 			dstStages = StageMaskToVulkan(transition.dst_stages);
 			dstAccess = AccessMaskToVulkan(transition.dst_access);
+
+			// If user provided stages but not access, infer access from the state
+			if (dstAccess == 0 && transition.dst_access == AccessMask::Auto)
+			{
+				VkPipelineStageFlags tempStages;        // Unused
+				GetVulkanStagesAndAccess(transition.after, dst_scope, tempStages, dstAccess);
+			}
 		}
 		else
 		{
@@ -417,6 +432,13 @@ void VulkanCommandList::Barrier(
 		{
 			srcStages = StageMaskToVulkan(transition.src_stages);
 			srcAccess = AccessMaskToVulkan(transition.src_access);
+
+			// If user provided stages but not access, infer access from the state
+			if (srcAccess == 0 && transition.src_access == AccessMask::Auto)
+			{
+				VkPipelineStageFlags tempStages;        // Unused
+				GetVulkanStagesAndAccess(transition.before, src_scope, tempStages, srcAccess);
+			}
 		}
 		else
 		{
@@ -427,6 +449,13 @@ void VulkanCommandList::Barrier(
 		{
 			dstStages = StageMaskToVulkan(transition.dst_stages);
 			dstAccess = AccessMaskToVulkan(transition.dst_access);
+
+			// If user provided stages but not access, infer access from the state
+			if (dstAccess == 0 && transition.dst_access == AccessMask::Auto)
+			{
+				VkPipelineStageFlags tempStages;        // Unused
+				GetVulkanStagesAndAccess(transition.after, dst_scope, tempStages, dstAccess);
+			}
 		}
 		else
 		{
@@ -488,6 +517,274 @@ void VulkanCommandList::Barrier(
 		    0,
 		    static_cast<uint32_t>(memBarriers.size()),
 		    memBarriers.empty() ? nullptr : memBarriers.data(),
+		    static_cast<uint32_t>(bufferBarriers.size()),
+		    bufferBarriers.empty() ? nullptr : bufferBarriers.data(),
+		    static_cast<uint32_t>(imageBarriers.size()),
+		    imageBarriers.empty() ? nullptr : imageBarriers.data());
+	}
+}
+
+void VulkanCommandList::ReleaseToQueue(
+    QueueType                          dstQueue,
+    std::span<const BufferTransition>  buffer_transitions,
+    std::span<const TextureTransition> texture_transitions)
+{
+	uint32_t dstQueueFamily = VK_QUEUE_FAMILY_IGNORED;
+	switch (dstQueue)
+	{
+		case QueueType::GRAPHICS:
+			dstQueueFamily = graphicsQueueFamily;
+			break;
+		case QueueType::COMPUTE:
+			dstQueueFamily = computeQueueFamily;
+			break;
+		case QueueType::TRANSFER:
+			dstQueueFamily = transferQueueFamily;
+			break;
+	}
+
+	PipelineScope currentScope = PipelineScope::All;
+	switch (queueType)
+	{
+		case QueueType::GRAPHICS:
+			currentScope = PipelineScope::Graphics;
+			break;
+		case QueueType::COMPUTE:
+			currentScope = PipelineScope::Compute;
+			break;
+		case QueueType::TRANSFER:
+			currentScope = PipelineScope::Copy;
+			break;
+	}
+
+	std::vector<VkBufferMemoryBarrier> bufferBarriers;
+	std::vector<VkImageMemoryBarrier>  imageBarriers;
+	VkPipelineStageFlags               accumulatedSrcStages = 0;
+
+	// Process buffer transitions for release
+	for (const auto &transition : buffer_transitions)
+	{
+		if (!transition.buffer)
+			continue;
+
+		VkBufferMemoryBarrier barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		barrier.srcQueueFamilyIndex = queueFamily;           // Current queue family
+		barrier.dstQueueFamilyIndex = dstQueueFamily;        // Destination queue family
+		barrier.buffer              = static_cast<VulkanBuffer *>(transition.buffer)->GetHandle();
+		barrier.offset              = transition.offset;
+		barrier.size                = (transition.size == ~0ull) ? VK_WHOLE_SIZE : transition.size;
+
+		// For release, we specify the source access based on the 'before' state
+		VkPipelineStageFlags srcStages;
+		VkAccessFlags        srcAccess;
+		GetVulkanStagesAndAccess(transition.before, currentScope, srcStages, srcAccess);
+
+		barrier.srcAccessMask = srcAccess;
+		barrier.dstAccessMask = 0;        // No destination access for release
+
+		// Accumulate the precise source stages
+		accumulatedSrcStages |= srcStages;
+
+		bufferBarriers.push_back(barrier);
+	}
+
+	// Process texture transitions for release
+	for (const auto &transition : texture_transitions)
+	{
+		if (!transition.texture)
+			continue;
+
+		VkImageMemoryBarrier barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		barrier.srcQueueFamilyIndex = queueFamily;           // Current queue family
+		barrier.dstQueueFamilyIndex = dstQueueFamily;        // Destination queue family
+		barrier.image               = static_cast<VulkanTexture *>(transition.texture)->GetHandle();
+		barrier.oldLayout           = ResourceStateToImageLayout(transition.before);
+		barrier.newLayout           = ResourceStateToImageLayout(transition.after);
+
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+		// Check if it's a depth/stencil format
+		TextureFormat format = transition.texture->GetFormat();
+		if (format == TextureFormat::D32_FLOAT)
+		{
+			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+		}
+		else if (format == TextureFormat::D24_UNORM_S8_UINT)
+		{
+			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+
+		barrier.subresourceRange.baseMipLevel   = transition.baseMipLevel;
+		barrier.subresourceRange.levelCount     = (transition.mipLevelCount == ~0u) ? VK_REMAINING_MIP_LEVELS : transition.mipLevelCount;
+		barrier.subresourceRange.baseArrayLayer = transition.baseArrayLayer;
+		barrier.subresourceRange.layerCount     = (transition.arrayLayerCount == ~0u) ? VK_REMAINING_ARRAY_LAYERS : transition.arrayLayerCount;
+
+		// For release, we specify the source access based on the 'before' state
+		VkPipelineStageFlags srcStages;
+		VkAccessFlags        srcAccess;
+		GetVulkanStagesAndAccess(transition.before, currentScope, srcStages, srcAccess);
+
+		barrier.srcAccessMask = srcAccess;
+		barrier.dstAccessMask = 0;        // No destination access for release
+
+		// Accumulate the precise source stages
+		accumulatedSrcStages |= srcStages;
+
+		imageBarriers.push_back(barrier);
+	}
+
+	// Issue the pipeline barrier for release
+	if (!bufferBarriers.empty() || !imageBarriers.empty())
+	{
+		// Use accumulated stages for more precise synchronization
+		// If no stages were accumulated (shouldn't happen), fall back to a safe default
+		VkPipelineStageFlags srcStageFlags = accumulatedSrcStages ? accumulatedSrcStages : PipelineScopeToVulkanStages(currentScope);
+
+		// Destination stage is BOTTOM_OF_PIPE for release
+		VkPipelineStageFlags dstStageFlags = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+
+		vkCmdPipelineBarrier(
+		    commandBuffer,
+		    srcStageFlags,
+		    dstStageFlags,
+		    0,
+		    0, nullptr,
+		    static_cast<uint32_t>(bufferBarriers.size()),
+		    bufferBarriers.empty() ? nullptr : bufferBarriers.data(),
+		    static_cast<uint32_t>(imageBarriers.size()),
+		    imageBarriers.empty() ? nullptr : imageBarriers.data());
+	}
+}
+
+void VulkanCommandList::AcquireFromQueue(
+    QueueType                          srcQueue,
+    std::span<const BufferTransition>  buffer_transitions,
+    std::span<const TextureTransition> texture_transitions)
+{
+	uint32_t srcQueueFamily = VK_QUEUE_FAMILY_IGNORED;
+	switch (srcQueue)
+	{
+		case QueueType::GRAPHICS:
+			srcQueueFamily = graphicsQueueFamily;
+			break;
+		case QueueType::COMPUTE:
+			srcQueueFamily = computeQueueFamily;
+			break;
+		case QueueType::TRANSFER:
+			srcQueueFamily = transferQueueFamily;
+			break;
+	}
+
+	PipelineScope currentScope = PipelineScope::All;
+	switch (queueType)
+	{
+		case QueueType::GRAPHICS:
+			currentScope = PipelineScope::Graphics;
+			break;
+		case QueueType::COMPUTE:
+			currentScope = PipelineScope::Compute;
+			break;
+		case QueueType::TRANSFER:
+			currentScope = PipelineScope::Copy;
+			break;
+	}
+
+	std::vector<VkBufferMemoryBarrier> bufferBarriers;
+	std::vector<VkImageMemoryBarrier>  imageBarriers;
+	VkPipelineStageFlags               accumulatedDstStages = 0;
+
+	// Process buffer transitions for acquire
+	for (const auto &transition : buffer_transitions)
+	{
+		if (!transition.buffer)
+			continue;
+
+		VkBufferMemoryBarrier barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		barrier.srcQueueFamilyIndex = srcQueueFamily;        // Source queue family
+		barrier.dstQueueFamilyIndex = queueFamily;           // Current queue family
+		barrier.buffer              = static_cast<VulkanBuffer *>(transition.buffer)->GetHandle();
+		barrier.offset              = transition.offset;
+		barrier.size                = (transition.size == ~0ull) ? VK_WHOLE_SIZE : transition.size;
+
+		// For acquire, we specify the destination access based on the 'after' state
+		VkPipelineStageFlags dstStages;
+		VkAccessFlags        dstAccess;
+		GetVulkanStagesAndAccess(transition.after, currentScope, dstStages, dstAccess);
+
+		barrier.srcAccessMask = 0;        // No source access for acquire
+		barrier.dstAccessMask = dstAccess;
+
+		// Accumulate the precise destination stages
+		accumulatedDstStages |= dstStages;
+
+		bufferBarriers.push_back(barrier);
+	}
+
+	// Process texture transitions for acquire
+	for (const auto &transition : texture_transitions)
+	{
+		if (!transition.texture)
+			continue;
+
+		VkImageMemoryBarrier barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		barrier.srcQueueFamilyIndex = srcQueueFamily;        // Source queue family
+		barrier.dstQueueFamilyIndex = queueFamily;           // Current queue family
+		barrier.image               = static_cast<VulkanTexture *>(transition.texture)->GetHandle();
+		barrier.oldLayout           = ResourceStateToImageLayout(transition.before);
+		barrier.newLayout           = ResourceStateToImageLayout(transition.after);
+
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+		// Check if it's a depth/stencil format
+		TextureFormat format = transition.texture->GetFormat();
+		if (format == TextureFormat::D32_FLOAT)
+		{
+			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+		}
+		else if (format == TextureFormat::D24_UNORM_S8_UINT)
+		{
+			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+
+		barrier.subresourceRange.baseMipLevel   = transition.baseMipLevel;
+		barrier.subresourceRange.levelCount     = (transition.mipLevelCount == ~0u) ? VK_REMAINING_MIP_LEVELS : transition.mipLevelCount;
+		barrier.subresourceRange.baseArrayLayer = transition.baseArrayLayer;
+		barrier.subresourceRange.layerCount     = (transition.arrayLayerCount == ~0u) ? VK_REMAINING_ARRAY_LAYERS : transition.arrayLayerCount;
+
+		// For acquire, we specify the destination access based on the 'after' state
+		VkPipelineStageFlags dstStages;
+		VkAccessFlags        dstAccess;
+		GetVulkanStagesAndAccess(transition.after, currentScope, dstStages, dstAccess);
+
+		barrier.srcAccessMask = 0;        // No source access for acquire
+		barrier.dstAccessMask = dstAccess;
+
+		// Accumulate the precise destination stages
+		accumulatedDstStages |= dstStages;
+
+		imageBarriers.push_back(barrier);
+	}
+
+	// Issue the pipeline barrier for acquire
+	if (!bufferBarriers.empty() || !imageBarriers.empty())
+	{
+		// Source stage is TOP_OF_PIPE for acquire
+		VkPipelineStageFlags srcStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+
+		// Use accumulated stages for more precise synchronization
+		// If no stages were accumulated (shouldn't happen), fall back to a safe default
+		VkPipelineStageFlags dstStageFlags = accumulatedDstStages ? accumulatedDstStages : PipelineScopeToVulkanStages(currentScope);
+
+		vkCmdPipelineBarrier(
+		    commandBuffer,
+		    srcStageFlags,
+		    dstStageFlags,
+		    0,
+		    0, nullptr,
 		    static_cast<uint32_t>(bufferBarriers.size()),
 		    bufferBarriers.empty() ? nullptr : bufferBarriers.data(),
 		    static_cast<uint32_t>(imageBarriers.size()),

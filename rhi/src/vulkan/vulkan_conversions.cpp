@@ -530,9 +530,21 @@ void GetVulkanStagesAndAccess(ResourceState state, PipelineScope scope,
 			break;
 
 		case ResourceState::GeneralRead:
-			stages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
-			         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
 			access = VK_ACCESS_SHADER_READ_BIT;
+			if (scope == PipelineScope::Compute)
+			{
+				stages = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			}
+			else if (scope == PipelineScope::Graphics)
+			{
+				stages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			}
+			else
+			{
+				// All scope - use all shader stages
+				stages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+				         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			}
 			break;
 
 		case ResourceState::CopySource:
@@ -596,29 +608,27 @@ void GetVulkanStagesAndAccess(ResourceState state, PipelineScope scope,
 			break;
 
 		case ResourceState::UniformBuffer:
-			stages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
-			         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
 			access = VK_ACCESS_UNIFORM_READ_BIT;
+			if (scope == PipelineScope::Compute)
+			{
+				stages = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			}
+			else if (scope == PipelineScope::Graphics)
+			{
+				stages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			}
+			else
+			{
+				// All scope - use all shader stages
+				stages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+				         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			}
 			break;
 
 		default:
 			stages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 			access = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 			break;
-	}
-
-	if (scope == PipelineScope::Graphics &&
-	    !(stages & (VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT)))
-	{
-		stages &= VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
-	}
-	else if (scope == PipelineScope::Compute)
-	{
-		if (state == ResourceState::GeneralRead || state == ResourceState::UniformBuffer ||
-		    state == ResourceState::ShaderReadWrite)
-		{
-			stages = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-		}
 	}
 }
 

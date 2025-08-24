@@ -252,13 +252,20 @@ class VulkanCommandList : public IRHICommandList
 	VulkanPipeline *currentPipeline;
 	bool            inRendering;
 	QueueType       queueType;
+	uint32_t        queueFamily;
+
+	// Queue family mappings for cross-queue transfers
+	uint32_t graphicsQueueFamily;
+	uint32_t computeQueueFamily;
+	uint32_t transferQueueFamily;
 
 	// Cached function pointers
 	PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
 	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
 
   public:
-	VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType,
+	VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType, uint32_t queueFamily,
+	                  uint32_t graphicsFamily, uint32_t computeFamily, uint32_t transferFamily,
 	                  PFN_vkCmdBeginRenderingKHR beginFunc,
 	                  PFN_vkCmdEndRenderingKHR   endFunc);
 	~VulkanCommandList() override;
@@ -297,6 +304,16 @@ class VulkanCommandList : public IRHICommandList
 	    std::span<const BufferTransition>  buffer_transitions,
 	    std::span<const TextureTransition> texture_transitions,
 	    std::span<const MemoryBarrier>     memory_barriers = {}) override;
+
+	void ReleaseToQueue(
+	    QueueType                          dstQueue,
+	    std::span<const BufferTransition>  buffer_transitions,
+	    std::span<const TextureTransition> texture_transitions) override;
+
+	void AcquireFromQueue(
+	    QueueType                          srcQueue,
+	    std::span<const BufferTransition>  buffer_transitions,
+	    std::span<const TextureTransition> texture_transitions) override;
 
 	VkCommandBuffer GetHandle() const
 	{
