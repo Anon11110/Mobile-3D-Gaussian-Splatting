@@ -14,10 +14,10 @@
 
 using namespace msplat;
 
-constexpr uint32_t PARTICLE_COUNT = 10000;
-constexpr uint32_t WORKGROUP_SIZE = 64;
-constexpr int MAX_FRAMES_IN_FLIGHT = 2;
-constexpr float FIXED_TIMESTEP = 1.0f / 60.0f;
+constexpr uint32_t PARTICLE_COUNT       = 10000;
+constexpr uint32_t WORKGROUP_SIZE       = 64;
+constexpr int      MAX_FRAMES_IN_FLIGHT = 2;
+constexpr float    FIXED_TIMESTEP       = 1.0f / 60.0f;
 
 struct Particle
 {
@@ -29,8 +29,8 @@ struct Particle
 
 struct SimulationParams
 {
-	float     deltaTime;
-	float     gravity;
+	float      deltaTime;
+	float      gravity;
 	math::vec2 bounds;
 };
 
@@ -102,17 +102,17 @@ int main()
 		paramsBufferDesc.usage                     = rhi::BufferUsage::UNIFORM;
 		paramsBufferDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
 		paramsBufferDesc.hints.persistently_mapped = true;
-		auto paramsBuffer                          = device->CreateBuffer(paramsBufferDesc);
-		void* paramsDataPtr = paramsBuffer->Map();
+		auto  paramsBuffer                         = device->CreateBuffer(paramsBufferDesc);
+		void *paramsDataPtr                        = paramsBuffer->Map();
 
 		LOG_INFO("Loading compute shader");
 		auto computeCode = LoadShaderCode("shaders/compiled/particle_compute.comp.spv");
 
 		rhi::ShaderDesc computeShaderDesc{};
-		computeShaderDesc.stage     = rhi::ShaderStage::COMPUTE;
-		computeShaderDesc.code      = computeCode.data();
-		computeShaderDesc.codeSize  = computeCode.size();
-		auto computeShader          = device->CreateShader(computeShaderDesc);
+		computeShaderDesc.stage    = rhi::ShaderStage::COMPUTE;
+		computeShaderDesc.code     = computeCode.data();
+		computeShaderDesc.codeSize = computeCode.size();
+		auto computeShader         = device->CreateShader(computeShaderDesc);
 
 		// Create compute descriptor set layout
 		rhi::DescriptorSetLayoutDesc computeLayoutDesc{};
@@ -125,9 +125,9 @@ int main()
 
 		// Create compute pipeline
 		rhi::ComputePipelineDesc computePipelineDesc{};
-		computePipelineDesc.computeShader         = computeShader.get();
-		computePipelineDesc.descriptorSetLayouts  = {computeDescriptorSetLayout.get()};
-		auto computePipeline                      = device->CreateComputePipeline(computePipelineDesc);
+		computePipelineDesc.computeShader        = computeShader.get();
+		computePipelineDesc.descriptorSetLayouts = {computeDescriptorSetLayout.get()};
+		auto computePipeline                     = device->CreateComputePipeline(computePipelineDesc);
 
 		// Create compute descriptor sets (double buffered)
 		auto computeDescriptorSetA = device->CreateDescriptorSet(computeDescriptorSetLayout.get(), rhi::QueueType::COMPUTE);
@@ -186,8 +186,8 @@ int main()
 		mvpBufferDesc.usage                     = rhi::BufferUsage::UNIFORM;
 		mvpBufferDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
 		mvpBufferDesc.hints.persistently_mapped = true;
-		auto mvpBuffer                          = device->CreateBuffer(mvpBufferDesc);
-		void* mvpDataPtr = mvpBuffer->Map();
+		auto  mvpBuffer                         = device->CreateBuffer(mvpBufferDesc);
+		void *mvpDataPtr                        = mvpBuffer->Map();
 
 		// Create graphics descriptor set layout
 		rhi::DescriptorSetLayoutDesc graphicsLayoutDesc{};
@@ -235,13 +235,15 @@ int main()
 		// Create synchronization objects for frames in flight
 		std::vector<std::unique_ptr<rhi::IRHISemaphore>> imageAvailableSemaphores(MAX_FRAMES_IN_FLIGHT);
 		std::vector<std::unique_ptr<rhi::IRHISemaphore>> computeFinishedSemaphores(MAX_FRAMES_IN_FLIGHT);
+		std::vector<std::unique_ptr<rhi::IRHISemaphore>> graphicsReleasedSemaphores(MAX_FRAMES_IN_FLIGHT);
 		std::vector<std::unique_ptr<rhi::IRHIFence>>     inFlightFences(MAX_FRAMES_IN_FLIGHT);
 
 		for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
-			imageAvailableSemaphores[i]  = device->CreateSemaphore();
-			computeFinishedSemaphores[i] = device->CreateSemaphore();
-			inFlightFences[i]            = device->CreateFence(true);
+			imageAvailableSemaphores[i]   = device->CreateSemaphore();
+			computeFinishedSemaphores[i]  = device->CreateSemaphore();
+			graphicsReleasedSemaphores[i] = device->CreateSemaphore();
+			inFlightFences[i]             = device->CreateFence(true);
 		}
 
 		// Create render finished semaphores per swapchain image (needed for presentation)
@@ -253,27 +255,29 @@ int main()
 
 		// Create command lists for frames in flight
 		std::vector<std::unique_ptr<rhi::IRHICommandList>> computeCommandLists(MAX_FRAMES_IN_FLIGHT);
+		std::vector<std::unique_ptr<rhi::IRHICommandList>> graphicsPreCommandLists(MAX_FRAMES_IN_FLIGHT);
 		std::vector<std::unique_ptr<rhi::IRHICommandList>> graphicsCommandLists(MAX_FRAMES_IN_FLIGHT);
 		for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
-			computeCommandLists[i] = device->CreateCommandList(rhi::QueueType::COMPUTE);
-			graphicsCommandLists[i] = device->CreateCommandList(rhi::QueueType::GRAPHICS);
+			computeCommandLists[i]     = device->CreateCommandList(rhi::QueueType::COMPUTE);
+			graphicsPreCommandLists[i] = device->CreateCommandList(rhi::QueueType::GRAPHICS);
+			graphicsCommandLists[i]    = device->CreateCommandList(rhi::QueueType::GRAPHICS);
 		}
 
 		std::vector<bool> imageFirstUse(swapchain->GetImageCount(), true);
 
 		// State tracking
-		bool useBufferA = true;        // true = A->B, false = B->A
+		bool     useBufferA   = true;        // true = A->B, false = B->A
 		uint32_t currentFrame = 0;
-		bool firstFrame = true;        // Track first frame for initial transitions
+		bool     firstFrame   = true;        // Track first frame for initial transitions
 
 		LOG_INFO("Starting particle simulation");
 		timer::Timer      applicationTimer;
 		timer::FPSCounter fpsCounter(1.0);
 		applicationTimer.start();
 
-		float lastTime = 0.0f;
-		float accumulator = 0.0f;      // Physics accumulator for fixed timestep
+		float lastTime    = 0.0f;
+		float accumulator = 0.0f;        // Physics accumulator for fixed timestep
 
 		while (!glfwWindowShouldClose(window))
 		{
@@ -284,8 +288,8 @@ int main()
 			inFlightFences[currentFrame]->Reset();
 
 			float currentTime = static_cast<float>(applicationTimer.elapsedSeconds());
-			float deltaTime = currentTime - lastTime;
-			lastTime = currentTime;
+			float deltaTime   = currentTime - lastTime;
+			lastTime          = currentTime;
 
 			accumulator += deltaTime;
 
@@ -309,13 +313,13 @@ int main()
 
 			// Simple camera setup
 			math::mat4 view = math::lookAt(
-			    math::vec3(0.0f, 0.0f, 3.0f),        // eye
-			    math::vec3(0.0f, 0.0f, 0.0f),        // center
-			    math::vec3(0.0f, 1.0f, 0.0f));       // up
+			    math::vec3(0.0f, 0.0f, 3.0f),         // eye
+			    math::vec3(0.0f, 0.0f, 0.0f),         // center
+			    math::vec3(0.0f, 1.0f, 0.0f));        // up
 
 			math::mat4 proj = math::perspective(math::radians(45.0f), aspect, 0.1f, 100.0f);
 			proj[1][1] *= -1;
-			math::mat4 mvp  = proj * view;
+			math::mat4 mvp = proj * view;
 
 			// Direct write to persistently mapped buffer
 			memcpy(mvpDataPtr, &mvp, sizeof(math::mat4));
@@ -356,6 +360,33 @@ int main()
 				break;
 			}
 
+			auto *inputBuffer  = useBufferA ? particleBufferA.get() : particleBufferB.get();
+			auto *outputBuffer = useBufferA ? particleBufferB.get() : particleBufferA.get();
+
+			// JIT GRAPHICS PRE-SUBMIT: Release input buffer from graphics to compute (only if physics will run)
+			bool didPreRelease = false;
+			if (shouldRunPhysics && !firstFrame)
+			{
+				auto &gfxPre = graphicsPreCommandLists[currentFrame];
+				gfxPre->Reset();
+				gfxPre->Begin();
+
+				rhi::BufferTransition releaseToCompute{};
+				releaseToCompute.buffer = inputBuffer;
+				releaseToCompute.before = rhi::ResourceState::VertexBuffer;        // last frame's draw state
+				releaseToCompute.after  = rhi::ResourceState::VertexBuffer;        // ownership-only transfer
+
+				gfxPre->ReleaseToQueue(rhi::QueueType::COMPUTE, std::array{releaseToCompute}, {});
+				gfxPre->End();
+
+				rhi::SubmitInfo preSubmit{};
+				preSubmit.signalSemaphores = std::array{graphicsReleasedSemaphores[currentFrame].get()};
+				auto gfxPreSpan            = std::array{gfxPre.get()};
+				device->SubmitCommandLists(gfxPreSpan, rhi::QueueType::GRAPHICS, preSubmit);
+
+				didPreRelease = true;
+			}
+
 			// COMPUTE PHASE (Producer) - Only run when physics should advance
 			if (shouldRunPhysics)
 			{
@@ -363,56 +394,72 @@ int main()
 				computeCmdList->Reset();
 				computeCmdList->Begin();
 
-				// For compute queue, we assume buffers are in GeneralRead state from previous frame
-				// (either from initialization or from previous compute->graphics transition)
-				rhi::BufferTransition computeInputTransition{};
-				computeInputTransition.buffer = useBufferA ? particleBufferA.get() : particleBufferB.get();
-				computeInputTransition.before = firstFrame ? rhi::ResourceState::Undefined : rhi::ResourceState::GeneralRead;
-				computeInputTransition.after  = rhi::ResourceState::ShaderReadWrite;
-
-				rhi::BufferTransition computeOutputTransition{};
-				computeOutputTransition.buffer = useBufferA ? particleBufferB.get() : particleBufferA.get();
-				computeOutputTransition.before = firstFrame ? rhi::ResourceState::Undefined : rhi::ResourceState::GeneralRead;
-				computeOutputTransition.after  = rhi::ResourceState::ShaderReadWrite;
-
-				// Only transition if we have transitions to make
-				if (firstFrame || computeInputTransition.before != computeInputTransition.after)
+				if (didPreRelease)
 				{
+					// Acquire exactly the buffer we just released from graphics
+					rhi::BufferTransition acquireFromGraphics{};
+					acquireFromGraphics.buffer = inputBuffer;
+					acquireFromGraphics.before = rhi::ResourceState::VertexBuffer;
+					acquireFromGraphics.after  = rhi::ResourceState::ShaderReadWrite;
+
+					computeCmdList->AcquireFromQueue(
+					    rhi::QueueType::GRAPHICS,
+					    std::array{acquireFromGraphics},
+					    {});
+				}
+				else
+				{
+					// First compute ever: local init path for both buffers
+					rhi::BufferTransition initInput{};
+					initInput.buffer = inputBuffer;
+					initInput.before = rhi::ResourceState::Undefined;
+					initInput.after  = rhi::ResourceState::ShaderReadWrite;
+
+					rhi::BufferTransition initOutput{};
+					initOutput.buffer = outputBuffer;
+					initOutput.before = rhi::ResourceState::Undefined;
+					initOutput.after  = rhi::ResourceState::ShaderReadWrite;
+
 					computeCmdList->Barrier(
 					    rhi::PipelineScope::Compute,
 					    rhi::PipelineScope::Compute,
-					    std::array{computeInputTransition, computeOutputTransition},
+					    std::array{initInput, initOutput},
 					    {},
 					    {});
 				}
 
 				computeCmdList->SetPipeline(computePipeline.get());
-
 				computeCmdList->BindDescriptorSet(0, useBufferA ? computeDescriptorSetA.get() : computeDescriptorSetB.get());
 
 				uint32_t workgroupCount = (PARTICLE_COUNT + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
 				computeCmdList->Dispatch(workgroupCount);
 
-				// Barrier: compute shader write -> general read (prepare for graphics queue)
-				rhi::BufferTransition computeToGeneralTransition{};
-				computeToGeneralTransition.buffer = useBufferA ? particleBufferB.get() : particleBufferA.get();
-				computeToGeneralTransition.before = rhi::ResourceState::ShaderReadWrite;
-				computeToGeneralTransition.after  = rhi::ResourceState::GeneralRead;
+				// Release the freshly written output to graphics for this frame's draw
+				rhi::BufferTransition releaseOutput{};
+				releaseOutput.buffer = outputBuffer;
+				releaseOutput.before = rhi::ResourceState::ShaderReadWrite;
+				releaseOutput.after  = rhi::ResourceState::VertexBuffer;
 
-				computeCmdList->Barrier(
-				    rhi::PipelineScope::Compute,
-				    rhi::PipelineScope::Compute,
-				    std::array{computeToGeneralTransition},
-				    {},
+				computeCmdList->ReleaseToQueue(
+				    rhi::QueueType::GRAPHICS,
+				    std::array{releaseOutput},
 				    {});
 
 				computeCmdList->End();
 
-				// Submit compute work - no wait semaphore needed, signal compute finished for CURRENT frame
+				// Submit compute; wait only if we actually did the pre-release
+				std::vector<rhi::SemaphoreWaitInfo> computeWaits;
+				if (didPreRelease)
+				{
+					computeWaits.push_back({graphicsReleasedSemaphores[currentFrame].get(), rhi::StageMask::ComputeShader});
+				}
+
+				rhi::SubmitInfo computeSubmit{};
+				computeSubmit.waitSemaphores   = computeWaits;
+				computeSubmit.signalSemaphores = std::array{computeFinishedSemaphores[currentFrame].get()};
+
 				auto computeCmdListSpan = std::array{computeCmdList.get()};
-				device->SubmitCommandLists(computeCmdListSpan, rhi::QueueType::COMPUTE,
-				                           nullptr,
-				                           computeFinishedSemaphores[currentFrame].get());
+				device->SubmitCommandLists(computeCmdListSpan, rhi::QueueType::COMPUTE, computeSubmit);
 
 				useBufferA = !useBufferA;
 			}
@@ -426,11 +473,19 @@ int main()
 			uint32_t backBufferWidth  = backBuffer->GetWidth();
 			uint32_t backBufferHeight = backBuffer->GetHeight();
 
-			// Transition particle buffer from general read to vertex buffer for graphics use
-			rhi::BufferTransition particleBufferTransition{};
-			particleBufferTransition.buffer = useBufferA ? particleBufferB.get() : particleBufferA.get();
-			particleBufferTransition.before = rhi::ResourceState::GeneralRead;
-			particleBufferTransition.after  = rhi::ResourceState::VertexBuffer;
+			// ACQUIRE the buffer that was written by compute (only if physics ran)
+			if (shouldRunPhysics)
+			{
+				rhi::BufferTransition acquireBuffer{};
+				acquireBuffer.buffer = outputBuffer;
+				acquireBuffer.before = rhi::ResourceState::VertexBuffer;
+				acquireBuffer.after  = rhi::ResourceState::VertexBuffer;
+
+				graphicsCmdList->AcquireFromQueue(
+				    rhi::QueueType::COMPUTE,
+				    std::array{acquireBuffer},
+				    {});
+			}
 
 			// Transition swapchain image
 			rhi::TextureTransition swapchainTransition{};
@@ -441,7 +496,7 @@ int main()
 			graphicsCmdList->Barrier(
 			    rhi::PipelineScope::Graphics,
 			    rhi::PipelineScope::Graphics,
-			    std::array{particleBufferTransition},
+			    {},
 			    std::array{swapchainTransition},
 			    {});
 
@@ -470,17 +525,12 @@ int main()
 			graphicsCmdList->SetPipeline(graphicsPipeline.get());
 			graphicsCmdList->BindDescriptorSet(0, graphicsDescriptorSet.get());
 
-			// Use the buffer that was just written by compute
-			graphicsCmdList->SetVertexBuffer(0, useBufferA ? particleBufferB.get() : particleBufferA.get());
+			// Use the buffer that was just written by compute (or the last valid buffer if physics didn't run)
+			auto *renderBuffer = shouldRunPhysics ? outputBuffer : (useBufferA ? particleBufferA.get() : particleBufferB.get());
+			graphicsCmdList->SetVertexBuffer(0, renderBuffer);
 			graphicsCmdList->Draw(PARTICLE_COUNT);
 
 			graphicsCmdList->EndRendering();
-
-			// Transition particle buffer back to general read for next compute pass
-			rhi::BufferTransition particleToGeneralTransition{};
-			particleToGeneralTransition.buffer = useBufferA ? particleBufferB.get() : particleBufferA.get();
-			particleToGeneralTransition.before = rhi::ResourceState::VertexBuffer;
-			particleToGeneralTransition.after  = rhi::ResourceState::GeneralRead;
 
 			// Transition swapchain image back to present
 			swapchainTransition.before = rhi::ResourceState::RenderTarget;
@@ -489,7 +539,7 @@ int main()
 			graphicsCmdList->Barrier(
 			    rhi::PipelineScope::Graphics,
 			    rhi::PipelineScope::Graphics,
-			    std::array{particleToGeneralTransition},
+			    {},
 			    std::array{swapchainTransition},
 			    {});
 
@@ -504,12 +554,14 @@ int main()
 				waitSemaphores.push_back({computeFinishedSemaphores[currentFrame].get(), rhi::StageMask::VertexInput});
 			}
 
-			rhi::IRHISemaphore* signalSemaphores[] = {renderFinishedSemaphores[imageIndex].get()};
+			// Build signal semaphores - only signal presentation
+			std::vector<rhi::IRHISemaphore *> signalSemaphores;
+			signalSemaphores.push_back(renderFinishedSemaphores[imageIndex].get());
 
 			rhi::SubmitInfo submitInfo{};
-			submitInfo.waitSemaphores = std::span<const rhi::SemaphoreWaitInfo>(waitSemaphores.data(), waitSemaphores.size());
+			submitInfo.waitSemaphores   = std::span<const rhi::SemaphoreWaitInfo>(waitSemaphores.data(), waitSemaphores.size());
 			submitInfo.signalSemaphores = signalSemaphores;
-			submitInfo.signalFence = inFlightFences[currentFrame].get();
+			submitInfo.signalFence      = inFlightFences[currentFrame].get();
 
 			auto graphicsCmdListSpan = std::array{graphicsCmdList.get()};
 			device->SubmitCommandLists(graphicsCmdListSpan, rhi::QueueType::GRAPHICS, submitInfo);

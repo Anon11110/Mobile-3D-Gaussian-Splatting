@@ -39,6 +39,7 @@ FORMAT_DIRS = [
     "examples/triangle/",
     "examples/unit-tests/",
     "examples/perf-tests/",
+    "examples/particles/",
     "include/msplat/core",
     "src/core",
 ]
