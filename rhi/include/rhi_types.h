@@ -278,6 +278,41 @@ enum class ImageLayout
 	PRESENT_SRC
 };
 
+// Sampler filtering modes
+enum class FilterMode
+{
+	NEAREST,
+	LINEAR
+};
+
+// Sampler mipmap modes
+enum class MipmapMode
+{
+	NEAREST,
+	LINEAR
+};
+
+// Sampler addressing modes
+enum class SamplerAddressMode
+{
+	REPEAT,
+	MIRRORED_REPEAT,
+	CLAMP_TO_EDGE,
+	CLAMP_TO_BORDER,
+	MIRROR_CLAMP_TO_EDGE
+};
+
+// Sampler border colors
+enum class BorderColor
+{
+	FLOAT_TRANSPARENT_BLACK,
+	INT_TRANSPARENT_BLACK,
+	FLOAT_OPAQUE_BLACK,
+	INT_OPAQUE_BLACK,
+	FLOAT_OPAQUE_WHITE,
+	INT_OPAQUE_WHITE
+};
+
 enum class TextureAspect : uint32_t
 {
 	COLOR   = 1 << 0,
@@ -483,6 +518,25 @@ struct ShaderDesc
 	const void *code;
 	size_t      codeSize;
 	const char *entryPoint = "main";
+};
+
+struct SamplerDesc
+{
+	FilterMode         magFilter    = FilterMode::LINEAR;
+	FilterMode         minFilter    = FilterMode::LINEAR;
+	MipmapMode         mipmapMode   = MipmapMode::LINEAR;
+	SamplerAddressMode addressModeU = SamplerAddressMode::REPEAT;
+	SamplerAddressMode addressModeV = SamplerAddressMode::REPEAT;
+	SamplerAddressMode addressModeW = SamplerAddressMode::REPEAT;
+	float              mipLodBias   = 0.0f;
+	bool               anisotropyEnable = false;
+	float              maxAnisotropy    = 1.0f;
+	bool               compareEnable    = false;
+	CompareOp          compareOp        = CompareOp::ALWAYS;
+	float              minLod           = 0.0f;
+	float              maxLod           = 1000.0f;
+	BorderColor        borderColor      = BorderColor::FLOAT_TRANSPARENT_BLACK;
+	bool               unnormalizedCoordinates = false;
 };
 
 struct VertexAttribute

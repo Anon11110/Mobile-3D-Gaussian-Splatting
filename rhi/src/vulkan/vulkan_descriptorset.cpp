@@ -171,23 +171,26 @@ void VulkanDescriptorSet::BindTexture(uint32_t binding, const TextureBinding &te
 }
 
 // VulkanSampler implementation
-VulkanSampler::VulkanSampler(VkDevice device) :
+VulkanSampler::VulkanSampler(VkDevice device, const SamplerDesc &desc) :
     device(device)
 {
 	VkSamplerCreateInfo samplerInfo{};
 	samplerInfo.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-	samplerInfo.magFilter               = VK_FILTER_LINEAR;
-	samplerInfo.minFilter               = VK_FILTER_LINEAR;
-	samplerInfo.addressModeU            = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	samplerInfo.addressModeV            = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	samplerInfo.addressModeW            = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	samplerInfo.anisotropyEnable        = VK_FALSE;
-	samplerInfo.maxAnisotropy           = 1.0f;
-	samplerInfo.borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-	samplerInfo.unnormalizedCoordinates = VK_FALSE;
-	samplerInfo.compareEnable           = VK_FALSE;
-	samplerInfo.compareOp               = VK_COMPARE_OP_ALWAYS;
-	samplerInfo.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	samplerInfo.magFilter               = FilterModeToVulkan(desc.magFilter);
+	samplerInfo.minFilter               = FilterModeToVulkan(desc.minFilter);
+	samplerInfo.addressModeU            = SamplerAddressModeToVulkan(desc.addressModeU);
+	samplerInfo.addressModeV            = SamplerAddressModeToVulkan(desc.addressModeV);
+	samplerInfo.addressModeW            = SamplerAddressModeToVulkan(desc.addressModeW);
+	samplerInfo.anisotropyEnable        = desc.anisotropyEnable ? VK_TRUE : VK_FALSE;
+	samplerInfo.maxAnisotropy           = desc.maxAnisotropy;
+	samplerInfo.borderColor             = BorderColorToVulkan(desc.borderColor);
+	samplerInfo.unnormalizedCoordinates = desc.unnormalizedCoordinates ? VK_TRUE : VK_FALSE;
+	samplerInfo.compareEnable           = desc.compareEnable ? VK_TRUE : VK_FALSE;
+	samplerInfo.compareOp               = CompareOpToVulkan(desc.compareOp);
+	samplerInfo.mipmapMode              = MipmapModeToVulkan(desc.mipmapMode);
+	samplerInfo.mipLodBias              = desc.mipLodBias;
+	samplerInfo.minLod                  = desc.minLod;
+	samplerInfo.maxLod                  = desc.maxLod;
 
 	if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS)
 	{

@@ -663,4 +663,70 @@ VkImageLayout ResourceStateToImageLayout(ResourceState state)
 	}
 }
 
+VkFilter FilterModeToVulkan(FilterMode filter)
+{
+	switch (filter)
+	{
+		case FilterMode::NEAREST:
+			return VK_FILTER_NEAREST;
+		case FilterMode::LINEAR:
+			return VK_FILTER_LINEAR;
+		default:
+			return VK_FILTER_LINEAR;
+	}
+}
+
+VkSamplerMipmapMode MipmapModeToVulkan(MipmapMode mode)
+{
+	switch (mode)
+	{
+		case MipmapMode::NEAREST:
+			return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		case MipmapMode::LINEAR:
+			return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		default:
+			return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	}
+}
+
+VkSamplerAddressMode SamplerAddressModeToVulkan(SamplerAddressMode mode)
+{
+	switch (mode)
+	{
+		case SamplerAddressMode::REPEAT:
+			return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		case SamplerAddressMode::MIRRORED_REPEAT:
+			return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+		case SamplerAddressMode::CLAMP_TO_EDGE:
+			return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		case SamplerAddressMode::CLAMP_TO_BORDER:
+			return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		case SamplerAddressMode::MIRROR_CLAMP_TO_EDGE:
+			return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+		default:
+			return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	}
+}
+
+VkBorderColor BorderColorToVulkan(BorderColor color)
+{
+	switch (color)
+	{
+		case BorderColor::FLOAT_TRANSPARENT_BLACK:
+			return VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+		case BorderColor::INT_TRANSPARENT_BLACK:
+			return VK_BORDER_COLOR_INT_TRANSPARENT_BLACK;
+		case BorderColor::FLOAT_OPAQUE_BLACK:
+			return VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+		case BorderColor::INT_OPAQUE_BLACK:
+			return VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+		case BorderColor::FLOAT_OPAQUE_WHITE:
+			return VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+		case BorderColor::INT_OPAQUE_WHITE:
+			return VK_BORDER_COLOR_INT_OPAQUE_WHITE;
+		default:
+			return VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+	}
+}
+
 }        // namespace rhi::vulkan

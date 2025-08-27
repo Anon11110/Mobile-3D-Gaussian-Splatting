@@ -169,6 +169,11 @@ class VulkanDevice : public IRHIDevice
 		return std::make_unique<VulkanTextureView>(device, desc);
 	}
 
+	std::unique_ptr<IRHISampler> CreateSampler(const SamplerDesc &desc) override
+	{
+		return std::make_unique<VulkanSampler>(device, desc);
+	}
+
 	std::unique_ptr<IRHIShader> CreateShader(const ShaderDesc &desc) override
 	{
 		return std::make_unique<VulkanShader>(device, desc);

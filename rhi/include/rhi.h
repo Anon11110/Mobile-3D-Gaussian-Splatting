@@ -14,6 +14,7 @@ class IRHIDevice
 	virtual std::unique_ptr<IRHIBuffer>              CreateBuffer(const BufferDesc &desc)                           = 0;
 	virtual std::unique_ptr<IRHITexture>             CreateTexture(const TextureDesc &desc)                         = 0;
 	virtual std::unique_ptr<IRHITextureView>         CreateTextureView(const TextureViewDesc &desc)                 = 0;
+	virtual std::unique_ptr<IRHISampler>             CreateSampler(const SamplerDesc &desc)                         = 0;
 	virtual std::unique_ptr<IRHIShader>              CreateShader(const ShaderDesc &desc)                           = 0;
 	virtual std::unique_ptr<IRHIPipeline>            CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)       = 0;
 	virtual std::unique_ptr<IRHIPipeline>            CreateComputePipeline(const ComputePipelineDesc &desc)         = 0;

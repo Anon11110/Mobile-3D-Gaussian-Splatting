@@ -473,7 +473,7 @@ class VulkanSampler : public IRHISampler
 	VkSampler sampler;
 
   public:
-	VulkanSampler(VkDevice device);
+	VulkanSampler(VkDevice device, const SamplerDesc &desc);
 	~VulkanSampler() override;
 
 	VulkanSampler(const VulkanSampler &)            = delete;
@@ -506,6 +506,10 @@ VkStencilOp           StencilOpToVulkan(StencilOp op);
 VkBlendFactor         BlendFactorToVulkan(BlendFactor factor);
 VkBlendOp             BlendOpToVulkan(BlendOp op);
 VkSampleCountFlagBits SampleCountToVulkan(SampleCount count);
+VkFilter              FilterModeToVulkan(FilterMode filter);
+VkSamplerMipmapMode   MipmapModeToVulkan(MipmapMode mode);
+VkSamplerAddressMode  SamplerAddressModeToVulkan(SamplerAddressMode mode);
+VkBorderColor         BorderColorToVulkan(BorderColor color);
 uint32_t              FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
 VkPipelineStageFlags  PipelineScopeToVulkanStages(PipelineScope scope);
 VkPipelineStageFlags  StageMaskToVulkan(StageMask mask);
