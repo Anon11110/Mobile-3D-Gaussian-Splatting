@@ -334,7 +334,111 @@ void VulkanCommandList::CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer,
 
 	vkCmdCopyBuffer(commandBuffer, vkSrcBuffer->GetHandle(), vkDstBuffer->GetHandle(),
 	                static_cast<uint32_t>(regions.size()),
-	                reinterpret_cast<const VkBufferCopy*>(regions.data()));
+	                reinterpret_cast<const VkBufferCopy *>(regions.data()));
+}
+
+void VulkanCommandList::CopyTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureCopy> regions)
+{
+	if (regions.empty())
+		return;
+
+	auto *vkSrcTexture = static_cast<VulkanTexture *>(srcTexture);
+	auto *vkDstTexture = static_cast<VulkanTexture *>(dstTexture);
+
+	std::vector<VkImageCopy> vkRegions;
+	vkRegions.reserve(regions.size());
+
+	for (const auto &region : regions)
+	{
+		VkImageCopy vkRegion{};
+
+		// Source subresource
+		vkRegion.srcSubresource.aspectMask     = TextureAspectToVulkan(region.aspectMask);
+		vkRegion.srcSubresource.mipLevel       = region.srcMipLevel;
+		vkRegion.srcSubresource.baseArrayLayer = region.srcArrayLayer;
+		vkRegion.srcSubresource.layerCount     = region.layerCount;
+
+		// Source offset
+		vkRegion.srcOffset.x = static_cast<int32_t>(region.srcX);
+		vkRegion.srcOffset.y = static_cast<int32_t>(region.srcY);
+		vkRegion.srcOffset.z = static_cast<int32_t>(region.srcZ);
+
+		// Destination subresource
+		vkRegion.dstSubresource.aspectMask     = TextureAspectToVulkan(region.aspectMask);
+		vkRegion.dstSubresource.mipLevel       = region.dstMipLevel;
+		vkRegion.dstSubresource.baseArrayLayer = region.dstArrayLayer;
+		vkRegion.dstSubresource.layerCount     = region.layerCount;
+
+		// Destination offset
+		vkRegion.dstOffset.x = static_cast<int32_t>(region.dstX);
+		vkRegion.dstOffset.y = static_cast<int32_t>(region.dstY);
+		vkRegion.dstOffset.z = static_cast<int32_t>(region.dstZ);
+
+		// Extent
+		vkRegion.extent.width  = region.width;
+		vkRegion.extent.height = region.height;
+		vkRegion.extent.depth  = region.depth;
+
+		vkRegions.push_back(vkRegion);
+	}
+
+	vkCmdCopyImage(commandBuffer,
+	               vkSrcTexture->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	               vkDstTexture->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	               static_cast<uint32_t>(vkRegions.size()), vkRegions.data());
+}
+
+void VulkanCommandList::BlitTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureBlit> regions, FilterMode filter)
+{
+	if (regions.empty())
+		return;
+
+	auto *vkSrcTexture = static_cast<VulkanTexture *>(srcTexture);
+	auto *vkDstTexture = static_cast<VulkanTexture *>(dstTexture);
+
+	std::vector<VkImageBlit> vkRegions;
+	vkRegions.reserve(regions.size());
+
+	for (const auto &region : regions)
+	{
+		VkImageBlit vkRegion{};
+
+		// Source subresource
+		vkRegion.srcSubresource.aspectMask     = TextureAspectToVulkan(region.aspectMask);
+		vkRegion.srcSubresource.mipLevel       = region.srcMipLevel;
+		vkRegion.srcSubresource.baseArrayLayer = region.srcArrayLayer;
+		vkRegion.srcSubresource.layerCount     = region.layerCount;
+
+		// Source offsets (blit region)
+		vkRegion.srcOffsets[0].x = static_cast<int32_t>(region.srcX0);
+		vkRegion.srcOffsets[0].y = static_cast<int32_t>(region.srcY0);
+		vkRegion.srcOffsets[0].z = static_cast<int32_t>(region.srcZ0);
+		vkRegion.srcOffsets[1].x = static_cast<int32_t>(region.srcX1);
+		vkRegion.srcOffsets[1].y = static_cast<int32_t>(region.srcY1);
+		vkRegion.srcOffsets[1].z = static_cast<int32_t>(region.srcZ1);
+
+		// Destination subresource
+		vkRegion.dstSubresource.aspectMask     = TextureAspectToVulkan(region.aspectMask);
+		vkRegion.dstSubresource.mipLevel       = region.dstMipLevel;
+		vkRegion.dstSubresource.baseArrayLayer = region.dstArrayLayer;
+		vkRegion.dstSubresource.layerCount     = region.layerCount;
+
+		// Destination offsets (blit region)
+		vkRegion.dstOffsets[0].x = static_cast<int32_t>(region.dstX0);
+		vkRegion.dstOffsets[0].y = static_cast<int32_t>(region.dstY0);
+		vkRegion.dstOffsets[0].z = static_cast<int32_t>(region.dstZ0);
+		vkRegion.dstOffsets[1].x = static_cast<int32_t>(region.dstX1);
+		vkRegion.dstOffsets[1].y = static_cast<int32_t>(region.dstY1);
+		vkRegion.dstOffsets[1].z = static_cast<int32_t>(region.dstZ1);
+
+		vkRegions.push_back(vkRegion);
+	}
+
+	vkCmdBlitImage(commandBuffer,
+	               vkSrcTexture->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	               vkDstTexture->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	               static_cast<uint32_t>(vkRegions.size()), vkRegions.data(),
+	               FilterModeToVulkan(filter));
 }
 
 void VulkanCommandList::Barrier(

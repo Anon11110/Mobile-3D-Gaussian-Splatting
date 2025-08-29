@@ -126,8 +126,10 @@ class IRHICommandList
 	virtual void Dispatch(uint32_t groupCountX, uint32_t groupCountY = 1, uint32_t groupCountZ = 1) = 0;
 	virtual void DispatchIndirect(IRHIBuffer *buffer, size_t offset)                                = 0;
 
-	// Buffer operations
 	virtual void CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer, std::span<const BufferCopy> regions) = 0;
+
+	virtual void CopyTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureCopy> regions)                                         = 0;
+	virtual void BlitTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureBlit> regions, FilterMode filter = FilterMode::LINEAR) = 0;
 
 	virtual void Barrier(
 	    PipelineScope                      src_scope,

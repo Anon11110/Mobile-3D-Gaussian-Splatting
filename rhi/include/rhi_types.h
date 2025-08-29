@@ -522,20 +522,20 @@ struct ShaderDesc
 
 struct SamplerDesc
 {
-	FilterMode         magFilter    = FilterMode::LINEAR;
-	FilterMode         minFilter    = FilterMode::LINEAR;
-	MipmapMode         mipmapMode   = MipmapMode::LINEAR;
-	SamplerAddressMode addressModeU = SamplerAddressMode::REPEAT;
-	SamplerAddressMode addressModeV = SamplerAddressMode::REPEAT;
-	SamplerAddressMode addressModeW = SamplerAddressMode::REPEAT;
-	float              mipLodBias   = 0.0f;
-	bool               anisotropyEnable = false;
-	float              maxAnisotropy    = 1.0f;
-	bool               compareEnable    = false;
-	CompareOp          compareOp        = CompareOp::ALWAYS;
-	float              minLod           = 0.0f;
-	float              maxLod           = 1000.0f;
-	BorderColor        borderColor      = BorderColor::FLOAT_TRANSPARENT_BLACK;
+	FilterMode         magFilter               = FilterMode::LINEAR;
+	FilterMode         minFilter               = FilterMode::LINEAR;
+	MipmapMode         mipmapMode              = MipmapMode::LINEAR;
+	SamplerAddressMode addressModeU            = SamplerAddressMode::REPEAT;
+	SamplerAddressMode addressModeV            = SamplerAddressMode::REPEAT;
+	SamplerAddressMode addressModeW            = SamplerAddressMode::REPEAT;
+	float              mipLodBias              = 0.0f;
+	bool               anisotropyEnable        = false;
+	float              maxAnisotropy           = 1.0f;
+	bool               compareEnable           = false;
+	CompareOp          compareOp               = CompareOp::ALWAYS;
+	float              minLod                  = 0.0f;
+	float              maxLod                  = 1000.0f;
+	BorderColor        borderColor             = BorderColor::FLOAT_TRANSPARENT_BLACK;
 	bool               unnormalizedCoordinates = false;
 };
 
@@ -601,6 +601,47 @@ struct BufferCopy
 	uint64_t srcOffset = 0;
 	uint64_t dstOffset = 0;
 	uint64_t size      = 0;
+};
+
+struct TextureCopy
+{
+	uint32_t      srcMipLevel   = 0;
+	uint32_t      srcArrayLayer = 0;
+	uint32_t      srcX          = 0;
+	uint32_t      srcY          = 0;
+	uint32_t      srcZ          = 0;
+	uint32_t      dstMipLevel   = 0;
+	uint32_t      dstArrayLayer = 0;
+	uint32_t      dstX          = 0;
+	uint32_t      dstY          = 0;
+	uint32_t      dstZ          = 0;
+	uint32_t      width         = 0;
+	uint32_t      height        = 0;
+	uint32_t      depth         = 1;
+	uint32_t      layerCount    = 1;
+	TextureAspect aspectMask    = TextureAspect::COLOR;
+};
+
+struct TextureBlit
+{
+	uint32_t      srcMipLevel   = 0;
+	uint32_t      srcArrayLayer = 0;
+	uint32_t      srcX0         = 0;
+	uint32_t      srcY0         = 0;
+	uint32_t      srcZ0         = 0;
+	uint32_t      srcX1         = 0;
+	uint32_t      srcY1         = 0;
+	uint32_t      srcZ1         = 1;
+	uint32_t      dstMipLevel   = 0;
+	uint32_t      dstArrayLayer = 0;
+	uint32_t      dstX0         = 0;
+	uint32_t      dstY0         = 0;
+	uint32_t      dstZ0         = 0;
+	uint32_t      dstX1         = 0;
+	uint32_t      dstY1         = 0;
+	uint32_t      dstZ1         = 1;
+	uint32_t      layerCount    = 1;
+	TextureAspect aspectMask    = TextureAspect::COLOR;
 };
 
 struct RasterizationState

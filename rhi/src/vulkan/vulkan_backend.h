@@ -305,6 +305,8 @@ class VulkanCommandList : public IRHICommandList
 	void DispatchIndirect(IRHIBuffer *buffer, size_t offset) override;
 
 	void CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer, std::span<const BufferCopy> regions) override;
+	void CopyTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureCopy> regions) override;
+	void BlitTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureBlit> regions, FilterMode filter = FilterMode::LINEAR) override;
 
 	void Barrier(
 	    PipelineScope                      src_scope,
@@ -518,6 +520,7 @@ VkFilter              FilterModeToVulkan(FilterMode filter);
 VkSamplerMipmapMode   MipmapModeToVulkan(MipmapMode mode);
 VkSamplerAddressMode  SamplerAddressModeToVulkan(SamplerAddressMode mode);
 VkBorderColor         BorderColorToVulkan(BorderColor color);
+VkImageAspectFlags    TextureAspectToVulkan(TextureAspect aspect);
 uint32_t              FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
 VkPipelineStageFlags  PipelineScopeToVulkanStages(PipelineScope scope);
 VkPipelineStageFlags  StageMaskToVulkan(StageMask mask);

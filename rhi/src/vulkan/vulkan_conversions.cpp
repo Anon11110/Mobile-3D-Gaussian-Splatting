@@ -729,4 +729,18 @@ VkBorderColor BorderColorToVulkan(BorderColor color)
 	}
 }
 
+VkImageAspectFlags TextureAspectToVulkan(TextureAspect aspect)
+{
+	VkImageAspectFlags flags = 0;
+
+	if (static_cast<uint32_t>(aspect & TextureAspect::COLOR))
+		flags |= VK_IMAGE_ASPECT_COLOR_BIT;
+	if (static_cast<uint32_t>(aspect & TextureAspect::DEPTH))
+		flags |= VK_IMAGE_ASPECT_DEPTH_BIT;
+	if (static_cast<uint32_t>(aspect & TextureAspect::STENCIL))
+		flags |= VK_IMAGE_ASPECT_STENCIL_BIT;
+
+	return flags;
+}
+
 }        // namespace rhi::vulkan
