@@ -132,7 +132,7 @@ class VulkanDevice : public IRHIDevice
 		if (desc.initialData != nullptr && desc.resourceUsage == ResourceUsage::Static)
 		{
 			// Handle initial data upload for static buffers using staging
-			UploadToStaticBuffer(buffer.get(), desc.initialData, desc.size);
+			UploadToBuffer(buffer.get(), desc.initialData, desc.size);
 		}
 		else if (desc.initialData != nullptr && desc.resourceUsage != ResourceUsage::Static)
 		{
@@ -260,6 +260,27 @@ class VulkanDevice : public IRHIDevice
 		}
 
 		return std::make_unique<VulkanDescriptorSet>(device, vkLayout, pool, descriptorSet);
+	}
+
+	void UpdateBuffer(IRHIBuffer *buffer, const void *data, size_t size, size_t offset = 0) override
+	{
+		auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
+
+		if (vkBuffer->IsMappable())
+		{
+			// Direct memory mapping approach for mappable buffers
+			void *mapped = vkBuffer->Map();
+			memcpy(static_cast<char*>(mapped) + offset, data, size);
+			vmaFlushAllocation(allocator, vkBuffer->GetAllocation(), offset, size);
+
+			vkBuffer->Unmap();
+		}
+		else
+		{
+			// Staging buffer approach for device-local buffers
+			// TODO: This currently stalls the GPU with vkQueueWaitIdle, it's better to implement async transfer
+			UploadToBuffer(vkBuffer, data, size, offset);
+		}
 	}
 
 	void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
@@ -907,7 +928,7 @@ class VulkanDevice : public IRHIDevice
 		}
 	}
 
-	void UploadToStaticBuffer(VulkanBuffer *dstBuffer, const void *data, size_t size)
+	void UploadToBuffer(VulkanBuffer *dstBuffer, const void *data, size_t size, size_t offset = 0)
 	{
 		// Create staging buffer in host-visible memory
 		VkBufferCreateInfo stagingInfo{};
@@ -953,7 +974,7 @@ class VulkanDevice : public IRHIDevice
 
 		VkBufferCopy copyRegion{};
 		copyRegion.srcOffset = 0;
-		copyRegion.dstOffset = 0;
+		copyRegion.dstOffset = offset;
 		copyRegion.size      = size;
 		vkCmdCopyBuffer(copyCmd, stagingBuffer, dstBuffer->GetHandle(), 1, &copyRegion);
 

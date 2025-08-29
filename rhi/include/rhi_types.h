@@ -596,6 +596,13 @@ struct TextureBinding
 	DescriptorType type    = DescriptorType::SAMPLED_TEXTURE;
 };
 
+struct BufferCopy
+{
+	uint64_t srcOffset = 0;
+	uint64_t dstOffset = 0;
+	uint64_t size      = 0;
+};
+
 struct RasterizationState
 {
 	bool        depthClampEnable        = false;

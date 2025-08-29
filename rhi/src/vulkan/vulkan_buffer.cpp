@@ -170,4 +170,16 @@ size_t VulkanBuffer::GetSize() const
 	return size;
 }
 
+bool VulkanBuffer::IsMappable() const
+{
+	// Check if the buffer was allocated with host-accessible memory
+	VmaAllocationInfo allocInfo;
+	vmaGetAllocationInfo(allocator, allocation, &allocInfo);
+
+	VkMemoryPropertyFlags memProps;
+	vmaGetMemoryTypeProperties(allocator, allocInfo.memoryType, &memProps);
+
+	return (memProps & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
+}
+
 }        // namespace rhi::vulkan

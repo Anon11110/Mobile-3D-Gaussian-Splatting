@@ -26,6 +26,9 @@ class IRHIDevice
 	virtual std::unique_ptr<IRHIDescriptorSet>       CreateDescriptorSet(IRHIDescriptorSetLayout *layout,
 	                                                                     QueueType                queueType = QueueType::GRAPHICS) = 0;
 
+	// Buffer operations
+	virtual void UpdateBuffer(IRHIBuffer *buffer, const void *data, size_t size, size_t offset = 0) = 0;
+
 	// Queue operations
 	virtual void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
 	                                QueueType                         queueType       = QueueType::GRAPHICS,
@@ -122,6 +125,9 @@ class IRHICommandList
 
 	virtual void Dispatch(uint32_t groupCountX, uint32_t groupCountY = 1, uint32_t groupCountZ = 1) = 0;
 	virtual void DispatchIndirect(IRHIBuffer *buffer, size_t offset)                                = 0;
+
+	// Buffer operations
+	virtual void CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer, std::span<const BufferCopy> regions) = 0;
 
 	virtual void Barrier(
 	    PipelineScope                      src_scope,

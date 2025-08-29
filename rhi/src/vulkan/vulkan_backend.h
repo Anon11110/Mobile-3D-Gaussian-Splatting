@@ -49,10 +49,16 @@ class VulkanBuffer : public IRHIBuffer
 	void  *Map() override;
 	void   Unmap() override;
 	size_t GetSize() const override;
+	bool   IsMappable() const;
 
 	VkBuffer GetHandle() const
 	{
 		return buffer;
+	}
+
+	VmaAllocation GetAllocation() const
+	{
+		return allocation;
 	}
 };
 
@@ -297,6 +303,8 @@ class VulkanCommandList : public IRHICommandList
 
 	void Dispatch(uint32_t groupCountX, uint32_t groupCountY = 1, uint32_t groupCountZ = 1) override;
 	void DispatchIndirect(IRHIBuffer *buffer, size_t offset) override;
+
+	void CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer, std::span<const BufferCopy> regions) override;
 
 	void Barrier(
 	    PipelineScope                      src_scope,

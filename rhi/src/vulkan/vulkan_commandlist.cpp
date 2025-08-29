@@ -319,6 +319,24 @@ void VulkanCommandList::DispatchIndirect(IRHIBuffer *buffer, size_t offset)
 	vkCmdDispatchIndirect(commandBuffer, vkBuffer->GetHandle(), offset);
 }
 
+void VulkanCommandList::CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer, std::span<const BufferCopy> regions)
+{
+	if (regions.empty())
+		return;
+
+	static_assert(sizeof(BufferCopy) == sizeof(VkBufferCopy));
+	static_assert(offsetof(BufferCopy, srcOffset) == offsetof(VkBufferCopy, srcOffset));
+	static_assert(offsetof(BufferCopy, dstOffset) == offsetof(VkBufferCopy, dstOffset));
+	static_assert(offsetof(BufferCopy, size) == offsetof(VkBufferCopy, size));
+
+	auto *vkSrcBuffer = static_cast<VulkanBuffer *>(srcBuffer);
+	auto *vkDstBuffer = static_cast<VulkanBuffer *>(dstBuffer);
+
+	vkCmdCopyBuffer(commandBuffer, vkSrcBuffer->GetHandle(), vkDstBuffer->GetHandle(),
+	                static_cast<uint32_t>(regions.size()),
+	                reinterpret_cast<const VkBufferCopy*>(regions.data()));
+}
+
 void VulkanCommandList::Barrier(
     PipelineScope                      src_scope,
     PipelineScope                      dst_scope,
