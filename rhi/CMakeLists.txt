@@ -20,26 +20,22 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third-party/glfw ${CMAKE_CURRENT
 # RHI Library
 add_library(RHI STATIC)
 
-# Common sources
-target_sources(RHI PRIVATE
-    src/rhi.cpp
-)
 
 # Vulkan backend sources
 target_sources(RHI PRIVATE
-    src/vulkan/vulkan_device.cpp
-    src/vulkan/vulkan_semaphore.cpp
-    src/vulkan/vulkan_fence.cpp
-    src/vulkan/vulkan_buffer.cpp
-    src/vulkan/vulkan_shader.cpp
-    src/vulkan/vulkan_texture.cpp
-    src/vulkan/vulkan_textureview.cpp
-    src/vulkan/vulkan_pipeline.cpp
-    src/vulkan/vulkan_swapchain.cpp
-    src/vulkan/vulkan_commandlist.cpp
-    src/vulkan/vulkan_descriptorset.cpp
-    src/vulkan/vulkan_conversions.cpp
-    src/vulkan/vma_implementation.cpp
+    src/backends/vulkan/vulkan_device.cpp
+    src/backends/vulkan/vulkan_semaphore.cpp
+    src/backends/vulkan/vulkan_fence.cpp
+    src/backends/vulkan/vulkan_buffer.cpp
+    src/backends/vulkan/vulkan_shader.cpp
+    src/backends/vulkan/vulkan_texture.cpp
+    src/backends/vulkan/vulkan_textureview.cpp
+    src/backends/vulkan/vulkan_pipeline.cpp
+    src/backends/vulkan/vulkan_swapchain.cpp
+    src/backends/vulkan/vulkan_commandlist.cpp
+    src/backends/vulkan/vulkan_descriptorset.cpp
+    src/backends/vulkan/vulkan_conversions.cpp
+    src/backends/vulkan/vma_implementation.cpp
 )
 target_compile_definitions(RHI PUBLIC RHI_VULKAN=1)
 target_link_libraries(RHI PUBLIC Vulkan::Vulkan)
@@ -59,7 +55,7 @@ target_include_directories(RHI PUBLIC
 
 # Private include for Vulkan backend
 target_include_directories(RHI PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/vulkan
 )
 
 # Link libraries

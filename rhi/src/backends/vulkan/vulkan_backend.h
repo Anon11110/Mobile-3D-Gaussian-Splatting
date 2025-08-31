@@ -6,7 +6,7 @@
 #include <memory>
 #include <vector>
 
-#include "rhi.h"
+#include "../../../include/rhi/rhi.h"
 
 namespace rhi::vulkan
 {
@@ -27,7 +27,7 @@ class VulkanDescriptorSet;
 class VulkanSampler;
 
 // Vulkan Buffer implementation
-class VulkanBuffer : public IRHIBuffer
+class VulkanBuffer final : public IRHIBuffer
 {
   private:
 	VmaAllocator  allocator;
@@ -51,19 +51,19 @@ class VulkanBuffer : public IRHIBuffer
 	size_t GetSize() const override;
 	bool   IsMappable() const;
 
-	VkBuffer GetHandle() const
+	[[nodiscard]] VkBuffer GetHandle() const noexcept
 	{
 		return buffer;
 	}
 
-	VmaAllocation GetAllocation() const
+	[[nodiscard]] VmaAllocation GetAllocation() const noexcept
 	{
 		return allocation;
 	}
 };
 
 // Vulkan Texture implementation
-class VulkanTexture : public IRHITexture
+class VulkanTexture final : public IRHITexture
 {
   private:
 	VkDevice      device;
@@ -115,18 +115,18 @@ class VulkanTexture : public IRHITexture
 		return format;
 	}
 
-	VkImage GetHandle() const
+	[[nodiscard]] VkImage GetHandle() const noexcept
 	{
 		return image;
 	}
-	VkImageView GetImageView() const
+	[[nodiscard]] VkImageView GetImageView() const noexcept
 	{
 		return imageView;
 	}
 };
 
 // Vulkan Texture View implementation
-class VulkanTextureView : public IRHITextureView
+class VulkanTextureView final : public IRHITextureView
 {
   private:
 	VkDevice       device;
@@ -174,14 +174,14 @@ class VulkanTextureView : public IRHITextureView
 		return arrayLayerCount;
 	}
 
-	VkImageView GetHandle() const
+	[[nodiscard]] VkImageView GetHandle() const
 	{
 		return imageView;
 	}
 };
 
 // Vulkan Shader implementation
-class VulkanShader : public IRHIShader
+class VulkanShader final : public IRHIShader
 {
   private:
 	VkDevice       device;
@@ -201,14 +201,14 @@ class VulkanShader : public IRHIShader
 	{
 		return stage;
 	}
-	VkShaderModule GetHandle() const
+	[[nodiscard]] VkShaderModule GetHandle() const
 	{
 		return shaderModule;
 	}
 };
 
 // Vulkan Pipeline implementation
-class VulkanPipeline : public IRHIPipeline
+class VulkanPipeline final : public IRHIPipeline
 {
   private:
 	VkDevice              device;
@@ -227,11 +227,11 @@ class VulkanPipeline : public IRHIPipeline
 	VulkanPipeline(VulkanPipeline &&other) noexcept;
 	VulkanPipeline &operator=(VulkanPipeline &&other) noexcept;
 
-	VkPipeline GetHandle() const
+	[[nodiscard]] VkPipeline GetHandle() const
 	{
 		return pipeline;
 	}
-	VkPipelineLayout GetLayout() const
+	[[nodiscard]] VkPipelineLayout GetLayout() const
 	{
 		return pipelineLayout;
 	}
@@ -239,7 +239,7 @@ class VulkanPipeline : public IRHIPipeline
 	{
 		return pipelineType;
 	}
-	VkPipelineBindPoint GetBindPoint() const
+	[[nodiscard]] VkPipelineBindPoint GetBindPoint() const
 	{
 		return pipelineType == PipelineType::GRAPHICS ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE;
 	}
@@ -250,7 +250,7 @@ class VulkanPipeline : public IRHIPipeline
 };
 
 // Vulkan Command List implementation
-class VulkanCommandList : public IRHICommandList
+class VulkanCommandList final : public IRHICommandList
 {
   private:
 	VkDevice        device;
@@ -325,14 +325,14 @@ class VulkanCommandList : public IRHICommandList
 	    std::span<const BufferTransition>  buffer_transitions,
 	    std::span<const TextureTransition> texture_transitions) override;
 
-	VkCommandBuffer GetHandle() const
+	[[nodiscard]] VkCommandBuffer GetHandle() const
 	{
 		return commandBuffer;
 	}
 };
 
 // Vulkan Swapchain implementation
-class VulkanSwapchain : public IRHISwapchain
+class VulkanSwapchain final : public IRHISwapchain
 {
   private:
 	VkInstance                                      instance;
@@ -374,14 +374,14 @@ class VulkanSwapchain : public IRHISwapchain
 };
 
 // Vulkan Semaphore implementation
-class VulkanSemaphore : public IRHISemaphore
+class VulkanSemaphore final : public IRHISemaphore
 {
   private:
 	VkDevice    device;
 	VkSemaphore semaphore;
 
   public:
-	VulkanSemaphore(VkDevice device);
+	explicit VulkanSemaphore(VkDevice device);
 	~VulkanSemaphore() override;
 
 	VulkanSemaphore(const VulkanSemaphore &)            = delete;
@@ -396,7 +396,7 @@ class VulkanSemaphore : public IRHISemaphore
 };
 
 // Vulkan Fence implementation
-class VulkanFence : public IRHIFence
+class VulkanFence final : public IRHIFence
 {
   private:
 	VkDevice device;
@@ -422,7 +422,7 @@ class VulkanFence : public IRHIFence
 };
 
 // Vulkan DescriptorSetLayout implementation
-class VulkanDescriptorSetLayout : public IRHIDescriptorSetLayout
+class VulkanDescriptorSetLayout final : public IRHIDescriptorSetLayout
 {
   private:
 	VkDevice                          device;
@@ -449,7 +449,7 @@ class VulkanDescriptorSetLayout : public IRHIDescriptorSetLayout
 };
 
 // Vulkan DescriptorSet implementation
-class VulkanDescriptorSet : public IRHIDescriptorSet
+class VulkanDescriptorSet final : public IRHIDescriptorSet
 {
   private:
 	VkDevice                   device;
@@ -476,7 +476,7 @@ class VulkanDescriptorSet : public IRHIDescriptorSet
 };
 
 // Vulkan Sampler implementation
-class VulkanSampler : public IRHISampler
+class VulkanSampler final : public IRHISampler
 {
   private:
 	VkDevice  device;

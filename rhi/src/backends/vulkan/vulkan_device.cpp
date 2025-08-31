@@ -10,7 +10,7 @@
 namespace rhi::vulkan
 {
 
-class VulkanDevice : public IRHIDevice
+class VulkanDevice final : public IRHIDevice
 {
   private:
 	VkInstance       instance;
@@ -270,7 +270,7 @@ class VulkanDevice : public IRHIDevice
 		{
 			// Direct memory mapping approach for mappable buffers
 			void *mapped = vkBuffer->Map();
-			memcpy(static_cast<char*>(mapped) + offset, data, size);
+			memcpy(static_cast<char *>(mapped) + offset, data, size);
 			vmaFlushAllocation(allocator, vkBuffer->GetAllocation(), offset, size);
 
 			vkBuffer->Unmap();

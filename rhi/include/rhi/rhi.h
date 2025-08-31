@@ -27,7 +27,7 @@ class IRHIDevice
 	                                                                     QueueType                queueType = QueueType::GRAPHICS) = 0;
 
 	// Buffer operations
-	virtual void UpdateBuffer(IRHIBuffer *buffer, const void *data, size_t size, size_t offset = 0) = 0;
+	virtual void UpdateBuffer(IRHIBuffer *buffer, const void *RHI_RESTRICT data, size_t size, size_t offset = 0) = 0;
 
 	// Queue operations
 	virtual void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
@@ -48,23 +48,23 @@ class IRHIDevice
 class IRHIBuffer
 {
   public:
-	virtual ~IRHIBuffer()          = default;
-	virtual void  *Map()           = 0;
-	virtual void   Unmap()         = 0;
-	virtual size_t GetSize() const = 0;
+	virtual ~IRHIBuffer()                        = default;
+	[[nodiscard]] virtual void  *Map()           = 0;
+	virtual void                 Unmap()         = 0;
+	[[nodiscard]] virtual size_t GetSize() const = 0;
 };
 
 // Texture interface
 class IRHITexture
 {
   public:
-	virtual ~IRHITexture()                       = default;
-	virtual uint32_t      GetWidth() const       = 0;
-	virtual uint32_t      GetHeight() const      = 0;
-	virtual uint32_t      GetDepth() const       = 0;
-	virtual uint32_t      GetMipLevels() const   = 0;
-	virtual uint32_t      GetArrayLayers() const = 0;
-	virtual TextureFormat GetFormat() const      = 0;
+	virtual ~IRHITexture()                                     = default;
+	[[nodiscard]] virtual uint32_t      GetWidth() const       = 0;
+	[[nodiscard]] virtual uint32_t      GetHeight() const      = 0;
+	[[nodiscard]] virtual uint32_t      GetDepth() const       = 0;
+	[[nodiscard]] virtual uint32_t      GetMipLevels() const   = 0;
+	[[nodiscard]] virtual uint32_t      GetArrayLayers() const = 0;
+	[[nodiscard]] virtual TextureFormat GetFormat() const      = 0;
 };
 
 // Texture view interface
@@ -126,10 +126,10 @@ class IRHICommandList
 	virtual void Dispatch(uint32_t groupCountX, uint32_t groupCountY = 1, uint32_t groupCountZ = 1) = 0;
 	virtual void DispatchIndirect(IRHIBuffer *buffer, size_t offset)                                = 0;
 
-	virtual void CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer, std::span<const BufferCopy> regions) = 0;
+	virtual void CopyBuffer(IRHIBuffer *RHI_RESTRICT srcBuffer, IRHIBuffer *RHI_RESTRICT dstBuffer, std::span<const BufferCopy> regions) = 0;
 
-	virtual void CopyTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureCopy> regions)                                         = 0;
-	virtual void BlitTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureBlit> regions, FilterMode filter = FilterMode::LINEAR) = 0;
+	virtual void CopyTexture(IRHITexture *RHI_RESTRICT srcTexture, IRHITexture *RHI_RESTRICT dstTexture, std::span<const TextureCopy> regions)                                         = 0;
+	virtual void BlitTexture(IRHITexture *RHI_RESTRICT srcTexture, IRHITexture *RHI_RESTRICT dstTexture, std::span<const TextureBlit> regions, FilterMode filter = FilterMode::LINEAR) = 0;
 
 	virtual void Barrier(
 	    PipelineScope                      src_scope,

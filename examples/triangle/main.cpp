@@ -8,7 +8,7 @@
 #include "core/math/math.h"
 #include "core/timer.h"
 #include "core/vfs.h"
-#include "rhi.h"
+#include "rhi/rhi.h"
 
 #include <GLFW/glfw3.h>
 

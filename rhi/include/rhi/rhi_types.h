@@ -5,6 +5,14 @@
 #include <span>
 #include <vector>
 
+#ifdef _MSC_VER
+#	define RHI_RESTRICT __restrict
+#elif defined(__GNUC__) || defined(__clang__)
+#	define RHI_RESTRICT __restrict__
+#else
+#	define RHI_RESTRICT
+#endif
+
 namespace rhi
 {
 
@@ -33,17 +41,17 @@ enum class BufferUsage : uint32_t
 };
 
 // Bitwise operators for BufferUsage
-inline BufferUsage operator|(BufferUsage lhs, BufferUsage rhs)
+constexpr inline BufferUsage operator|(BufferUsage lhs, BufferUsage rhs)
 {
 	return static_cast<BufferUsage>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
 }
 
-inline BufferUsage operator&(BufferUsage lhs, BufferUsage rhs)
+constexpr inline BufferUsage operator&(BufferUsage lhs, BufferUsage rhs)
 {
 	return static_cast<BufferUsage>(static_cast<uint32_t>(lhs) & static_cast<uint32_t>(rhs));
 }
 
-inline BufferUsage operator~(BufferUsage usage)
+constexpr inline BufferUsage operator~(BufferUsage usage)
 {
 	return static_cast<BufferUsage>(~static_cast<uint32_t>(usage));
 }
@@ -60,7 +68,7 @@ inline BufferUsage &operator&=(BufferUsage &lhs, BufferUsage rhs)
 	return lhs;
 }
 
-inline bool operator!(BufferUsage usage)
+constexpr inline bool operator!(BufferUsage usage)
 {
 	return static_cast<uint32_t>(usage) == 0;
 }
@@ -321,17 +329,17 @@ enum class TextureAspect : uint32_t
 };
 
 // Bitwise operators for TextureAspect flags
-inline TextureAspect operator|(TextureAspect lhs, TextureAspect rhs)
+constexpr inline TextureAspect operator|(TextureAspect lhs, TextureAspect rhs)
 {
 	return static_cast<TextureAspect>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
 }
 
-inline TextureAspect operator&(TextureAspect lhs, TextureAspect rhs)
+constexpr inline TextureAspect operator&(TextureAspect lhs, TextureAspect rhs)
 {
 	return static_cast<TextureAspect>(static_cast<uint32_t>(lhs) & static_cast<uint32_t>(rhs));
 }
 
-inline TextureAspect operator~(TextureAspect aspect)
+constexpr inline TextureAspect operator~(TextureAspect aspect)
 {
 	return static_cast<TextureAspect>(~static_cast<uint32_t>(aspect));
 }
@@ -348,7 +356,7 @@ inline TextureAspect &operator&=(TextureAspect &lhs, TextureAspect rhs)
 	return lhs;
 }
 
-inline bool operator!(TextureAspect aspect)
+constexpr inline bool operator!(TextureAspect aspect)
 {
 	return static_cast<uint32_t>(aspect) == 0;
 }
@@ -423,12 +431,12 @@ enum class AccessMask : uint64_t
 	MemoryWrite         = 1ull << 16,
 };
 
-inline StageMask operator|(StageMask lhs, StageMask rhs)
+constexpr inline StageMask operator|(StageMask lhs, StageMask rhs)
 {
 	return static_cast<StageMask>(static_cast<uint64_t>(lhs) | static_cast<uint64_t>(rhs));
 }
 
-inline StageMask operator&(StageMask lhs, StageMask rhs)
+constexpr inline StageMask operator&(StageMask lhs, StageMask rhs)
 {
 	return static_cast<StageMask>(static_cast<uint64_t>(lhs) & static_cast<uint64_t>(rhs));
 }
@@ -439,12 +447,12 @@ inline StageMask &operator|=(StageMask &lhs, StageMask rhs)
 	return lhs;
 }
 
-inline AccessMask operator|(AccessMask lhs, AccessMask rhs)
+constexpr inline AccessMask operator|(AccessMask lhs, AccessMask rhs)
 {
 	return static_cast<AccessMask>(static_cast<uint64_t>(lhs) | static_cast<uint64_t>(rhs));
 }
 
-inline AccessMask operator&(AccessMask lhs, AccessMask rhs)
+constexpr inline AccessMask operator&(AccessMask lhs, AccessMask rhs)
 {
 	return static_cast<AccessMask>(static_cast<uint64_t>(lhs) & static_cast<uint64_t>(rhs));
 }
