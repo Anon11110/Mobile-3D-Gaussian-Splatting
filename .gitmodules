@@ -22,3 +22,6 @@
 [submodule "third-party/spdlog"]
 	path = third-party/spdlog
 	url = https://github.com/gabime/spdlog.git
+[submodule "third_party/miniply"]
+	path = third_party/miniply
+	url = https://github.com/vilya/miniply.git

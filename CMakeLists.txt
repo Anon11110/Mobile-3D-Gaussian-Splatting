@@ -16,6 +16,9 @@ option(MSPLAT_USE_SYSTEM_STL "Use system STL containers instead of custom implem
 # Include core library configuration
 include(cmake/core.cmake)
 
+# Include engine library configuration
+include(cmake/engine.cmake)
+
 # Add subdirectories
 add_subdirectory(rhi)
 add_subdirectory(examples)
