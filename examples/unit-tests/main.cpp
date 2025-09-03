@@ -4,7 +4,7 @@ std::vector<Test> g_tests;
 
 // Forward declarations for test functions
 extern void register_platform_tests();
-extern void register_allocator_tests();
+extern void register_pmr_allocator_tests();
 
 int main()
 {
@@ -12,7 +12,7 @@ int main()
 
 	// Register all tests
 	register_platform_tests();
-	register_allocator_tests();
+	register_pmr_allocator_tests();
 
 	int passed = 0;
 	int failed = 0;

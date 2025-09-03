@@ -74,8 +74,8 @@ TEST(vector_default_construction)
 
 TEST(vector_allocator_construction)
 {
-	auto                          &heap_alloc = msplat::container::get_heap_allocator();
-	msplat::container::vector<int> vec(&heap_alloc);
+	auto                          *upstream = msplat::container::pmr::GetUpstreamAllocator();
+	msplat::container::vector<int> vec(upstream);
 	return vec.size() == 0 && vec.capacity() == 0 && vec.empty();
 }
 
@@ -384,10 +384,10 @@ TEST(vector_destructor_calls)
 	return NonTrivialType::construct_count == NonTrivialType::destruct_count;
 }
 
-TEST(vector_with_linear_allocator)
+TEST(vector_with_frame_arena)
 {
-	msplat::container::LinearAllocator linear_alloc(1024);
-	msplat::container::vector<int>     vec(&linear_alloc);
+	msplat::container::pmr::FrameArena frameArena;
+	msplat::container::vector<int>     vec(frameArena.Resource());
 
 	for (int i = 0; i < 10; ++i)
 	{

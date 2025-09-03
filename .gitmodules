@@ -13,9 +13,6 @@
 [submodule "third-party/glm"]
 	path = third-party/glm
 	url = https://github.com/g-truc/glm.git
-[submodule "third-party/rpmalloc"]
-	path = third-party/rpmalloc
-	url = https://github.com/mjansson/rpmalloc.git
 [submodule "third-party/rapidhash"]
 	path = third-party/rapidhash
 	url = https://github.com/Nicoshev/rapidhash.git
@@ -25,3 +22,6 @@
 [submodule "third_party/miniply"]
 	path = third_party/miniply
 	url = https://github.com/vilya/miniply.git
+[submodule "third-party/mimalloc"]
+	path = third-party/mimalloc
+	url = https://github.com/microsoft/mimalloc.git

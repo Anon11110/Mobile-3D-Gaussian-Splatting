@@ -34,11 +34,11 @@ class SplatLoaderException : public std::runtime_error
 class SplatLoader::Impl
 {
   private:
-	std::jthread                  workerThread;
-	std::queue<LoadTask>          taskQueue;
-	std::mutex                    queueMutex;
-	std::condition_variable       queueCV;
-	msplat::container::Allocator *allocator;
+	std::jthread               workerThread;
+	std::queue<LoadTask>       taskQueue;
+	std::mutex                 queueMutex;
+	std::condition_variable    queueCV;
+	std::pmr::memory_resource *memoryResource;
 
 	void WorkerLoop(std::stop_token stopToken)
 	{
@@ -123,7 +123,7 @@ class SplatLoader::Impl
 			shCoeffsPerSplat = 0;
 		}
 
-		auto data = std::make_shared<SplatSoA>(allocator);
+		auto data = std::make_shared<SplatSoA>(memoryResource);
 		data->Resize(numSplats, shCoeffsPerSplat);
 
 		// Move to vertex element and load it
@@ -238,7 +238,7 @@ class SplatLoader::Impl
 
   public:
 	explicit Impl() :
-	    allocator(&msplat::container::get_heap_allocator()),
+	    memoryResource(msplat::container::pmr::GetUpstreamAllocator()),
 	    workerThread([this](std::stop_token st) { WorkerLoop(st); })
 	{
 	}

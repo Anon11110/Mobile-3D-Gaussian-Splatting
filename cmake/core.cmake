@@ -44,11 +44,8 @@ set(CORE_SOURCES
     # Platform sources
     ${CMAKE_SOURCE_DIR}/src/core/platform.cpp
 
-    # Memory/Containers sources
-    ${CMAKE_SOURCE_DIR}/src/core/containers/memory.cpp
-
     # Third-party sources
-    ${CMAKE_SOURCE_DIR}/third-party/rpmalloc/rpmalloc/rpmalloc.c
+    ${CMAKE_SOURCE_DIR}/third-party/mimalloc/src/static.c
 
     # Add a dummy source file to create the library
     ${CMAKE_SOURCE_DIR}/src/core/core.cpp
@@ -63,7 +60,7 @@ target_include_directories(core PUBLIC
     ${CMAKE_SOURCE_DIR}/include/msplat
     ${CMAKE_SOURCE_DIR}/third-party/glm
     ${CMAKE_SOURCE_DIR}/third-party/spdlog/include
-    ${CMAKE_SOURCE_DIR}/third-party/rpmalloc/rpmalloc
+    ${CMAKE_SOURCE_DIR}/third-party/mimalloc/include
 )
 
 # Require C++20 for C++ files and C11 for C files
@@ -74,16 +71,13 @@ set_property(TARGET core PROPERTY C_STANDARD_REQUIRED ON)
 # Add MSVC-specific flags
 if(MSVC)
     target_compile_options(core PUBLIC /utf-8)
-    # Enable C11 support and atomics for rpmalloc.c
-    set_source_files_properties(
-        ${CMAKE_SOURCE_DIR}/third-party/rpmalloc/rpmalloc/rpmalloc.c
-        PROPERTIES COMPILE_FLAGS "/std:c11 /experimental:c11atomics"
-    )
 endif()
 
-# Configure rpmalloc to not override global new/delete
-# (we handle that in our own memory.cpp)
-target_compile_definitions(core PRIVATE ENABLE_OVERRIDE=0)
+# Configure mimalloc for static linking
+target_compile_definitions(core PRIVATE
+    MI_STATIC_LIB
+    MI_BUILD_SHARED=OFF
+)
 
 # Container selection: use system STL if option is enabled
 if(MSPLAT_USE_SYSTEM_STL)

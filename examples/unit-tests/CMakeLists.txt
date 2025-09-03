@@ -7,7 +7,7 @@ find_package(Threads REQUIRED)
 add_executable(unit-tests
     main.cpp
     test_platform.cpp
-    test_allocators.cpp
+    test_pmr_allocators.cpp
     test_custom_vector.cpp
 )
 

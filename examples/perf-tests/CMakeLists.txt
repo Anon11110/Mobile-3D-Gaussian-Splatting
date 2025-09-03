@@ -1,10 +1,8 @@
-# Performance tests for memory allocators
+# Performance tests for PMR allocators and containers
 
 # Main performance test suite
 add_executable(perf-tests 
     main.cpp
-    memory_performance.cpp
-    allocator_performance.cpp
     vector_performance.cpp
 )
 

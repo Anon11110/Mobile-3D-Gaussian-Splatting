@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstring>
 #include <memory>
+#include <memory_resource>
 #include <type_traits>
 #include <utility>
 
@@ -23,13 +24,13 @@ template <typename T>
 using vector = std::vector<T>;
 
 #else
-// Custom vector implementation with allocator integration
+// Custom PMR-based vector implementation
 //
 // Memory Layout - vector<T> object:
-// +------------+----------+------------+-------------+
-// | T* m_data  | m_size   | m_capacity | Allocator*  |
-// | 8 bytes    | 8 bytes  | 8 bytes    | 8 bytes     |
-// +------------+----------+------------+-------------+
+// +------------+----------+------------+------------------+
+// | T* mData  | mSize   | mCapacity | memory_resource* |
+// | 8 bytes    | 8 bytes  | 8 bytes    | 8 bytes          |
+// +------------+----------+------------+------------------+
 // Total: 32 bytes per vector instance
 //
 // Design: Renderer-centric container optimized for 3D Gaussian Splatting data flow patterns
@@ -39,10 +40,10 @@ template <typename T>
 class vector
 {
   private:
-	T         *m_data;             // Pointer to elements - contiguous memory for RHI compatibility
-	size_t     m_size;             // Number of active elements
-	size_t     m_capacity;         // Allocated capacity
-	Allocator *m_allocator;        // Non-owning pointer to custom allocator
+	T                         *mData;                  // Pointer to elements - contiguous memory for RHI compatibility
+	size_t                     mSize;                  // Number of active elements
+	size_t                     mCapacity;              // Allocated capacity
+	std::pmr::memory_resource *mMemoryResource;        // Non-owning pointer to memory resource
 
 	// Helper methods
 	// Trivial destructor optimization - skip destructor calls for POD types
@@ -51,137 +52,82 @@ class vector
 	{
 		if constexpr (!std::is_trivially_destructible_v<T>)
 		{
-			for (T *it = first; it != last; ++it)
+			for (T *ptr = first; ptr != last; ++ptr)
 			{
-				it->~T();
+				ptr->~T();
 			}
 		}
-		// For trivial types, destructors are no-ops
 	}
 
 	void deallocate_storage()
 	{
-		if (m_data && m_allocator)
+		if (mData && mMemoryResource)
 		{
-			m_allocator->deallocate(m_data, m_capacity * sizeof(T));
+			mMemoryResource->deallocate(mData, mCapacity * sizeof(T), alignof(T));
 		}
 	}
 
-	T *allocate_storage(size_t capacity)
+	void allocate_storage(size_t capacity)
 	{
-		if (capacity == 0 || !m_allocator)
+		if (capacity == 0 || !mMemoryResource)
 		{
-			return nullptr;
-		}
-		void *ptr = m_allocator->allocate(capacity * sizeof(T), alignof(T));
-		return static_cast<T *>(ptr);
-	}
-
-	// Growth strategy: 2.0x factor balances memory usage vs reallocation frequency
-	// Optimized for renderer frame data patterns - minimize reallocations in critical loops
-	void grow_capacity(size_t requested_size)
-	{
-		// Growth strategy: max(2 * capacity, requested_size)
-		// First allocation: start with 8 elements or requested size
-		size_t new_capacity = m_capacity == 0 ? 8 : m_capacity * 2;
-		new_capacity        = std::max(new_capacity, requested_size);
-
-		// Allocate new storage
-		T *new_data = allocate_storage(new_capacity);
-		if (!new_data)
-		{
-			// Allocation failed - could throw or handle gracefully
-			// For now, we'll leave the vector unchanged
 			return;
 		}
 
-		// Transfer existing elements to new storage
-		if (m_data && m_size > 0)
+		void *ptr = mMemoryResource->allocate(capacity * sizeof(T), alignof(T));
+		if (!ptr)
 		{
-			transfer_elements(m_data, new_data, m_size);
-
-			// Destroy old elements
-			destroy_elements(m_data, m_data + m_size);
+			throw std::bad_alloc();
 		}
 
-		// Deallocate old storage
-		deallocate_storage();
-
-		// Update to new storage
-		m_data     = new_data;
-		m_capacity = new_capacity;
-	}
-
-	// Optimized element transfer with trivial type specialization
-	// Performance critical: uses memcpy for POD types, move semantics for complex types
-	// Exception safety: uses std::move_if_noexcept pattern for strong guarantee
-	void transfer_elements(T *source, T *dest, size_t count)
-	{
-		if constexpr (std::is_trivially_copyable_v<T>)
-		{
-			// For trivial types, use memcpy for maximum performance
-			if (count > 0)
-			{
-				std::memcpy(dest, source, count * sizeof(T));
-			}
-		}
-		else
-		{
-			// For non-trivial types, use move/copy construction
-			for (size_t i = 0; i < count; ++i)
-			{
-				if constexpr (std::is_move_constructible_v<T> && std::is_nothrow_move_constructible_v<T>)
-				{
-					new (dest + i) T(std::move(source[i]));
-				}
-				else
-				{
-					new (dest + i) T(source[i]);
-				}
-			}
-		}
+		mData     = static_cast<T *>(ptr);
+		mCapacity = capacity;
 	}
 
   public:
 	// Rule of Five implementation for efficient renderer data flow
 	// Exception safety: noexcept move operations, strong guarantee for copy operations
 
-	// Default constructor - uses heap allocator if none specified
-	explicit vector(Allocator *alloc = nullptr) :
-	    m_data(nullptr), m_size(0), m_capacity(0), m_allocator(alloc ? alloc : &get_heap_allocator())
+	// Default constructor - uses upstream allocator if none specified
+	explicit vector(std::pmr::memory_resource *memres = nullptr) :
+	    mData(nullptr), mSize(0), mCapacity(0), mMemoryResource(memres ? memres : pmr::GetUpstreamAllocator())
 	{
 	}
 
 	// Copy constructor
 	vector(const vector &other) :
-	    m_data(nullptr), m_size(0), m_capacity(0), m_allocator(other.m_allocator)
+	    mData(nullptr), mSize(0), mCapacity(0), mMemoryResource(other.mMemoryResource)
 	{
-		if (other.m_size > 0)
+		if (other.mSize > 0)
 		{
-			m_data = allocate_storage(other.m_size);
-			if (m_data)
+			allocate_storage(other.mSize);
+			if constexpr (std::is_trivially_copyable_v<T>)
 			{
-				m_capacity = other.m_size;
-				// Construct elements using copy constructor
-				for (size_t i = 0; i < other.m_size; ++i)
-				{
-					new (m_data + i) T(other.m_data[i]);
-				}
-				m_size = other.m_size;
+				std::memcpy(mData, other.mData, other.mSize * sizeof(T));
 			}
+			else
+			{
+				std::uninitialized_copy_n(other.mData, other.mSize, mData);
+			}
+			mSize = other.mSize;
 		}
 	}
 
-	// Move constructor - O(1) ownership transfer, critical for renderer performance
-	// noexcept guarantee enables efficient returns from render passes
-	vector(vector &&other) noexcept
-	    :
-	    m_data(other.m_data), m_size(other.m_size), m_capacity(other.m_capacity), m_allocator(other.m_allocator)
+	// Move constructor - noexcept for performance
+	vector(vector &&other) noexcept :
+	    mData(other.mData), mSize(other.mSize), mCapacity(other.mCapacity), mMemoryResource(other.mMemoryResource)
 	{
-		// Reset other to empty state
-		other.m_data     = nullptr;
-		other.m_size     = 0;
-		other.m_capacity = 0;
+		other.mData           = nullptr;
+		other.mSize           = 0;
+		other.mCapacity       = 0;
+		other.mMemoryResource = pmr::GetUpstreamAllocator();
+	}
+
+	// Destructor
+	~vector()
+	{
+		destroy_elements(mData, mData + mSize);
+		deallocate_storage();
 	}
 
 	// Copy assignment
@@ -189,317 +135,361 @@ class vector
 	{
 		if (this != &other)
 		{
-			// Clean up existing elements
-			destroy_elements(m_data, m_data + m_size);
-			deallocate_storage();
-
-			// Copy from other
-			m_allocator = other.m_allocator;
-			m_size      = 0;
-			m_capacity  = 0;
-			m_data      = nullptr;
-
-			if (other.m_size > 0)
-			{
-				m_data = allocate_storage(other.m_size);
-				if (m_data)
-				{
-					m_capacity = other.m_size;
-					// Construct elements using copy constructor
-					for (size_t i = 0; i < other.m_size; ++i)
-					{
-						new (m_data + i) T(other.m_data[i]);
-					}
-					m_size = other.m_size;
-				}
-			}
+			// Strong exception safety
+			vector temp(other);
+			*this = std::move(temp);
 		}
 		return *this;
 	}
 
-	// Move assignment
+	// Move assignment - noexcept for performance
 	vector &operator=(vector &&other) noexcept
 	{
 		if (this != &other)
 		{
-			// Clean up existing elements
-			destroy_elements(m_data, m_data + m_size);
+			// Clean up current resources
+			destroy_elements(mData, mData + mSize);
 			deallocate_storage();
 
-			// Move from other
-			m_data      = other.m_data;
-			m_size      = other.m_size;
-			m_capacity  = other.m_capacity;
-			m_allocator = other.m_allocator;
+			// Move data
+			mData           = other.mData;
+			mSize           = other.mSize;
+			mCapacity       = other.mCapacity;
+			mMemoryResource = other.mMemoryResource;
 
-			// Reset other to empty state
-			other.m_data     = nullptr;
-			other.m_size     = 0;
-			other.m_capacity = 0;
+			// Leave other in valid state
+			other.mData           = nullptr;
+			other.mSize           = 0;
+			other.mCapacity       = 0;
+			other.mMemoryResource = pmr::GetUpstreamAllocator();
 		}
 		return *this;
 	}
 
-	// Destructor
-	~vector()
-	{
-		destroy_elements(m_data, m_data + m_size);
-		deallocate_storage();
-	}
-
-	// Basic accessors - zero overhead compared to raw pointer access
-	// data() method critical for RHI interoperability and GPU buffer updates
-	T *data()
-	{
-		return m_data;
-	}
-	const T *data() const
-	{
-		return m_data;
-	}
-	size_t size() const
-	{
-		return m_size;
-	}
-	size_t capacity() const
-	{
-		return m_capacity;
-	}
-	bool empty() const
-	{
-		return m_size == 0;
-	}
-
-	// Element access
-	T &operator[](size_t index)
-	{
-		assert(index < m_size && "Index out of bounds");
-		return m_data[index];
-	}
-
-	const T &operator[](size_t index) const
-	{
-		assert(index < m_size && "Index out of bounds");
-		return m_data[index];
-	}
-
-	T &front()
-	{
-		assert(m_size > 0 && "Vector is empty");
-		return m_data[0];
-	}
-
-	const T &front() const
-	{
-		assert(m_size > 0 && "Vector is empty");
-		return m_data[0];
-	}
-
-	T &back()
-	{
-		assert(m_size > 0 && "Vector is empty");
-		return m_data[m_size - 1];
-	}
-
-	const T &back() const
-	{
-		assert(m_size > 0 && "Vector is empty");
-		return m_data[m_size - 1];
-	}
-
-	// Basic iterators - T* pointers for STL compatibility and range-based for loops
-	// Compatible with STL algorithms while maintaining zero overhead
-	T *begin()
-	{
-		return m_data;
-	}
-	const T *begin() const
-	{
-		return m_data;
-	}
-	T *end()
-	{
-		return m_data + m_size;
-	}
-	const T *end() const
-	{
-		return m_data + m_size;
-	}
-
-	// Capacity management - most important performance function for renderer
-	// Pre-allocation prevents reallocations in time-critical render loops
+	// Capacity management
 	void reserve(size_t new_capacity)
 	{
-		if (new_capacity <= m_capacity)
+		if (new_capacity <= mCapacity)
 		{
-			return;        // No need to grow
+			return;
 		}
+
+		T     *new_data     = nullptr;
+		size_t old_capacity = mCapacity;
 
 		// Allocate new storage
-		T *new_data = allocate_storage(new_capacity);
-		if (!new_data)
+		void *ptr = mMemoryResource->allocate(new_capacity * sizeof(T), alignof(T));
+		if (!ptr)
 		{
-			return;        // Allocation failed
+			throw std::bad_alloc();
+		}
+		new_data = static_cast<T *>(ptr);
+
+		// Move/copy existing elements
+		if (mData && mSize > 0)
+		{
+			if constexpr (std::is_nothrow_move_constructible_v<T>)
+			{
+				std::uninitialized_move_n(mData, mSize, new_data);
+			}
+			else if constexpr (std::is_copy_constructible_v<T>)
+			{
+				try
+				{
+					std::uninitialized_copy_n(mData, mSize, new_data);
+				}
+				catch (...)
+				{
+					mMemoryResource->deallocate(new_data, new_capacity * sizeof(T), alignof(T));
+					throw;
+				}
+			}
+			else
+			{
+				static_assert(std::is_move_constructible_v<T> || std::is_copy_constructible_v<T>,
+				              "T must be move or copy constructible");
+			}
+
+			// Destroy old elements and deallocate
+			destroy_elements(mData, mData + mSize);
+			mMemoryResource->deallocate(mData, old_capacity * sizeof(T), alignof(T));
 		}
 
-		// Transfer existing elements to new storage
-		if (m_data && m_size > 0)
-		{
-			transfer_elements(m_data, new_data, m_size);
-
-			// Destroy old elements
-			destroy_elements(m_data, m_data + m_size);
-		}
-
-		// Deallocate old storage
-		deallocate_storage();
-
-		// Update to new storage
-		m_data     = new_data;
-		m_capacity = new_capacity;
+		mData     = new_data;
+		mCapacity = new_capacity;
 	}
 
-	// Element modifiers
-	void push_back(const T &value)
-	{
-		if (m_size >= m_capacity)
-		{
-			grow_capacity(m_size + 1);
-		}
-
-		if (m_size < m_capacity)        // Check again in case growth failed
-		{
-			new (m_data + m_size) T(value);
-			++m_size;
-		}
-	}
-
-	void push_back(T &&value)
-	{
-		if (m_size >= m_capacity)
-		{
-			grow_capacity(m_size + 1);
-		}
-
-		if (m_size < m_capacity)        // Check again in case growth failed
-		{
-			new (m_data + m_size) T(std::move(value));
-			++m_size;
-		}
-	}
-
-	// Clear - destroys elements but keeps capacity for frame reuse pattern
-	// Critical for renderer: avoid deallocation between frames
-	void clear()
-	{
-		destroy_elements(m_data, m_data + m_size);
-		m_size = 0;
-		// Keep capacity for reuse
-	}
-
-	// Advanced capacity operations
-	// resize() essential for GPU buffer matching - correct element construction/destruction
 	void resize(size_t new_size)
 	{
-		if (new_size == m_size)
+		if (new_size < mSize)
 		{
-			return;        // No change needed
+			// Shrink: destroy excess elements
+			destroy_elements(mData + new_size, mData + mSize);
 		}
-
-		if (new_size < m_size)
+		else if (new_size > mSize)
 		{
-			// Shrinking: destroy excess elements
-			destroy_elements(m_data + new_size, m_data + m_size);
-			m_size = new_size;
-		}
-		else
-		{
-			// Growing: ensure capacity and construct new elements
-			if (new_size > m_capacity)
+			// Grow: ensure capacity and default-construct new elements
+			if (new_size > mCapacity)
 			{
-				grow_capacity(new_size);
+				reserve(std::max(new_size, mCapacity * 2));
 			}
 
-			if (new_size <= m_capacity)        // Check capacity is sufficient
+			// Default-construct new elements
+			if constexpr (std::is_default_constructible_v<T>)
 			{
-				// Default-construct new elements
-				for (size_t i = m_size; i < new_size; ++i)
-				{
-					new (m_data + i) T();
-				}
-				m_size = new_size;
+				std::uninitialized_value_construct_n(mData + mSize, new_size - mSize);
+			}
+			else
+			{
+				static_assert(std::is_default_constructible_v<T>, "T must be default constructible for resize");
 			}
 		}
+
+		mSize = new_size;
 	}
 
 	void resize(size_t new_size, const T &value)
 	{
-		if (new_size == m_size)
+		if (new_size < mSize)
 		{
-			return;        // No change needed
+			// Shrink: destroy excess elements
+			destroy_elements(mData + new_size, mData + mSize);
 		}
-
-		if (new_size < m_size)
+		else if (new_size > mSize)
 		{
-			// Shrinking: destroy excess elements
-			destroy_elements(m_data + new_size, m_data + m_size);
-			m_size = new_size;
-		}
-		else
-		{
-			// Growing: ensure capacity and construct new elements with value
-			if (new_size > m_capacity)
+			// Grow: ensure capacity and construct new elements with value
+			if (new_size > mCapacity)
 			{
-				grow_capacity(new_size);
+				reserve(std::max(new_size, mCapacity * 2));
 			}
 
-			if (new_size <= m_capacity)        // Check capacity is sufficient
+			// Construct new elements with provided value
+			std::uninitialized_fill_n(mData + mSize, new_size - mSize, value);
+		}
+
+		mSize = new_size;
+	}
+
+	// Element access
+	T &operator[](size_t index) noexcept
+	{
+		assert(index < mSize);
+		return mData[index];
+	}
+
+	const T &operator[](size_t index) const noexcept
+	{
+		assert(index < mSize);
+		return mData[index];
+	}
+
+	T &at(size_t index)
+	{
+		if (index >= mSize)
+		{
+			throw std::out_of_range("vector::at: index out of range");
+		}
+		return mData[index];
+	}
+
+	const T &at(size_t index) const
+	{
+		if (index >= mSize)
+		{
+			throw std::out_of_range("vector::at: index out of range");
+		}
+		return mData[index];
+	}
+
+	T &front() noexcept
+	{
+		assert(mSize > 0);
+		return mData[0];
+	}
+
+	const T &front() const noexcept
+	{
+		assert(mSize > 0);
+		return mData[0];
+	}
+
+	T &back() noexcept
+	{
+		assert(mSize > 0);
+		return mData[mSize - 1];
+	}
+
+	const T &back() const noexcept
+	{
+		assert(mSize > 0);
+		return mData[mSize - 1];
+	}
+
+	T *data() noexcept
+	{
+		return mData;
+	}
+
+	const T *data() const noexcept
+	{
+		return mData;
+	}
+
+	// Iterators
+	T *begin() noexcept
+	{
+		return mData;
+	}
+
+	const T *begin() const noexcept
+	{
+		return mData;
+	}
+
+	const T *cbegin() const noexcept
+	{
+		return mData;
+	}
+
+	T *end() noexcept
+	{
+		return mData + mSize;
+	}
+
+	const T *end() const noexcept
+	{
+		return mData + mSize;
+	}
+
+	const T *cend() const noexcept
+	{
+		return mData + mSize;
+	}
+
+	// Capacity queries
+	size_t size() const noexcept
+	{
+		return mSize;
+	}
+
+	size_t capacity() const noexcept
+	{
+		return mCapacity;
+	}
+
+	bool empty() const noexcept
+	{
+		return mSize == 0;
+	}
+
+	// Modifiers
+	void push_back(const T &value)
+	{
+		if (mSize >= mCapacity)
+		{
+			size_t new_capacity = (mCapacity == 0) ? 8 : mCapacity * 2;
+			reserve(new_capacity);
+		}
+
+		new (mData + mSize) T(value);
+		++mSize;
+	}
+
+	void push_back(T &&value)
+	{
+		if (mSize >= mCapacity)
+		{
+			size_t new_capacity = (mCapacity == 0) ? 8 : mCapacity * 2;
+			reserve(new_capacity);
+		}
+
+		new (mData + mSize) T(std::move(value));
+		++mSize;
+	}
+
+	template <typename... Args>
+	T &emplace_back(Args &&...args)
+	{
+		if (mSize >= mCapacity)
+		{
+			size_t new_capacity = (mCapacity == 0) ? 8 : mCapacity * 2;
+			reserve(new_capacity);
+		}
+
+		T *new_element = new (mData + mSize) T(std::forward<Args>(args)...);
+		++mSize;
+		return *new_element;
+	}
+
+	void pop_back() noexcept
+	{
+		assert(mSize > 0);
+		--mSize;
+		if constexpr (!std::is_trivially_destructible_v<T>)
+		{
+			mData[mSize].~T();
+		}
+	}
+
+	void clear() noexcept
+	{
+		destroy_elements(mData, mData + mSize);
+		mSize = 0;
+	}
+
+	void shrink_to_fit()
+	{
+		if (mSize < mCapacity)
+		{
+			if (mSize == 0)
 			{
-				// Copy-construct new elements with provided value
-				for (size_t i = m_size; i < new_size; ++i)
+				deallocate_storage();
+				mData     = nullptr;
+				mCapacity = 0;
+			}
+			else
+			{
+				// Allocate exactly what we need
+				void *ptr = mMemoryResource->allocate(mSize * sizeof(T), alignof(T));
+				if (!ptr)
 				{
-					new (m_data + i) T(value);
+					return;        // Shrinking is optional, continue with old allocation
 				}
-				m_size = new_size;
+
+				T *new_data = static_cast<T *>(ptr);
+
+				// Move elements to new storage
+				if constexpr (std::is_nothrow_move_constructible_v<T>)
+				{
+					std::uninitialized_move_n(mData, mSize, new_data);
+				}
+				else
+				{
+					try
+					{
+						std::uninitialized_copy_n(mData, mSize, new_data);
+					}
+					catch (...)
+					{
+						mMemoryResource->deallocate(new_data, mSize * sizeof(T), alignof(T));
+						return;        // Keep old allocation on failure
+					}
+				}
+
+				// Clean up old storage
+				destroy_elements(mData, mData + mSize);
+				deallocate_storage();
+
+				mData     = new_data;
+				mCapacity = mSize;
 			}
 		}
 	}
 
-	// shrink_to_fit() critical for mobile memory management
-	// Release unused capacity after large temporary operations to reduce memory pressure
-	void shrink_to_fit()
+	// Memory resource access
+	std::pmr::memory_resource *get_memory_resource() const noexcept
 	{
-		if (m_size == m_capacity || m_capacity == 0)
-		{
-			return;        // Already optimal size or empty
-		}
-
-		if (m_size == 0)
-		{
-			// If empty, deallocate everything
-			deallocate_storage();
-			m_data     = nullptr;
-			m_capacity = 0;
-			return;
-		}
-
-		// Allocate storage for exactly m_size elements
-		T *new_data = allocate_storage(m_size);
-		if (!new_data)
-		{
-			return;        // Allocation failed, keep current storage
-		}
-
-		// Transfer elements to new storage
-		transfer_elements(m_data, new_data, m_size);
-
-		// Destroy old elements and deallocate
-		destroy_elements(m_data, m_data + m_size);
-		deallocate_storage();
-
-		// Update to new storage
-		m_data     = new_data;
-		m_capacity = m_size;
+		return mMemoryResource;
 	}
 };
 

@@ -35,8 +35,8 @@ struct SplatSoA
 	uint32_t shDegree         = 0;
 	uint32_t shCoeffsPerSplat = 0;
 
-	explicit SplatSoA(msplat::container::Allocator *allocator = nullptr) :
-	    posX(allocator), posY(allocator), posZ(allocator), scaleX(allocator), scaleY(allocator), scaleZ(allocator), rotX(allocator), rotY(allocator), rotZ(allocator), rotW(allocator), opacity(allocator), fDc0(allocator), fDc1(allocator), fDc2(allocator), fRest(allocator)
+	explicit SplatSoA(std::pmr::memory_resource *memres = nullptr) :
+	    posX(memres), posY(memres), posZ(memres), scaleX(memres), scaleY(memres), scaleZ(memres), rotX(memres), rotY(memres), rotZ(memres), rotW(memres), opacity(memres), fDc0(memres), fDc1(memres), fDc2(memres), fRest(memres)
 	{
 	}
 

@@ -1,406 +1,134 @@
 #pragma once
 
-#include <algorithm>
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
-#include <limits>
+#include <array>
+#include <atomic>
 #include <memory>
-#include <type_traits>
-#include <typeinfo>
-#include <unordered_map>
-#include <vector>
+#include <memory_resource>
+#include <mimalloc.h>
 
-#include <msplat/core/log.h>
-#include <msplat/core/platform.h>
-
-namespace msplat::container
+namespace msplat::container::pmr
 {
 
-// Abstract base class for all allocators
-class Allocator
+/**
+ * The root memory source, wrapping mimalloc.
+ * This is the application's interface to the OS heap and serves as the
+ * ultimate fallback for all other allocators.
+ */
+class UpstreamAllocator : public std::pmr::memory_resource
 {
-  public:
-	virtual ~Allocator() = default;
+  protected:
+	void *do_allocate(size_t bytes, size_t alignment) override
+	{
+		return mi_malloc_aligned(bytes, alignment);
+	}
 
-	// Allocate memory with specified size and alignment
-	// Returns nullptr on failure
-	virtual void *allocate(size_t size, size_t alignment = alignof(std::max_align_t)) = 0;
+	void do_deallocate(void *p, size_t bytes, size_t alignment) override
+	{
+		mi_free(p);
+	}
 
-	// Deallocate memory previously allocated by this allocator
-	// ptr may be nullptr (safe to call)
-	// size must match the size used in allocate()
-	virtual void deallocate(void *ptr, size_t size) = 0;
-
-	// Optional: get name for debugging
-	virtual const char *name() const = 0;
+	bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override
+	{
+		// All UpstreamAllocators are considered equal as it's a singleton.
+		return dynamic_cast<const UpstreamAllocator *>(&other) != nullptr;
+	}
 };
 
-// High-performance heap allocator using rpmalloc for general-purpose allocations
-//
-// Project Use Case: The default, general-purpose allocator for the 3D Gaussian Splatting engine.
-// - Long-lived objects in 'msplat::application' and 'msplat::engine' (e.g., Scene, Camera)
-// - Storing PLY asset data after being loaded from the VFS
-// - The fallback allocator for any container without a specified, specialized need
-// - Thread-safe with internal synchronization
-class HeapAllocator : public Allocator
+/**
+ * Singleton accessor for the single upstream allocator instance.
+ */
+inline std::pmr::memory_resource *GetUpstreamAllocator()
 {
-  public:
-	HeapAllocator();
-	~HeapAllocator();
+	static UpstreamAllocator instance;
+	return &instance;
+}
 
-	void       *allocate(size_t size, size_t alignment = alignof(std::max_align_t)) override;
-	void        deallocate(void *ptr, size_t size) override;
-	const char *name() const override
-	{
-		return "HeapAllocator";
-	}
-
-	// Non-copyable and non-movable
-	HeapAllocator(const HeapAllocator &)            = delete;
-	HeapAllocator &operator=(const HeapAllocator &) = delete;
-	HeapAllocator(HeapAllocator &&)                 = delete;
-	HeapAllocator &operator=(HeapAllocator &&)      = delete;
-};
-
-// Global heap allocator instance
-extern HeapAllocator &get_heap_allocator();
-
-// Linear allocator using bump pointer allocation for high-speed transient data
-// - Very fast O(1) allocation via pointer increment
-// - No individual deallocation (deallocate() is no-op)
-// - Use reset() to reclaim all memory at once
-// - NOT thread-safe
-//
-// Project Use Case: High-speed, transient allocations for the main render loop.
-// - A double-buffered instance should be used for per-frame data: one for the CPU to write to while the GPU reads from the other
-// - Storing the output of 'GpuVisibilityPass' (e.g., a list of visible splat cluster IDs)
-// - Temporary buffers for sorting and processing in the 'HybridTransparencyPass'
-// - Any CPU-side data that will be uploaded to the GPU for a single frame's use
-class LinearAllocator : public Allocator
+/**
+ * A multi-buffered, monotonic (bump) allocator for all per-frame transient data.
+ * This directly replaces the old LinearAllocator and is the primary tool for
+ * high-performance, short-lived allocations.
+ *
+ * The number of arenas should be ≥ max GPU in-flight frames that can touch the arena.
+ *
+ * THREAD SAFETY: This class is NOT thread-safe. BeginFrame() and Resource()
+ * must be called from the same thread (typically the main render thread).
+ * Multiple threads can safely allocate from the same Resource() concurrently,
+ * but BeginFrame() must not be called concurrently with any other operations.
+ */
+template <size_t NumArenas = 3>
+class FrameArenaResource
 {
   private:
-	void  *m_buffer;             // Start of buffer
-	size_t m_size;               // Total buffer size
-	size_t m_offset;             // Current allocation offset
-	bool   m_owns_buffer;        // Whether we own the buffer
+	static_assert(NumArenas >= 2, "Must have at least 2 arenas for double-buffering");
+
+	using Mon = std::pmr::monotonic_buffer_resource;
+
+	// Backing buffers
+	std::array<std::unique_ptr<std::byte[]>, NumArenas> mBuffers;
+
+	// Raw storage for monotonic_buffer_resource objects (not constructed yet)
+	std::array<std::aligned_storage_t<sizeof(Mon), alignof(Mon)>, NumArenas> mArenaStorage;
+
+	static Mon *ArenaAt(void *slot)
+	{
+		return std::launder(reinterpret_cast<Mon *>(slot));
+	}
+
+	uint32_t     mFrameIndex = 0;
+	const size_t mArenaSize;
 
   public:
-	// Constructor with buffer size - allocates own buffer
-	explicit LinearAllocator(size_t buffer_size);
-
-	// Constructor with external buffer - does not own buffer
-	LinearAllocator(void *buffer, size_t buffer_size);
-
-	~LinearAllocator();
-
-	void       *allocate(size_t size, size_t alignment = alignof(std::max_align_t)) override;
-	void        deallocate(void *ptr, size_t size) override;        // No-op
-	const char *name() const override
+	explicit FrameArenaResource(size_t arenaBytes = 64 * 1024 * 1024) :
+	    mArenaSize(arenaBytes)
 	{
-		return "LinearAllocator";
-	}
-
-	// Reset to beginning of buffer
-	void reset();
-
-	// Get current usage statistics
-	size_t bytes_used() const
-	{
-		return m_offset;
-	}
-	size_t bytes_remaining() const
-	{
-		return m_size - m_offset;
-	}
-	size_t total_size() const
-	{
-		return m_size;
-	}
-
-	// Non-copyable and non-movable
-	LinearAllocator(const LinearAllocator &)            = delete;
-	LinearAllocator &operator=(const LinearAllocator &) = delete;
-	LinearAllocator(LinearAllocator &&)                 = delete;
-	LinearAllocator &operator=(LinearAllocator &&)      = delete;
-};
-
-// Stack allocator with LIFO deallocation and markers for scoped allocations
-// - Fast O(1) allocation via pointer increment like LinearAllocator
-// - Supports LIFO deallocation to rewind to previous allocation points
-// - Use markers to save/restore allocation points
-// - NOT thread-safe
-//
-// Project Use Case: Scoped, temporary allocations within complex algorithms.
-// - Ideal for the offline tools that build the splat cluster hierarchies (DAGs). A recursive DAG construction function can push/pop its memory needs using markers
-// - Processing nested data structures where memory has a clear entry/exit scope
-// - Less critical for the real-time loop, which is better served by the LinearAllocator
-class StackAllocator : public Allocator
-{
-  public:
-	using Marker = size_t;        // Type for allocation markers
-
-  private:
-	void  *m_buffer;             // Start of buffer
-	size_t m_size;               // Total buffer size
-	size_t m_offset;             // Current allocation offset
-	bool   m_owns_buffer;        // Whether we own the buffer
-
-  public:
-	// Constructor with buffer size - allocates own buffer
-	explicit StackAllocator(size_t buffer_size);
-
-	// Constructor with external buffer - does not own buffer
-	StackAllocator(void *buffer, size_t buffer_size);
-
-	~StackAllocator();
-
-	void       *allocate(size_t size, size_t alignment = alignof(std::max_align_t)) override;
-	void        deallocate(void *ptr, size_t size) override;        // Validates LIFO order
-	const char *name() const override
-	{
-		return "StackAllocator";
-	}
-
-	// Marker operations for bulk deallocation
-	Marker get_marker() const
-	{
-		return m_offset;
-	}
-	void reset_to_marker(Marker marker);
-
-	// Reset to beginning of buffer
-	void reset()
-	{
-		reset_to_marker(0);
-	}
-
-	// Get current usage statistics
-	size_t bytes_used() const
-	{
-		return m_offset;
-	}
-	size_t bytes_remaining() const
-	{
-		return m_size - m_offset;
-	}
-	size_t total_size() const
-	{
-		return m_size;
-	}
-
-	// Non-copyable and non-movable
-	StackAllocator(const StackAllocator &)            = delete;
-	StackAllocator &operator=(const StackAllocator &) = delete;
-	StackAllocator(StackAllocator &&)                 = delete;
-	StackAllocator &operator=(StackAllocator &&)      = delete;
-};
-
-// Pool allocator for fixed-size allocations with O(1) performance
-// - Very fast O(1) allocation and deallocation
-// - Pre-allocates chunks of fixed size
-// - Maintains free list for O(1) operations
-// - Thread-safe with internal synchronization
-//
-// Project Use Case: Managing the nodes for the Nanite-inspired virtualized geometry pipeline.
-// - An instance of 'PoolAllocator<SplatClusterNode>' would be perfect for the splat DAG
-// - As clusters are streamed in and out of memory at runtime, this provides extremely fast, fragmentation-free allocation and deallocation of the fixed-size node structures
-// - Essential for achieving high performance in the GPU-driven culling and LOD selection system
-template <typename T>
-class PoolAllocator : public Allocator
-{
-  private:
-	struct FreeNode
-	{
-		FreeNode *next;
-	};
-
-	void     *m_buffer;             // Start of buffer
-	size_t    m_chunk_size;         // Size of each chunk (>= sizeof(T))
-	size_t    m_chunk_count;        // Total number of chunks
-	FreeNode *m_free_head;          // Head of free list
-	bool      m_owns_buffer;        // Whether we own the buffer
-	size_t    m_allocated;          // Number of allocated chunks
-
-  public:
-	// Constructor with chunk count - allocates own buffer
-	explicit PoolAllocator(size_t chunk_count);
-
-	// Constructor with external buffer
-	PoolAllocator(void *buffer, size_t buffer_size);
-
-	~PoolAllocator();
-
-	void       *allocate(size_t size, size_t alignment = alignof(std::max_align_t)) override;
-	void        deallocate(void *ptr, size_t size) override;
-	const char *name() const override
-	{
-		return "PoolAllocator";
-	}
-
-	// Pool-specific operations
-	size_t chunk_size() const
-	{
-		return m_chunk_size;
-	}
-	size_t chunk_count() const
-	{
-		return m_chunk_count;
-	}
-	size_t allocated_chunks() const
-	{
-		return m_allocated;
-	}
-	size_t free_chunks() const
-	{
-		return m_chunk_count - m_allocated;
-	}
-
-	// Non-copyable and non-movable
-	PoolAllocator(const PoolAllocator &)            = delete;
-	PoolAllocator &operator=(const PoolAllocator &) = delete;
-	PoolAllocator(PoolAllocator &&)                 = delete;
-	PoolAllocator &operator=(PoolAllocator &&)      = delete;
-
-  private:
-	void initialize_free_list()
-	{
-		// Initialize free list by linking all chunks
-		char *buffer_ptr = static_cast<char *>(m_buffer);
-		m_free_head      = nullptr;
-
-		for (size_t i = 0; i < m_chunk_count; ++i)
+		for (size_t i = 0; i < NumArenas; ++i)
 		{
-			FreeNode *node = reinterpret_cast<FreeNode *>(buffer_ptr + i * m_chunk_size);
-			node->next     = m_free_head;
-			m_free_head    = node;
+			mBuffers[i] = std::make_unique<std::byte[]>(mArenaSize);
+			new (&mArenaStorage[i]) Mon(mBuffers[i].get(), mArenaSize, GetUpstreamAllocator());
 		}
 	}
+
+	~FrameArenaResource()
+	{
+		for (size_t i = 0; i < NumArenas; ++i)
+		{
+			ArenaAt(&mArenaStorage[i])->~Mon();
+		}
+	}
+
+	/// Call this once at the beginning of each new frame.
+	/// MUST be called from the same thread as Resource().
+	/// NOT thread-safe with concurrent calls to Resource().
+	void BeginFrame()
+	{
+		mFrameIndex = (mFrameIndex + 1) % NumArenas;
+		ArenaAt(&mArenaStorage[mFrameIndex])->release();
+	}
+
+	/// Get the memory resource for the current frame's allocations.
+	/// The returned resource is safe for concurrent allocations from multiple threads.
+	/// However, this method itself is NOT thread-safe with BeginFrame().
+	std::pmr::memory_resource *Resource()
+	{
+		return ArenaAt(&mArenaStorage[mFrameIndex]);
+	}
+
+	/// Get the number of arenas configured for this instance
+	constexpr size_t GetNumArenas() const noexcept
+	{
+		return NumArenas;
+	}
+
+	/// Get the size of each arena in bytes
+	constexpr size_t GetArenaSize() const noexcept
+	{
+		return mArenaSize;
+	}
 };
 
-// PoolAllocator template implementation
-template <typename T>
-PoolAllocator<T>::PoolAllocator(size_t chunk_count) :
-    m_buffer(nullptr), m_chunk_size(std::max(sizeof(T), sizeof(FreeNode))), m_chunk_count(chunk_count), m_free_head(nullptr), m_owns_buffer(true), m_allocated(0)
-{
-	if (chunk_count == 0)
-	{
-		throw std::invalid_argument("PoolAllocator chunk count cannot be zero");
-	}
+// Common type aliases for typical use cases
+using FrameArena       = FrameArenaResource<3>;        // Triple-buffered (default 64MB)
+using FrameArenaDouble = FrameArenaResource<2>;        // Double-buffered (default 64MB)
+using FrameArenaQuad   = FrameArenaResource<4>;        // Quad-buffered (default 64MB)
 
-	// Ensure chunk size is properly aligned for the type, but also compatible with general allocator interface
-	// We want chunks to be at least sizeof(T) but properly aligned
-	size_t type_alignment = alignof(T);
-	m_chunk_size          = ((m_chunk_size + type_alignment - 1) / type_alignment) * type_alignment;
-
-	size_t buffer_size = m_chunk_size * m_chunk_count;
-	m_buffer           = ::msplat::core::aligned_malloc(buffer_size, type_alignment);
-	if (!m_buffer)
-	{
-		throw std::bad_alloc();
-	}
-
-	initialize_free_list();
-}
-
-template <typename T>
-PoolAllocator<T>::PoolAllocator(void *buffer, size_t buffer_size) :
-    m_buffer(buffer), m_chunk_size(std::max(sizeof(T), sizeof(FreeNode))), m_chunk_count(0), m_free_head(nullptr), m_owns_buffer(false), m_allocated(0)
-{
-	if (!buffer || buffer_size == 0)
-	{
-		throw std::invalid_argument("PoolAllocator buffer and size must be valid");
-	}
-
-	// Ensure chunk size is properly aligned for the type, but also compatible with general allocator interface
-	// We want chunks to be at least sizeof(T) but properly aligned
-	size_t type_alignment = alignof(T);
-	m_chunk_size          = ((m_chunk_size + type_alignment - 1) / type_alignment) * type_alignment;
-
-	// Calculate how many chunks fit in the buffer
-	m_chunk_count = buffer_size / m_chunk_size;
-	if (m_chunk_count == 0)
-	{
-		throw std::invalid_argument("Buffer too small for even one chunk");
-	}
-
-	initialize_free_list();
-}
-
-template <typename T>
-PoolAllocator<T>::~PoolAllocator()
-{
-	if (m_owns_buffer && m_buffer)
-	{
-		::msplat::core::aligned_free(m_buffer);
-	}
-}
-
-template <typename T>
-void *PoolAllocator<T>::allocate(size_t size, size_t alignment)
-{
-	// Pool allocator only supports allocations up to the chunk size
-	// and alignment up to what we allocated with (max_align_t)
-	if (size > m_chunk_size)
-	{
-		return nullptr;
-	}
-
-	// Since our chunks are aligned to at least alignof(T), we can handle any alignment
-	// that's compatible with our chunk alignment
-	if (alignment > m_chunk_size)
-	{
-		return nullptr;
-	}
-
-	if (!m_free_head)
-	{
-		// No free chunks available
-		return nullptr;
-	}
-
-	// Remove from free list
-	FreeNode *node = m_free_head;
-	m_free_head    = m_free_head->next;
-	++m_allocated;
-
-	return node;
-}
-
-template <typename T>
-void PoolAllocator<T>::deallocate(void *ptr, size_t size)
-{
-	if (!ptr)
-	{
-		return;
-	}
-
-	// Validate that the pointer is within our buffer range
-	char *buffer_start = static_cast<char *>(m_buffer);
-	char *buffer_end   = buffer_start + (m_chunk_count * m_chunk_size);
-	char *ptr_char     = static_cast<char *>(ptr);
-
-	if (ptr_char < buffer_start || ptr_char >= buffer_end)
-	{
-		// Pointer not from this allocator
-		assert(false && "Pointer not from this PoolAllocator");
-		return;
-	}
-
-	// Validate alignment
-	size_t offset = ptr_char - buffer_start;
-	if (offset % m_chunk_size != 0)
-	{
-		// Invalid alignment - not start of a chunk
-		assert(false && "Invalid pointer alignment in PoolAllocator");
-		return;
-	}
-
-	// Add back to free list
-	FreeNode *node = static_cast<FreeNode *>(ptr);
-	node->next     = m_free_head;
-	m_free_head    = node;
-	--m_allocated;
-}
-
-}        // namespace msplat::container
+}        // namespace msplat::container::pmr

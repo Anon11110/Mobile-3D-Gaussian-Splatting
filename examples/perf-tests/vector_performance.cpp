@@ -60,26 +60,26 @@ int vector_performance_main()
 		compare_performance("Push Back (int)", custom_time, std_time);
 	}
 
-	LOG_INFO("\n--- Allocator Integration Tests ---");
+	LOG_INFO("\n--- PMR Allocator Integration Tests ---");
 	{
-		msplat::container::LinearAllocator linear_alloc(1024 * 1024);        // 1MB buffer
+		msplat::container::pmr::FrameArena frameArena;
 
 		Timer timer;
 		timer.start();
 
 		for (int i = 0; i < ITERATIONS; ++i)
 		{
-			linear_alloc.reset();
-			msplat::container::vector<int> vec(&linear_alloc);
+			frameArena.BeginFrame();
+			msplat::container::vector<int> vec(frameArena.Resource());
 
-			for (size_t j = 0; j < TEST_SIZE / 10; ++j)
-			{        // Smaller size for LinearAllocator
+			for (size_t j = 0; j < TEST_SIZE; ++j)
+			{
 				vec.push_back(static_cast<int>(j));
 			}
 		}
 
 		timer.stop();
-		LOG_INFO("LinearAllocator Integration: {:.3f}ms per iteration", timer.elapsedMilliseconds() / ITERATIONS);
+		LOG_INFO("FrameArena Integration: {:.3f}ms per iteration", timer.elapsedMilliseconds() / ITERATIONS);
 	}
 
 #else
