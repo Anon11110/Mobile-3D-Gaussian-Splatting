@@ -13,7 +13,7 @@ using unordered_map = std::unordered_map<K, V>;
 #else
 #	include "hash.h"
 #	include "memory.h"
-#	include "unordered_dense.h"
+#	include "third-party/unordered_dense/unordered_dense.h"
 
 namespace msplat::container
 {

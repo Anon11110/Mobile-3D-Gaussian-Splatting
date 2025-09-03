@@ -3,7 +3,7 @@
 #include <iomanip>
 #include <iostream>
 #include <msplat/core/containers/hash.h>
-#include <msplat/core/containers/unordered_dense.h>
+#include "third-party/unordered_dense/unordered_dense.h"
 #include <msplat/core/log.h>
 #include <msplat/core/timer.h>
 #include <random>
