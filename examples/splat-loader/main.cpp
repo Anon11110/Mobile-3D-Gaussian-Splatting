@@ -1,7 +1,7 @@
-#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <msplat/core/log.h>
+#include <msplat/core/timer.h>
 #include <msplat/engine/splat_loader.h>
 
 void LoadAndDisplaySplatFile(const std::filesystem::path &plyPath)
@@ -14,7 +14,8 @@ void LoadAndDisplaySplatFile(const std::filesystem::path &plyPath)
 		throw std::runtime_error("PLY file does not exist: " + plyPath.string());
 	}
 
-	auto startTime = std::chrono::high_resolution_clock::now();
+	msplat::timer::Timer timer;
+	timer.start();
 
 	msplat::engine::SplatLoader loader;
 	auto                        future = loader.Load(plyPath);
@@ -27,8 +28,7 @@ void LoadAndDisplaySplatFile(const std::filesystem::path &plyPath)
 	std::cout << " done!" << std::endl;
 
 	auto splatData = future.get();
-	auto endTime   = std::chrono::high_resolution_clock::now();
-	auto duration  = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+	timer.stop();
 
 	std::cout << std::endl;
 	std::cout << "Load Results:" << std::endl;
@@ -37,13 +37,13 @@ void LoadAndDisplaySplatFile(const std::filesystem::path &plyPath)
 	std::cout << "Splats loaded: " << splatData->numSplats << std::endl;
 	std::cout << "SH degree: " << splatData->shDegree << std::endl;
 	std::cout << "SH coefficients per splat: " << splatData->shCoeffsPerSplat << std::endl;
-	std::cout << "Load time: " << duration.count() << " ms" << std::endl;
+	std::cout << "Load time: " << static_cast<int>(timer.elapsedMilliseconds()) << " ms" << std::endl;
 
 	size_t totalBytes = splatData->numSplats * sizeof(float) *
 	                    (3 + 3 + 4 + 1 + 3 + splatData->shCoeffsPerSplat);
 	std::cout << "Memory usage: " << totalBytes / (1024.0 * 1024.0) << " MB" << std::endl;
 
-	double pointsPerSecond = (splatData->numSplats / static_cast<double>(duration.count())) * 1000.0;
+	double pointsPerSecond = (splatData->numSplats / timer.elapsedMilliseconds()) * 1000.0;
 	std::cout << "Performance: " << pointsPerSecond << " splats/second" << std::endl;
 
 	if (splatData->numSplats > 0)

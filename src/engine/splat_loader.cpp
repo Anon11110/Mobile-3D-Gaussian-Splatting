@@ -11,7 +11,6 @@
 #include <queue>
 #include <sstream>
 #include <stdexcept>
-#include <stop_token>
 #include <thread>
 
 namespace msplat::engine
@@ -34,25 +33,26 @@ class SplatLoaderException : public std::runtime_error
 class SplatLoader::Impl
 {
   private:
-	std::jthread               workerThread;
+	std::thread                workerThread;
+	std::atomic<bool>          shouldStop{false};
 	std::queue<LoadTask>       taskQueue;
 	std::mutex                 queueMutex;
 	std::condition_variable    queueCV;
 	std::pmr::memory_resource *memoryResource;
 
-	void WorkerLoop(std::stop_token stopToken)
+	void WorkerLoop()
 	{
-		while (!stopToken.stop_requested())
+		while (!shouldStop.load())
 		{
 			LoadTask task;
 
 			{
 				std::unique_lock<std::mutex> lock(queueMutex);
-				queueCV.wait(lock, [this, &stopToken] {
-					return !taskQueue.empty() || stopToken.stop_requested();
+				queueCV.wait(lock, [this] {
+					return !taskQueue.empty() || shouldStop.load();
 				});
 
-				if (stopToken.stop_requested() && taskQueue.empty())
+				if (shouldStop.load() && taskQueue.empty())
 				{
 					break;
 				}
@@ -239,14 +239,18 @@ class SplatLoader::Impl
   public:
 	explicit Impl() :
 	    memoryResource(msplat::container::pmr::GetUpstreamAllocator()),
-	    workerThread([this](std::stop_token st) { WorkerLoop(st); })
+	    workerThread(&Impl::WorkerLoop, this)
 	{
 	}
 
 	~Impl()
 	{
-		workerThread.request_stop();
+		shouldStop.store(true);
 		queueCV.notify_all();
+		if (workerThread.joinable())
+		{
+			workerThread.join();
+		}
 	}
 
 	std::future<std::shared_ptr<SplatSoA>> Load(const std::filesystem::path &path)

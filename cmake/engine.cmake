@@ -7,14 +7,14 @@ set(ENGINE_HEADERS
 
 set(ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/engine/splat_loader.cpp
-    ${CMAKE_SOURCE_DIR}/third_party/miniply/miniply.cpp
+    ${CMAKE_SOURCE_DIR}/third-party/miniply/miniply.cpp
 )
 
 add_library(engine STATIC ${ENGINE_SOURCES} ${ENGINE_HEADERS})
 
 target_include_directories(engine PUBLIC
     ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/third_party/miniply
+    ${CMAKE_SOURCE_DIR}/third-party/miniply
 )
 
 target_link_libraries(engine PUBLIC core)
