@@ -4,6 +4,7 @@
 add_executable(perf-tests 
     main.cpp
     vector_performance.cpp
+    hash_performance.cpp
 )
 
 # Link with core library

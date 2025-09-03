@@ -8,6 +8,7 @@ using namespace msplat::timer;
 
 // Forward declarations of test functions
 int vector_performance_main();
+int hash_performance_main();
 
 namespace
 {
@@ -19,7 +20,8 @@ struct TestSuite
 };
 
 TestSuite test_suites[] = {
-    {"Vector Performance", vector_performance_main}};
+    {"Vector Performance", vector_performance_main},
+    {"Hash Performance", hash_performance_main}};
 
 constexpr size_t num_test_suites = sizeof(test_suites) / sizeof(test_suites[0]);
 

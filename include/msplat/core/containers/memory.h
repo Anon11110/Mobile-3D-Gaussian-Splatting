@@ -45,8 +45,7 @@ inline std::pmr::memory_resource *GetUpstreamAllocator()
 
 /**
  * A multi-buffered, monotonic (bump) allocator for all per-frame transient data.
- * This directly replaces the old LinearAllocator and is the primary tool for
- * high-performance, short-lived allocations.
+ * This is the primary tool for high-performance, short-lived allocations.
  *
  * The number of arenas should be ≥ max GPU in-flight frames that can touch the arena.
  *

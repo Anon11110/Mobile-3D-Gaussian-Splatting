@@ -58,6 +58,7 @@ add_library(core STATIC ${CORE_SOURCES} ${CORE_HEADERS})
 target_include_directories(core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include/msplat
+    ${CMAKE_SOURCE_DIR}  # For third-party includes
     ${CMAKE_SOURCE_DIR}/third-party/glm
     ${CMAKE_SOURCE_DIR}/third-party/spdlog/include
     ${CMAKE_SOURCE_DIR}/third-party/mimalloc/include
