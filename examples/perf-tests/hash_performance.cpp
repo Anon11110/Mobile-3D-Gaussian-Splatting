@@ -128,10 +128,9 @@ std::vector<Point> generate_random_points(size_t count)
 
 // Benchmark functions
 template <typename Map, typename Key, typename Value>
-double benchmark_insertion(const std::vector<Key> &keys, const std::vector<Value> &values)
+double benchmark_insertion(const std::vector<Key> &keys, const std::vector<Value> &values, Map map = Map{})
 {
 	Timer timer;
-	Map   map;
 
 	timer.start();
 	for (size_t i = 0; i < keys.size(); ++i)
@@ -215,12 +214,15 @@ void run_comparison_benchmark(const std::string        &test_name,
 	using StdMap    = std::unordered_map<Key, Value>;
 
 	// Insertion benchmarks
-	double custom_insert_time = benchmark_insertion<CustomMap>(keys, values);
-	double std_insert_time    = benchmark_insertion<StdMap>(keys, values);
+	// For custom map, use factory function to ensure proper allocator initialization
+	double custom_insert_time = benchmark_insertion<CustomMap>(keys, values,
+	                                                           msplat::container::make_unordered_map_default<Key, Value>());
+	double std_insert_time    = benchmark_insertion<StdMap>(keys, values, StdMap{});
 	perf::log_comparison("Insertion", custom_insert_time, std_insert_time);
 
 	// Create maps for other benchmarks
-	CustomMap custom_map;
+	// Use factory function for custom map to ensure proper allocator initialization
+	CustomMap custom_map = msplat::container::make_unordered_map_default<Key, Value>();
 	StdMap    std_map;
 	for (size_t i = 0; i < keys.size(); ++i)
 	{

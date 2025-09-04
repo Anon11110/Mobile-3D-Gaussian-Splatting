@@ -36,4 +36,4 @@ endif()
 
 # Use the improved shader compilation system
 include(${CMAKE_SOURCE_DIR}/cmake/compileshaders.cmake)
-add_shader_directory(triangle ${CMAKE_SOURCE_DIR}/shaders)
+add_shader_directory(triangle ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
