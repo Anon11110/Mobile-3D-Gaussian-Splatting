@@ -1,51 +1,15 @@
 #!/usr/bin/env python3
 """
 CMake core utilities for the build system.
-Core CMake-specific functionality and utilities.
 
-Module Dependency Diagram:
-=========================
+This module provides CMake-specific functionality including:
+- Project configuration with CMake
+- Build target discovery and execution
+- Output filtering and progress indication
+- Cross-platform build type detection
+- Executable running with proper working directories
 
-                           configure.py
-                          (Main Entry Point)
-                                 |
-                    ┌────────────┼────────────┐
-                    │            │            │
-                    ▼            ▼            ▼
-              validation.py  cmake_core.py  orchestrator.py
-             (Rules & Checks)  (This File)   (Build Control)
-                    │            │            │
-                    │       ┌────┼────┐       │
-                    │       │    │    │       │
-                    ▼       ▼    ▼    ▼       ▼
-               types.py ◄─────────┼─────► output_strategies.py
-            (Core Types)          │      (Output Filtering)
-                    │             │            │
-                    │             │            │
-                    ▼             ▼            ▼
-              terminal/term.py  constants.py   │
-             (UI Formatting)   (Build Config)  │
-                    ▲                          │
-                    └──────────────────────────┘
-
-Dependency Flow:
-- constants.py & terminal/term.py: Base modules (no dependencies)
-- types.py: Depends on terminal/term.py
-- output_strategies.py: Depends on types.py, constants.py
-- validation.py: Depends on types.py, constants.py
-- orchestrator.py: Depends on types.py, constants.py, output_strategies.py
-- cmake_core.py: Depends on all above modules
-- configure.py: Orchestrates all modules
-
-Module Purposes:
-- constants.py: Build constants, messages, patterns
-- types.py: Error classes, Result<T> type, enums
-- terminal/term.py: Terminal formatting and colors
-- output_strategies.py: Output filtering strategies
-- validation.py: Validation rules framework
-- orchestrator.py: Build process orchestration
-- cmake_core.py: CMake operations and utilities
-- configure.py: Command-line interface and coordination
+For complete module architecture and dependencies, see MODULE_ARCHITECTURE.md
 """
 
 import os
@@ -59,6 +23,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Union
 
 from ..terminal import term
+from ..terminal.progress import create_progress
 from .constants import BuildConstants, Messages
 from .types import (
     Result,
@@ -223,16 +188,21 @@ def run_cmake(config, source_dir: Path, build_dir: Path, verbose: bool = True) -
                 cmake_cmd, cwd=build_dir, env=env, check=True, text=True
             )
         else:
-            # Capture output, show only on error
-            term.info("Configuring project...")
-            result = subprocess.run(
-                cmake_cmd,
-                cwd=build_dir,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            # Capture output with progress indicator
+            progress = create_progress("Configuring project", enabled=True)
+            progress.start()
+            
+            try:
+                result = subprocess.run(
+                    cmake_cmd,
+                    cwd=build_dir,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            finally:
+                progress.stop()
 
             if result.returncode != 0:
                 term.error("CMake configuration failed!")
@@ -274,9 +244,12 @@ def auto_configure(
     verbose: bool = True,
 ) -> bool:
     """Automatically configure the project with sensible defaults."""
-    from platform_config import (
-        get_platform_config,
-    )  # Import here to avoid circular imports
+    # Import here to avoid circular imports
+    import sys
+    from pathlib import Path
+    # Add parent directory to path to import platforms module
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    from platforms import get_platform_config
 
     term.section("Auto-configuring project")
     term.info(f"Project not configured, running automatic configuration...")

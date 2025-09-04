@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from ..terminal import term
+from ..terminal.progress import create_progress
 from .constants import BuildConstants, Messages
 from .types import GeneratorInfo, Result, BuildError
 from .output_strategies import OutputManager, OutputStrategyFactory
@@ -239,14 +240,21 @@ class BuildOrchestrator:
                 self._display_target_success(target, build_time)
                 return BuildResult.success_result(target, build_time)
             else:
-                # Capture output for filtering
-                result = subprocess.run(
-                    cmd,
-                    cwd=self.config.build_dir,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+                # Capture output with progress indicator
+                progress = create_progress(f"Building {target}", enabled=True)
+                progress.start()
+                
+                try:
+                    result = subprocess.run(
+                        cmd,
+                        cwd=self.config.build_dir,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                finally:
+                    progress.stop()
+                    
                 build_time = time.time() - start_time
 
                 if result.returncode == 0:
@@ -329,8 +337,7 @@ class BuildOrchestrator:
         """Display target build start message."""
         if self.config.verbose:
             term.info(f"Building target: {target}")
-        else:
-            term.info(Messages.BUILDING_TARGET.format(target=target))
+        # In non-verbose mode, the progress indicator handles the display
 
     def _display_command(self, cmd: List[str]) -> None:
         """Display command being executed."""

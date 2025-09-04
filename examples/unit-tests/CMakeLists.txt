@@ -9,6 +9,7 @@ add_executable(unit-tests
     test_platform.cpp
     test_pmr_allocators.cpp
     test_custom_vector.cpp
+    test_hash.cpp
 )
 
 # Link with core library

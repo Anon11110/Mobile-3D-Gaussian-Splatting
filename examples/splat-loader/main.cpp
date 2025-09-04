@@ -1,17 +1,17 @@
 #include <filesystem>
-#include <iostream>
 #include <msplat/core/log.h>
 #include <msplat/core/timer.h>
 #include <msplat/engine/splat_loader.h>
 
 void LoadAndDisplaySplatFile(const std::filesystem::path &plyPath)
 {
-	std::cout << "Loading PLY file: " << plyPath << std::endl;
-	std::cout << "===========================================" << std::endl;
+	LOG_INFO("Loading PLY file: {}", plyPath.string());
+	LOG_INFO("===========================================");
 
 	if (!std::filesystem::exists(plyPath))
 	{
-		throw std::runtime_error("PLY file does not exist: " + plyPath.string());
+		auto absolutePath = std::filesystem::absolute(plyPath);
+		throw std::runtime_error("PLY file does not exist: " + absolutePath.string());
 	}
 
 	msplat::timer::Timer timer;
@@ -20,57 +20,52 @@ void LoadAndDisplaySplatFile(const std::filesystem::path &plyPath)
 	msplat::engine::SplatLoader loader;
 	auto                        future = loader.Load(plyPath);
 
-	std::cout << "Loading in progress";
+	LOG_INFO("Loading file in progress...");
+	LOG_INFO("");
 	while (future.wait_for(std::chrono::milliseconds(100)) != std::future_status::ready)
 	{
-		std::cout << "." << std::flush;
+		LOG_PROGRESS("");
 	}
-	std::cout << " done!" << std::endl;
+	LOG_INFO("");
 
 	auto splatData = future.get();
 	timer.stop();
 
-	std::cout << std::endl;
-	std::cout << "Load Results:" << std::endl;
-	std::cout << "-------------" << std::endl;
-	std::cout << "File: " << plyPath.filename() << std::endl;
-	std::cout << "Splats loaded: " << splatData->numSplats << std::endl;
-	std::cout << "SH degree: " << splatData->shDegree << std::endl;
-	std::cout << "SH coefficients per splat: " << splatData->shCoeffsPerSplat << std::endl;
-	std::cout << "Load time: " << static_cast<int>(timer.elapsedMilliseconds()) << " ms" << std::endl;
+	LOG_INFO("Load Results:");
+	LOG_INFO("-------------");
+	LOG_INFO("File: {}", plyPath.filename().string());
+	LOG_INFO("Splats loaded: {}", splatData->numSplats);
+	LOG_INFO("SH degree: {}", splatData->shDegree);
+	LOG_INFO("SH coefficients per splat: {}", splatData->shCoeffsPerSplat);
+	LOG_INFO("Load time: {} ms", static_cast<int>(timer.elapsedMilliseconds()));
 
 	size_t totalBytes = splatData->numSplats * sizeof(float) *
 	                    (3 + 3 + 4 + 1 + 3 + splatData->shCoeffsPerSplat);
-	std::cout << "Memory usage: " << totalBytes / (1024.0 * 1024.0) << " MB" << std::endl;
+	LOG_INFO("Memory usage: {:.2f} MB", totalBytes / (1024.0 * 1024.0));
 
 	double pointsPerSecond = (splatData->numSplats / timer.elapsedMilliseconds()) * 1000.0;
-	std::cout << "Performance: " << pointsPerSecond << " splats/second" << std::endl;
+	LOG_INFO("Performance: {:.0f} splats/second", pointsPerSecond);
 
 	if (splatData->numSplats > 0)
 	{
-		std::cout << std::endl;
-		std::cout << "Sample Data (first 5 splats):" << std::endl;
-		std::cout << "------------------------------" << std::endl;
+		LOG_INFO("");
+		LOG_INFO("Sample Data (first 5 splats):");
+		LOG_INFO("------------------------------");
 
 		uint32_t samplesToShow = std::min(5u, splatData->numSplats);
 		for (uint32_t i = 0; i < samplesToShow; ++i)
 		{
-			std::cout << "Splat " << i << ":" << std::endl;
-			std::cout << "  Position: (" << splatData->posX[i] << ", "
-			          << splatData->posY[i] << ", " << splatData->posZ[i] << ")" << std::endl;
-			std::cout << "  Scale: (" << splatData->scaleX[i] << ", "
-			          << splatData->scaleY[i] << ", " << splatData->scaleZ[i] << ")" << std::endl;
-			std::cout << "  Rotation: (" << splatData->rotX[i] << ", "
-			          << splatData->rotY[i] << ", " << splatData->rotZ[i] << ", "
-			          << splatData->rotW[i] << ")" << std::endl;
-			std::cout << "  Opacity: " << splatData->opacity[i] << std::endl;
-			std::cout << "  DC: (" << splatData->fDc0[i] << ", "
-			          << splatData->fDc1[i] << ", " << splatData->fDc2[i] << ")" << std::endl;
-			std::cout << std::endl;
+			LOG_INFO("Splat {}:", i);
+			LOG_INFO("  Position: ({}, {}, {})", splatData->posX[i], splatData->posY[i], splatData->posZ[i]);
+			LOG_INFO("  Scale: ({}, {}, {})", splatData->scaleX[i], splatData->scaleY[i], splatData->scaleZ[i]);
+			LOG_INFO("  Rotation: ({}, {}, {}, {})", splatData->rotX[i], splatData->rotY[i], splatData->rotZ[i], splatData->rotW[i]);
+			LOG_INFO("  Opacity: {}", splatData->opacity[i]);
+			LOG_INFO("  DC: ({}, {}, {})", splatData->fDc0[i], splatData->fDc1[i], splatData->fDc2[i]);
+			LOG_INFO("");
 		}
 
-		std::cout << "Data Range Analysis:" << std::endl;
-		std::cout << "-------------------" << std::endl;
+		LOG_INFO("Data Range Analysis:");
+		LOG_INFO("-------------------");
 
 		float minX = splatData->posX[0], maxX = splatData->posX[0];
 		float minY = splatData->posY[0], maxY = splatData->posY[0];
@@ -86,40 +81,40 @@ void LoadAndDisplaySplatFile(const std::filesystem::path &plyPath)
 			maxZ = std::max(maxZ, splatData->posZ[i]);
 		}
 
-		std::cout << "Position bounds:" << std::endl;
-		std::cout << "  X: [" << minX << ", " << maxX << "] (range: " << (maxX - minX) << ")" << std::endl;
-		std::cout << "  Y: [" << minY << ", " << maxY << "] (range: " << (maxY - minY) << ")" << std::endl;
-		std::cout << "  Z: [" << minZ << ", " << maxZ << "] (range: " << (maxZ - minZ) << ")" << std::endl;
+		LOG_INFO("Position bounds:");
+		LOG_INFO("  X: [{}, {}] (range: {})", minX, maxX, (maxX - minX));
+		LOG_INFO("  Y: [{}, {}] (range: {})", minY, maxY, (maxY - minY));
+		LOG_INFO("  Z: [{}, {}] (range: {})", minZ, maxZ, (maxZ - minZ));
 	}
 }
 
 void TestErrorHandling()
 {
-	std::cout << std::endl;
-	std::cout << "Testing Error Handling:" << std::endl;
-	std::cout << "======================" << std::endl;
+	LOG_INFO("");
+	LOG_INFO("Testing Error Handling:");
+	LOG_INFO("======================");
 
 	msplat::engine::SplatLoader loader;
 
-	std::cout << "Testing non-existent file... ";
+	LOG_INFO("Testing non-existent file... ");
 	try
 	{
 		auto future = loader.Load("non_existent_file.ply");
 		auto result = future.get();
-		std::cout << "[FAIL] Expected exception but got result" << std::endl;
+		LOG_INFO("[FAIL] Expected exception but got result");
 	}
 	catch (const std::exception &e)
 	{
-		std::cout << "[PASS] Caught expected exception: " << e.what() << std::endl;
+		LOG_INFO("[PASS] Caught expected exception: {}", e.what());
 	}
 }
 
 int main(int argc, char *argv[])
 {
-	std::cout << "========================================" << std::endl;
-	std::cout << "    Splat Loader Example" << std::endl;
-	std::cout << "========================================" << std::endl;
-	std::cout << std::endl;
+	LOG_INFO("========================================");
+	LOG_INFO("    Splat Loader Example");
+	LOG_INFO("========================================");
+	LOG_INFO("");
 
 	std::filesystem::path plyPath;
 
@@ -127,13 +122,20 @@ int main(int argc, char *argv[])
 	if (argc >= 2)
 	{
 		plyPath = argv[1];
+		LOG_INFO("Using specified PLY file: {}", plyPath.string());
 	}
 	else
 	{
+		// Default file should be in the same directory as the executable
 		plyPath = "flowers_1.ply";
-		std::cout << "No PLY file specified. Using default: " << plyPath << std::endl;
-		std::cout << "Usage: " << argv[0] << " <path_to_ply_file>" << std::endl;
-		std::cout << std::endl;
+
+		// Convert to absolute path for better error reporting
+		auto absolutePath = std::filesystem::absolute(plyPath);
+
+		LOG_INFO("No PLY file specified. Using default: {}", plyPath.string());
+		LOG_INFO("Looking for file at: {}", absolutePath.string());
+		LOG_INFO("Usage: {} <path_to_ply_file>", argv[0]);
+		LOG_INFO("");
 	}
 
 	try
@@ -141,18 +143,18 @@ int main(int argc, char *argv[])
 		LoadAndDisplaySplatFile(plyPath);
 		TestErrorHandling();
 
-		std::cout << std::endl;
-		std::cout << "========================================" << std::endl;
-		std::cout << "    Example completed successfully!" << std::endl;
-		std::cout << "========================================" << std::endl;
+		LOG_INFO("");
+		LOG_INFO("========================================");
+		LOG_INFO("    Example completed successfully!");
+		LOG_INFO("========================================");
 		return 0;
 	}
 	catch (const std::exception &e)
 	{
-		std::cerr << std::endl;
-		std::cerr << "========================================" << std::endl;
-		std::cerr << "    Error: " << e.what() << std::endl;
-		std::cerr << "========================================" << std::endl;
+		LOG_ERROR("");
+		LOG_ERROR("========================================");
+		LOG_ERROR("    Error: {}", e.what());
+		LOG_ERROR("========================================");
 		return 1;
 	}
 }

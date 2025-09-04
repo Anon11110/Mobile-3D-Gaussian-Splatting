@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -241,6 +242,30 @@ inline void log_critical(const std::string &fmt, Args &&...args) noexcept
 	}
 }
 
+// Progress logging - uses direct stdout for progress indicators without newlines
+template <typename... Args>
+inline void log_progress(const std::string &fmt, Args &&...args) noexcept
+{
+	try
+	{
+		// Use a static mutex for thread safety
+		static std::mutex           progress_mutex;
+		std::lock_guard<std::mutex> lock(progress_mutex);
+
+		if constexpr (sizeof...(args) > 0)
+		{
+			auto formatted = fmt::vformat(fmt, fmt::make_format_args(args...));
+			std::cout << formatted << std::flush;
+		}
+		else
+		{
+			std::cout << fmt << std::flush;
+		}
+	}
+	catch (...)
+	{}
+}
+
 // Level control functions
 inline void log_level_verbose()
 {
@@ -301,6 +326,9 @@ inline spdlog::sink_ptr create_sink_with_callback(std::function<void(const spdlo
 
 #define LOG_FATAL(fmt, ...) \
 	msplat::log::log_critical(fmt, ##__VA_ARGS__)
+
+#define LOG_PROGRESS(fmt, ...) \
+	msplat::log::log_progress(fmt, ##__VA_ARGS__)
 
 // Location-aware variants
 #define LOG_VERBOSE_WITH_LOCATION(fmt, ...) \

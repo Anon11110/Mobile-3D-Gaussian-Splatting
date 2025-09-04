@@ -1,14 +1,14 @@
+#include "perf_framework.h"
 #include <algorithm>
 #include <chrono>
 #include <iomanip>
 #include <iostream>
 #include <msplat/core/containers/hash.h>
-#include "third-party/unordered_dense/unordered_dense.h"
+#include <msplat/core/containers/unordered_map.h>
 #include <msplat/core/log.h>
 #include <msplat/core/timer.h>
 #include <random>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 using namespace msplat::timer;
@@ -27,37 +27,13 @@ struct Point
 	}
 };
 
-// Custom hash for Point when using std::unordered_map
-struct PointHashStd
-{
-	std::size_t operator()(const Point &p) const
-	{
-		// Simple hash combining for std
-		std::size_t h1 = std::hash<float>{}(p.x);
-		std::size_t h2 = std::hash<float>{}(p.y);
-		std::size_t h3 = std::hash<float>{}(p.z);
-		return h1 ^ (h2 << 1) ^ (h3 << 2);
-	}
-};
-
 }        // namespace
 
-// Specialization for std::hash
-namespace std
-{
-template <>
-struct hash<Point>
-{
-	std::size_t operator()(const Point &p) const
-	{
-		return PointHashStd{}(p);
-	}
-};
-}        // namespace std
-
-// Specialization for msplat::container::hash
+// Hash specialization for Point - need both for comparison
+#ifndef MSPLAT_USE_SYSTEM_STL
 namespace msplat::container
 {
+// Custom hash implementation using hash_combine
 template <>
 struct hash<Point>
 {
@@ -69,6 +45,24 @@ struct hash<Point>
 	}
 };
 }        // namespace msplat::container
+#endif
+
+// Specialization for std::hash - always needed for comparison
+namespace std
+{
+template <>
+struct hash<Point>
+{
+	std::size_t operator()(const Point &p) const
+	{
+		// Simple hash combining for std
+		std::size_t h1 = std::hash<float>{}(p.x);
+		std::size_t h2 = std::hash<float>{}(p.y);
+		std::size_t h3 = std::hash<float>{}(p.z);
+		return h1 ^ (h2 << 1) ^ (h3 << 2);
+	}
+};
+}        // namespace std
 
 namespace
 {
@@ -205,83 +199,68 @@ double benchmark_deletion(Map &map, const std::vector<Key> &delete_keys)
 	return timer.elapsedMilliseconds();
 }
 
-// Main benchmark runner for a single map type
-template <typename Map, typename Key, typename Value>
-void run_single_benchmark(const std::string        &map_name,
-                          const std::vector<Key>   &keys,
-                          const std::vector<Value> &values,
-                          const std::vector<Key>   &lookup_keys,
-                          const std::vector<Key>   &delete_keys)
+// Benchmark runner for comparison
+#ifndef MSPLAT_USE_SYSTEM_STL
+template <typename Key, typename Value>
+void run_comparison_benchmark(const std::string        &test_name,
+                              const std::vector<Key>   &keys,
+                              const std::vector<Value> &values,
+                              const std::vector<Key>   &lookup_keys,
+                              const std::vector<Key>   &delete_keys)
 {
-	LOG_INFO("  {} Results:", map_name);
+	perf::log_benchmark_header(test_name + " (" + std::to_string(keys.size()) + " elements)",
+	                           keys.size(), lookup_keys.size(), delete_keys.size());
 
-	// Insertion benchmark
-	double insert_time = benchmark_insertion<Map>(keys, values);
-	LOG_INFO("    Insertion: {:.2f} ms ({:.2f} μs/element)",
-	         insert_time, insert_time * 1000.0 / keys.size());
+	using CustomMap = msplat::container::unordered_map<Key, Value>;
+	using StdMap    = std::unordered_map<Key, Value>;
 
-	// Create map for other benchmarks
-	Map map;
+	// Insertion benchmarks
+	double custom_insert_time = benchmark_insertion<CustomMap>(keys, values);
+	double std_insert_time    = benchmark_insertion<StdMap>(keys, values);
+	perf::log_comparison("Insertion", custom_insert_time, std_insert_time);
+
+	// Create maps for other benchmarks
+	CustomMap custom_map;
+	StdMap    std_map;
 	for (size_t i = 0; i < keys.size(); ++i)
 	{
-		map[keys[i]] = values[i];
+		custom_map[keys[i]] = values[i];
+		std_map[keys[i]]    = values[i];
 	}
 
-	// Lookup benchmark
-	double lookup_time = benchmark_lookup(map, lookup_keys);
-	LOG_INFO("    Lookup: {:.2f} ms ({:.2f} ns/lookup)",
-	         lookup_time, lookup_time * 1000000.0 / lookup_keys.size());
+	// Lookup benchmarks
+	double custom_lookup_time = benchmark_lookup(custom_map, lookup_keys);
+	double std_lookup_time    = benchmark_lookup(std_map, lookup_keys);
+	perf::log_comparison("Lookup", custom_lookup_time, std_lookup_time);
 
-	// Iteration benchmark
-	double iter_time = benchmark_iteration(map);
-	LOG_INFO("    Iteration: {:.2f} ms", iter_time);
+	// Iteration benchmarks
+	double custom_iter_time = benchmark_iteration(custom_map);
+	double std_iter_time    = benchmark_iteration(std_map);
+	perf::log_comparison("Iteration", custom_iter_time, std_iter_time);
 
-	// Deletion benchmark
-	double delete_time = benchmark_deletion(map, delete_keys);
-	LOG_INFO("    Deletion: {:.2f} ms ({:.2f} μs/deletion)",
-	         delete_time, delete_time * 1000.0 / delete_keys.size());
+	// Deletion benchmarks
+	double custom_delete_time = benchmark_deletion(custom_map, delete_keys);
+	double std_delete_time    = benchmark_deletion(std_map, delete_keys);
+	perf::log_comparison("Deletion", custom_delete_time, std_delete_time);
 
-	// Total time
-	double total_time = insert_time + lookup_time + iter_time + delete_time;
-	LOG_INFO("    Total: {:.2f} ms", total_time);
+	// Total time comparison
+	double custom_total = custom_insert_time + custom_lookup_time + custom_iter_time + custom_delete_time;
+	double std_total    = std_insert_time + std_lookup_time + std_iter_time + std_delete_time;
+	perf::log_final_comparison("Overall", custom_total, std_total);
 }
-
-// Compare two map implementations
-template <typename Key, typename Value>
-void compare_maps(const std::string        &test_name,
-                  const std::vector<Key>   &keys,
-                  const std::vector<Value> &values,
-                  const std::vector<Key>   &lookup_keys,
-                  const std::vector<Key>   &delete_keys)
-{
-	LOG_INFO("");
-	LOG_INFO("=== {} Benchmark ===", test_name);
-	LOG_INFO("Elements: {}, Lookups: {}, Deletions: {}",
-	         keys.size(), lookup_keys.size(), delete_keys.size());
-
-	// Test std::unordered_map with std::hash
-	using StdMap = std::unordered_map<Key, Value>;
-	run_single_benchmark<StdMap>("std::unordered_map",
-	                             keys, values, lookup_keys, delete_keys);
-
-	// Test ankerl::unordered_dense::map with RapidHash
-	using AnkerlMap = ankerl::unordered_dense::map<Key, Value, msplat::container::hash<Key>>;
-	run_single_benchmark<AnkerlMap>("ankerl::unordered_dense + RapidHash",
-	                                keys, values, lookup_keys, delete_keys);
-
-	// Also test ankerl with default hash for comparison
-	using AnkerlDefaultMap = ankerl::unordered_dense::map<Key, Value>;
-	run_single_benchmark<AnkerlDefaultMap>("ankerl::unordered_dense + default hash",
-	                                       keys, values, lookup_keys, delete_keys);
-}
+#endif
 
 }        // anonymous namespace
 
 int hash_performance_main()
 {
-	LOG_INFO("Hash Performance Test Suite");
-	LOG_INFO("============================");
-	LOG_INFO("Comparing std::unordered_map vs ankerl::unordered_dense with different hash functions");
+	perf::log_suite_header("Hash Map Performance Tests");
+
+#ifdef MSPLAT_USE_SYSTEM_STL
+	LOG_INFO("  ⊘ Custom unordered_map implementation disabled (MSPLAT_USE_SYSTEM_STL defined)");
+	LOG_INFO("  ⊘ Skipping performance comparison benchmarks");
+#else
+	LOG_INFO("  Comparing: Custom (ankerl::unordered_dense + RapidHash) vs STL");
 
 	// Integer keys benchmark
 	{
@@ -290,7 +269,7 @@ int hash_performance_main()
 		auto lookup_ints = generate_random_ints(NUM_LOOKUPS);
 		auto delete_ints = std::vector<int>(ints.begin(), ints.begin() + NUM_DELETIONS);
 
-		compare_maps("Integer Keys", ints, values, lookup_ints, delete_ints);
+		run_comparison_benchmark("Integer Keys", ints, values, lookup_ints, delete_ints);
 	}
 
 	// String keys benchmarks (different lengths)
@@ -302,8 +281,8 @@ int hash_performance_main()
 		auto delete_strings = std::vector<std::string>(strings.begin(),
 		                                               strings.begin() + NUM_DELETIONS);
 
-		compare_maps("String Keys (length " + std::to_string(str_len) + ")",
-		             strings, values, lookup_strings, delete_strings);
+		run_comparison_benchmark("String Keys (len=" + std::to_string(str_len) + ")",
+		                         strings, values, lookup_strings, delete_strings);
 	}
 
 	// Custom struct keys benchmark
@@ -314,16 +293,11 @@ int hash_performance_main()
 		auto delete_points = std::vector<Point>(points.begin(),
 		                                        points.begin() + NUM_DELETIONS);
 
-		compare_maps("Custom Struct Keys (Point)", points, values, lookup_points, delete_points);
+		run_comparison_benchmark("Custom Struct (Point)", points, values, lookup_points, delete_points);
 	}
 
-	LOG_INFO("");
-	LOG_INFO("Performance test completed successfully!");
-	LOG_INFO("");
-	LOG_INFO("Summary:");
-	LOG_INFO("- std::unordered_map uses std::hash");
-	LOG_INFO("- ankerl::unordered_dense tested with both RapidHash and its default hash");
-	LOG_INFO("- Lower times are better for all metrics");
+	perf::log_test_summary("Hash Performance", true);
+#endif
 
 	return 0;
 }

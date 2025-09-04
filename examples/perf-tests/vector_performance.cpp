@@ -1,3 +1,4 @@
+#include "perf_framework.h"
 #include <msplat/core/containers/memory.h>
 #include <msplat/core/containers/vector.h>
 #include <msplat/core/log.h>
@@ -31,36 +32,35 @@ double benchmark_push_back_ints(size_t size, int iterations)
 	return timer.elapsedMilliseconds() / iterations;
 }
 
-void compare_performance(const char *test_name, double custom_time, double std_time)
-{
-	double      ratio       = std_time / custom_time;
-	const char *performance = (ratio > 1.05) ? "FASTER" : (ratio < 0.95) ? "SLOWER" :
-	                                                                       "SIMILAR";
-
-	LOG_INFO("{}: Custom={:.3f}ms, Std={:.3f}ms, Ratio={:.2f}x [{}]",
-	         test_name, custom_time, std_time, ratio, performance);
-}
-
 }        // anonymous namespace
 
 int vector_performance_main()
 {
-	LOG_INFO("Vector Performance Benchmarks");
-	LOG_INFO("==========================================");
+	perf::log_suite_header("Vector Performance Tests");
 
-	LOG_INFO("Configuration:");
-	LOG_INFO("- Test size: {}", TEST_SIZE);
-	LOG_INFO("- Iterations: {}", ITERATIONS);
-
-#ifndef MSPLAT_USE_SYSTEM_STL
-	LOG_INFO("\n--- Basic Push Back Benchmarks ---");
+#ifdef MSPLAT_USE_SYSTEM_STL
+	LOG_INFO("  ⊘ Custom vector implementation disabled (MSPLAT_USE_SYSTEM_STL defined)");
+	LOG_INFO("  ⊘ Skipping performance comparison benchmarks");
+#else
+	// Push Back Comparison
+	perf::log_section_header("Push Back Comparison");
+	LOG_INFO("    ├─ Test size: {:,} | Iterations: {}", TEST_SIZE, ITERATIONS);
 	{
 		auto custom_time = benchmark_push_back_ints<msplat::container::vector<int>>(TEST_SIZE, ITERATIONS);
 		auto std_time    = benchmark_push_back_ints<std::vector<int>>(TEST_SIZE, ITERATIONS);
-		compare_performance("Push Back (int)", custom_time, std_time);
+
+		LOG_INFO("    ├─ Custom:   {:.3f} ms (avg)", custom_time);
+		LOG_INFO("    ├─ STL:      {:.3f} ms (avg)", std_time);
+
+		double ratio = std_time / custom_time;
+		auto   perf  = perf::classify_performance(ratio);
+		LOG_INFO("    └─ Result:   {:.2f}x {} {}",
+		         ratio, perf::performance_string(perf), perf::performance_symbol(perf));
 	}
 
-	LOG_INFO("\n--- PMR Allocator Integration Tests ---");
+	// PMR Allocator Integration
+	perf::log_section_header("PMR Allocator Integration");
+	LOG_INFO("    ├─ Test size: {:,} | Iterations: {}", TEST_SIZE, ITERATIONS);
 	{
 		msplat::container::pmr::FrameArena frameArena;
 
@@ -79,14 +79,10 @@ int vector_performance_main()
 		}
 
 		timer.stop();
-		LOG_INFO("FrameArena Integration: {:.3f}ms per iteration", timer.elapsedMilliseconds() / ITERATIONS);
+		LOG_INFO("    └─ FrameArena: {:.3f} ms/iteration", timer.elapsedMilliseconds() / ITERATIONS);
 	}
-
-#else
-	LOG_INFO("Custom vector implementation disabled (MSPLAT_USE_SYSTEM_STL defined)");
-	LOG_INFO("Skipping performance benchmarks");
 #endif
 
-	LOG_INFO("\nVector performance benchmarks completed.");
+	perf::log_test_summary("Vector Performance", true);
 	return 0;
 }

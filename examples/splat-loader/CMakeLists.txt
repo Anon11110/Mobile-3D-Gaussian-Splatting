@@ -29,10 +29,10 @@ add_custom_command(TARGET splat-loader PRE_BUILD
     COMMENT "Downloading splat assets if needed"
 )
 
-# Copy assets to working directory
+# Copy assets to executable directory
 add_custom_command(TARGET splat-loader POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/assets/splats/flowers_1/flowers_1.ply
-        ${CMAKE_CURRENT_BINARY_DIR}/flowers_1.ply
-    COMMENT "Copying splat asset to working directory"
+        $<TARGET_FILE_DIR:splat-loader>/flowers_1.ply
+    COMMENT "Copying splat asset to executable directory"
 )

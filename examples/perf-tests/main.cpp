@@ -1,3 +1,4 @@
+#include "perf_framework.h"
 #include <algorithm>
 #include <iostream>
 #include <msplat/core/log.h>
@@ -40,8 +41,7 @@ void print_usage(const char *program_name)
 
 int run_test_suite(const TestSuite &suite)
 {
-	LOG_INFO("");
-	LOG_INFO("=== Running {} ===", suite.name);
+	// Output handled by individual test suites now
 
 	Timer timer;
 	timer.start();
@@ -51,14 +51,7 @@ int run_test_suite(const TestSuite &suite)
 	timer.stop();
 	double elapsed = timer.elapsedMilliseconds();
 
-	if (result == 0)
-	{
-		LOG_INFO("=== {} PASSED ({:.2f}ms) ===", suite.name, elapsed);
-	}
-	else
-	{
-		LOG_ERROR("=== {} FAILED ({:.2f}ms) ===", suite.name, elapsed);
-	}
+	// Summary output is handled by test suites themselves
 
 	return result;
 }
@@ -83,21 +76,7 @@ int run_all_tests()
 	total_timer.stop();
 	double total_elapsed = total_timer.elapsedMilliseconds();
 
-	LOG_INFO("");
-	LOG_INFO("=== Performance Test Summary ===");
-	LOG_INFO("Total tests: {}", num_test_suites);
-	LOG_INFO("Passed: {}", num_test_suites - total_failed);
-	LOG_INFO("Failed: {}", total_failed);
-	LOG_INFO("Total time: {:.2f}ms", total_elapsed);
-
-	if (total_failed == 0)
-	{
-		LOG_INFO("All performance tests PASSED!");
-	}
-	else
-	{
-		LOG_ERROR("{} performance test(s) FAILED!", total_failed);
-	}
+	perf::log_main_footer(num_test_suites, num_test_suites - total_failed, total_elapsed);
 
 	return total_failed;
 }
@@ -106,8 +85,7 @@ int run_all_tests()
 
 int main(int argc, char *argv[])
 {
-	LOG_INFO("Mobile 3D Gaussian Splatting - Performance Test Suite");
-	LOG_INFO("=====================================================");
+	perf::log_main_header();
 
 	if (argc == 1)
 	{

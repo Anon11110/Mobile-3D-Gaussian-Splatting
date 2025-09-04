@@ -2,15 +2,27 @@
 
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <string>
 #include <string_view>
 #include <type_traits>
 
-#include "third-party/rapidhash/rapidhash.h"
+// Conditional compilation support
+#ifdef MSPLAT_USE_SYSTEM_STL
+#	include <functional>
+#else
+#	include "third-party/rapidhash/rapidhash.h"
+#endif
 
 namespace msplat::container
 {
+
+#ifdef MSPLAT_USE_SYSTEM_STL
+// Use standard library hash
+template <typename T>
+using hash = std::hash<T>;
+
+#else
+// Custom RapidHash-based implementation
 
 // Primary template for hash - uses RapidHash for generic types
 template <typename T, typename Enable = void>
@@ -34,15 +46,19 @@ struct hash<T, std::enable_if_t<std::is_arithmetic_v<T>>>
 
 	std::size_t operator()(T key) const noexcept
 	{
-		// For small types, hash directly
-		if constexpr (sizeof(T) <= sizeof(std::size_t))
+		// For types that fit in uint64_t, use rapid_mix directly for optimal performance
+		// This avoids the overhead of buffer hashing for simple integer types
+		if constexpr (sizeof(T) <= sizeof(uint64_t))
 		{
-			// Mix bits for better distribution on small values
-			std::size_t h = static_cast<std::size_t>(key);
-			return rapidhash(&h, sizeof(h));
+			// Use rapidhash's fast mixing function directly
+			// rapid_mix is exposed as public inline function in rapidhash.h
+			// Using first value from rapid_secret array as mixing constant
+			return rapid_mix(static_cast<uint64_t>(key), 0x2d358dccaa6c78a5ull);
 		}
 		else
 		{
+			// For larger arithmetic types (e.g., long double on some platforms)
+			// Fall back to buffer hashing
 			return rapidhash(&key, sizeof(T));
 		}
 	}
@@ -56,9 +72,10 @@ struct hash<T *>
 
 	std::size_t operator()(T *ptr) const noexcept
 	{
-		// Hash the pointer value
+		// Hash the pointer value using rapid_mix directly
+		// This matches how unordered_dense handles pointers efficiently
 		std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(ptr);
-		return rapidhash(&addr, sizeof(addr));
+		return rapid_mix(static_cast<uint64_t>(addr), 0x2d358dccaa6c78a5ull);
 	}
 };
 
@@ -124,10 +141,10 @@ inline std::size_t hash_with_seed(const T &key, uint64_t seed) noexcept
 {
 	if constexpr (std::is_arithmetic_v<T>)
 	{
-		if constexpr (sizeof(T) <= sizeof(std::size_t))
+		if constexpr (sizeof(T) <= sizeof(uint64_t))
 		{
-			std::size_t h = static_cast<std::size_t>(key);
-			return rapidhash_withSeed(&h, sizeof(h), seed);
+			// Use rapid_mix with seed for optimal performance
+			return rapid_mix(static_cast<uint64_t>(key), seed);
 		}
 		else
 		{
@@ -141,7 +158,8 @@ inline std::size_t hash_with_seed(const T &key, uint64_t seed) noexcept
 	else if constexpr (std::is_pointer_v<T>)
 	{
 		std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(key);
-		return rapidhash_withSeed(&addr, sizeof(addr), seed);
+		// Use rapid_mix with seed for optimal performance
+		return rapid_mix(static_cast<uint64_t>(addr), seed);
 	}
 	else
 	{
@@ -156,5 +174,7 @@ inline std::size_t hash_combine(Args... args) noexcept
 	std::size_t hashes[] = {hash<std::decay_t<Args>>{}(args)...};
 	return rapidhash(hashes, sizeof(hashes));
 }
+
+#endif        // MSPLAT_USE_SYSTEM_STL
 
 }        // namespace msplat::container

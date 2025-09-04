@@ -4,11 +4,29 @@ Cross-platform 3D Gaussian Splatting implementation with Vulkan/MoltenVK backend
 
 ## Available Targets
 
-The project provides several runnable targets:
+The project provides several runnable targets and libraries:
 
-- **`triangle`** - Main Vulkan triangle example showcasing the RHI (Rendering Hardware Interface) and core library integration
+### Executable Targets
+
+- **`triangle`** - Vulkan triangle example showcasing the RHI (Rendering Hardware Interface) and core library integration
+<p align="left">
+  <img src="screenshots/example_triangle.png" alt="Triangle Example Screenshot" width="500"/>
+</p>
+
+- **`particles`** - GPU-accelerated particle simulation demonstrating compute shader capabilities
+<p align="left">
+  <img src="screenshots/example_particles.png" alt="Particles Example Screenshot" width="500"/>
+</p>
+
+- **`splat-loader`** - 3D Gaussian Splatting PLY file loader and analyzer
 - **`unit-tests`** - Core library unit tests for platform utilities, memory allocators, and math functions
 - **`perf-tests`** - Performance benchmarks for memory allocation, vector operations, and core library components
+
+### Libraries
+
+- **`core`** - Static library with foundational utilities (math, logging, timer, VFS, platform abstraction)
+- **`engine`** - Static library with 3D Gaussian Splatting data structures and PLY loading functionality
+- **`RHI`** - Rendering Hardware Interface static library with Vulkan backend implementation
 
 ## Windows
 
@@ -230,6 +248,12 @@ python3 scripts/configure.py build [OPTIONS]
 # Quick start with triangle example
 python3 scripts/configure.py
 python3 scripts/configure.py build --target triangle --run
+
+# Run particle simulation
+python3 scripts/configure.py build --target particles --run
+
+# Load and analyze a 3D Gaussian Splatting file
+python3 scripts/configure.py build --target splat-loader --run
 
 # Debug build with validation
 python3 scripts/configure.py --clean --build-type Debug --validation

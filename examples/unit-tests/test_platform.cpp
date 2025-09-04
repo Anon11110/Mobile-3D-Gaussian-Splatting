@@ -1,9 +1,9 @@
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 
 #include "msplat/core/platform.h"
 #include "test_framework.h"
+#include <msplat/core/log.h>
 
 TEST(aligned_malloc_basic)
 {
@@ -87,7 +87,7 @@ TEST(get_page_size)
 	if ((page_size & (page_size - 1)) != 0)
 		return false;        // Check power of 2
 
-	std::cout << "(page size: " << page_size << " bytes) ";
+	LOG_INFO("(page size: {} bytes) ", page_size);
 	return true;
 }
 
@@ -101,7 +101,7 @@ TEST(get_cache_line_size)
 	if ((cache_line_size & (cache_line_size - 1)) != 0)
 		return false;        // Check power of 2
 
-	std::cout << "(cache line size: " << cache_line_size << " bytes) ";
+	LOG_INFO("(cache line size: {} bytes) ", cache_line_size);
 	return true;
 }
 
