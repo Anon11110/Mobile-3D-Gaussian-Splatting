@@ -28,7 +28,7 @@ using vector = std::vector<T>;
 //
 // Memory Layout - vector<T> object:
 // +------------+----------+------------+------------------+
-// | T* mData  | mSize   | mCapacity | memory_resource* |
+// | T* mData   | mSize    | mCapacity  | memory_resource* |
 // | 8 bytes    | 8 bytes  | 8 bytes    | 8 bytes          |
 // +------------+----------+------------+------------------+
 // Total: 32 bytes per vector instance

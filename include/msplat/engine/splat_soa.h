@@ -10,26 +10,26 @@ namespace msplat::engine
 
 struct SplatSoA
 {
-	msplat::container::vector<float> posX;
-	msplat::container::vector<float> posY;
-	msplat::container::vector<float> posZ;
+	container::vector<float> posX;
+	container::vector<float> posY;
+	container::vector<float> posZ;
 
-	msplat::container::vector<float> scaleX;
-	msplat::container::vector<float> scaleY;
-	msplat::container::vector<float> scaleZ;
+	container::vector<float> scaleX;
+	container::vector<float> scaleY;
+	container::vector<float> scaleZ;
 
-	msplat::container::vector<float> rotX;
-	msplat::container::vector<float> rotY;
-	msplat::container::vector<float> rotZ;
-	msplat::container::vector<float> rotW;
+	container::vector<float> rotX;
+	container::vector<float> rotY;
+	container::vector<float> rotZ;
+	container::vector<float> rotW;
 
-	msplat::container::vector<float> opacity;
+	container::vector<float> opacity;
 
-	msplat::container::vector<float> fDc0;
-	msplat::container::vector<float> fDc1;
-	msplat::container::vector<float> fDc2;
+	container::vector<float> fDc0;
+	container::vector<float> fDc1;
+	container::vector<float> fDc2;
 
-	msplat::container::vector<float> fRest;
+	container::vector<float> fRest;
 
 	uint32_t numSplats        = 0;
 	uint32_t shDegree         = 0;

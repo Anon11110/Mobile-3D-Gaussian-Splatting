@@ -1,0 +1,123 @@
+#pragma once
+
+#include <string>
+#include <string_view>
+
+// Conditional compilation support
+#ifdef MSPLAT_USE_SYSTEM_STL
+namespace msplat::container
+{
+// Use standard library string types
+using std::string;
+using std::u16string;
+using std::u32string;
+using std::u8string;
+using std::wstring;
+
+using std::string_view;
+using std::u16string_view;
+using std::u32string_view;
+using std::u8string_view;
+using std::wstring_view;
+
+// Helper functions for compatibility (just pass through for STL version)
+inline std::string to_std_string(const string &str)
+{
+	return str;
+}
+
+inline string to_pmr_string(const std::string &str)
+{
+	return str;
+}
+
+}        // namespace msplat::container
+
+#else
+// Custom PMR-based string implementation
+#	include "hash.h"
+#	include "memory.h"
+#	include <memory_resource>
+
+namespace msplat::container
+{
+// PMR-based string types for custom memory allocation
+using string    = std::basic_string<char, std::char_traits<char>, std::pmr::polymorphic_allocator<char>>;
+using u8string  = std::basic_string<char8_t, std::char_traits<char8_t>, std::pmr::polymorphic_allocator<char8_t>>;
+using u16string = std::basic_string<char16_t, std::char_traits<char16_t>, std::pmr::polymorphic_allocator<char16_t>>;
+using u32string = std::basic_string<char32_t, std::char_traits<char32_t>, std::pmr::polymorphic_allocator<char32_t>>;
+using wstring   = std::basic_string<wchar_t, std::char_traits<wchar_t>, std::pmr::polymorphic_allocator<wchar_t>>;
+
+// String view types (always use standard library)
+using std::string_view;
+using std::u16string_view;
+using std::u32string_view;
+using std::u8string_view;
+using std::wstring_view;
+
+// Helper functions for conversion between std::string and PMR string
+inline string to_pmr_string(const std::string &str, std::pmr::memory_resource *res = nullptr)
+{
+	if (!res)
+		res = pmr::GetUpstreamAllocator();
+	return string(str.data(), str.size(), res);
+}
+
+inline std::string to_std_string(const string &str)
+{
+	return std::string(str.data(), str.size());
+}
+
+// Concatenation operators for PMR strings
+inline string operator+(const string &lhs, const std::string &rhs)
+{
+	string result(lhs);
+	result.append(rhs.data(), rhs.size());
+	return result;
+}
+
+inline string operator+(const string &lhs, const char *rhs)
+{
+	string result(lhs);
+	result.append(rhs);
+	return result;
+}
+
+inline string operator+(const char *lhs, const string &rhs)
+{
+	string result(lhs, rhs.get_allocator());
+	result.append(rhs);
+	return result;
+}
+
+inline string operator+(const std::string &lhs, const string &rhs)
+{
+	string result(lhs.data(), lhs.size(), rhs.get_allocator());
+	result.append(rhs);
+	return result;
+}
+
+// Hash specializations for PMR string types (delegating to basic_string_hash in hash.h)
+template <>
+struct hash<string> : basic_string_hash<char, std::char_traits<char>>
+{};
+
+template <>
+struct hash<u8string> : basic_string_hash<char8_t, std::char_traits<char8_t>>
+{};
+
+template <>
+struct hash<u16string> : basic_string_hash<char16_t, std::char_traits<char16_t>>
+{};
+
+template <>
+struct hash<u32string> : basic_string_hash<char32_t, std::char_traits<char32_t>>
+{};
+
+template <>
+struct hash<wstring> : basic_string_hash<wchar_t, std::char_traits<wchar_t>>
+{};
+
+}        // namespace msplat::container
+
+#endif        // MSPLAT_USE_SYSTEM_STL

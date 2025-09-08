@@ -1,4 +1,8 @@
+#include <msplat/core/containers/filesystem.h>
 #include <msplat/core/containers/memory.h>
+#include <msplat/core/containers/queue.h>
+#include <msplat/core/containers/string.h>
+#include <msplat/core/containers/vector.h>
 #include <msplat/core/log.h>
 #include <msplat/engine/splat_loader.h>
 
@@ -8,8 +12,6 @@
 #include <condition_variable>
 #include <exception>
 #include <mutex>
-#include <queue>
-#include <sstream>
 #include <stdexcept>
 #include <thread>
 
@@ -18,27 +20,28 @@ namespace msplat::engine
 
 struct LoadTask
 {
-	std::filesystem::path                   path;
-	std::promise<std::shared_ptr<SplatSoA>> promise;
+	container::filesystem::path                   path;
+	std::promise<container::shared_ptr<SplatSoA>> promise;
 };
 
 class SplatLoaderException : public std::runtime_error
 {
   public:
-	explicit SplatLoaderException(const std::string &message) :
-	    std::runtime_error(message)
+	explicit SplatLoaderException(const container::string &message) :
+	    std::runtime_error(container::to_std_string(message))
 	{}
 };
 
 class SplatLoader::Impl
 {
   private:
-	std::thread                workerThread;
-	std::atomic<bool>          shouldStop{false};
-	std::queue<LoadTask>       taskQueue;
-	std::mutex                 queueMutex;
-	std::condition_variable    queueCV;
+	container::queue<LoadTask> taskQueue;
 	std::pmr::memory_resource *memoryResource;
+
+	std::thread             workerThread;
+	std::atomic<bool>       shouldStop{false};
+	std::mutex              queueMutex;
+	std::condition_variable queueCV;
 
 	void WorkerLoop()
 	{
@@ -76,13 +79,14 @@ class SplatLoader::Impl
 		}
 	}
 
-	std::shared_ptr<SplatSoA> InnerLoad(const std::filesystem::path &path)
+	container::shared_ptr<SplatSoA> InnerLoad(const container::filesystem::path &path)
 	{
-		miniply::PLYReader reader(path.string().c_str());
+		auto               pathStr = container::to_pmr_string(path.string());
+		miniply::PLYReader reader(pathStr.c_str());
 
 		if (!reader.valid())
 		{
-			throw SplatLoaderException("Failed to open PLY file: " + path.string());
+			throw SplatLoaderException(container::string("Failed to open PLY file: ") + pathStr);
 		}
 
 		// Find vertex element
@@ -202,15 +206,15 @@ class SplatLoader::Impl
 		// Extract SH rest coefficients if present
 		if (shCoeffsPerSplat > 0)
 		{
-			std::vector<uint32_t> restIndices(shCoeffsPerSplat);
+			container::vector<uint32_t> restIndices;
+			restIndices.resize(shCoeffsPerSplat);
 			for (uint32_t i = 0; i < shCoeffsPerSplat; ++i)
 			{
-				std::stringstream propName;
-				propName << "f_rest_" << i;
-				restIndices[i] = reader.find_property(propName.str().c_str());
+				container::string propName = container::string("f_rest_") + std::to_string(i).c_str();
+				restIndices[i]             = reader.find_property(propName.c_str());
 				if (restIndices[i] == miniply::kInvalidIndex)
 				{
-					throw SplatLoaderException("Failed to find property: " + propName.str());
+					throw SplatLoaderException(container::string("Failed to find property: ") + propName);
 				}
 			}
 
@@ -231,16 +235,17 @@ class SplatLoader::Impl
 		}
 
 		LOG_INFO("Loaded {} splats with SH degree {} from {}",
-		         numSplats, data->shDegree, path.string());
+		         numSplats, data->shDegree, container::to_std_string(pathStr));
 
 		return data;
 	}
 
   public:
 	explicit Impl() :
-	    memoryResource(msplat::container::pmr::GetUpstreamAllocator()),
-	    workerThread(&Impl::WorkerLoop, this)
+	    memoryResource(container::pmr::GetUpstreamAllocator())
 	{
+		// Start worker thread after all members are initialized
+		workerThread = std::thread(&Impl::WorkerLoop, this);
 	}
 
 	~Impl()
@@ -253,7 +258,7 @@ class SplatLoader::Impl
 		}
 	}
 
-	std::future<std::shared_ptr<SplatSoA>> Load(const std::filesystem::path &path)
+	std::future<container::shared_ptr<SplatSoA>> Load(const container::filesystem::path &path)
 	{
 		LoadTask task;
 		task.path   = path;
@@ -270,13 +275,13 @@ class SplatLoader::Impl
 };
 
 SplatLoader::SplatLoader() :
-    pimpl(std::make_unique<Impl>())
+    pimpl(container::make_unique<Impl>())
 {
 }
 
 SplatLoader::~SplatLoader() = default;
 
-std::future<std::shared_ptr<SplatSoA>> SplatLoader::Load(const std::filesystem::path &path)
+std::future<container::shared_ptr<SplatSoA>> SplatLoader::Load(const container::filesystem::path &path)
 {
 	return pimpl->Load(path);
 }

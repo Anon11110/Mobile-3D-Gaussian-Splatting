@@ -398,3 +398,9 @@ TEST(vector_with_frame_arena)
 }
 
 #endif        // !MSPLAT_USE_SYSTEM_STL
+
+// Register all custom vector tests
+void register_custom_vector_tests()
+{
+	// Tests are automatically registered via static constructors
+}

@@ -28,6 +28,10 @@ set(CORE_HEADERS
 
     # Memory/Containers headers
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/memory.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/hash.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/string.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/unordered_map.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/vector.h
 )
 
 set(CORE_SOURCES
