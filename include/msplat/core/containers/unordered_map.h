@@ -14,6 +14,7 @@ using unordered_map = std::unordered_map<K, V>;
 #else
 #	include "hash.h"
 #	include "memory.h"
+#	include <msplat/core/memory/frame_arena.h>
 #	include "third-party/unordered_dense/unordered_dense.h"
 
 namespace msplat::container

@@ -1,5 +1,4 @@
 #include <msplat/core/containers/filesystem.h>
-#include <msplat/core/containers/memory.h>
 #include <msplat/core/containers/queue.h>
 #include <msplat/core/containers/string.h>
 #include <msplat/core/containers/vector.h>

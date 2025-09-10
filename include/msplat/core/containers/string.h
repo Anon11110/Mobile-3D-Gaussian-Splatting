@@ -31,6 +31,28 @@ inline string to_pmr_string(const std::string &str)
 	return str;
 }
 
+// Generic to_string helper - returns container::string unchanged, converts others
+template <typename T>
+inline string to_string(T &&t)
+{
+	if constexpr (std::is_same_v<std::decay_t<T>, string>)
+	{
+		return std::forward<T>(t);
+	}
+	else if constexpr (std::is_same_v<std::decay_t<T>, std::string>)
+	{
+		return std::forward<T>(t);        // string is aliased to std::string here
+	}
+	else if constexpr (std::is_convertible_v<T, std::string>)
+	{
+		return string(std::forward<T>(t));
+	}
+	else
+	{
+		return string(t);
+	}
+}
+
 }        // namespace msplat::container
 
 #else
@@ -41,8 +63,44 @@ inline string to_pmr_string(const std::string &str)
 
 namespace msplat::container
 {
+// Helper class that adds implicit conversion to std::string for LOG_* macro compatibility
+class string : public std::basic_string<char, std::char_traits<char>, std::pmr::polymorphic_allocator<char>>
+{
+  public:
+	using base = std::basic_string<char, std::char_traits<char>, std::pmr::polymorphic_allocator<char>>;
+	using base::base;             // Inherit all constructors
+	using base::operator=;        // Inherit assignment operators
+
+	// Implicit conversion to std::string for logging and other std::string APIs
+	operator std::string() const
+	{
+		return std::string(this->data(), this->size());
+	}
+
+	// String concatenation operators
+	string operator+(const string &rhs) const
+	{
+		string result(*this);
+		result.append(rhs);
+		return result;
+	}
+
+	string operator+(const std::string &rhs) const
+	{
+		string result(*this);
+		result.append(rhs.data(), rhs.size());
+		return result;
+	}
+
+	string operator+(const char *rhs) const
+	{
+		string result(*this);
+		result.append(rhs);
+		return result;
+	}
+};
+
 // PMR-based string types for custom memory allocation
-using string    = std::basic_string<char, std::char_traits<char>, std::pmr::polymorphic_allocator<char>>;
 using u8string  = std::basic_string<char8_t, std::char_traits<char8_t>, std::pmr::polymorphic_allocator<char8_t>>;
 using u16string = std::basic_string<char16_t, std::char_traits<char16_t>, std::pmr::polymorphic_allocator<char16_t>>;
 using u32string = std::basic_string<char32_t, std::char_traits<char32_t>, std::pmr::polymorphic_allocator<char32_t>>;
@@ -68,33 +126,30 @@ inline std::string to_std_string(const string &str)
 	return std::string(str.data(), str.size());
 }
 
-// Concatenation operators for PMR strings
-inline string operator+(const string &lhs, const std::string &rhs)
-{
-	string result(lhs);
-	result.append(rhs.data(), rhs.size());
-	return result;
-}
+// Note: Concatenation operators are now member functions of the string class
+// to avoid ambiguity with implicit conversions
 
-inline string operator+(const string &lhs, const char *rhs)
+// Generic to_string helper - returns container::string unchanged, converts others
+template <typename T>
+inline string to_string(T &&t)
 {
-	string result(lhs);
-	result.append(rhs);
-	return result;
-}
-
-inline string operator+(const char *lhs, const string &rhs)
-{
-	string result(lhs, rhs.get_allocator());
-	result.append(rhs);
-	return result;
-}
-
-inline string operator+(const std::string &lhs, const string &rhs)
-{
-	string result(lhs.data(), lhs.size(), rhs.get_allocator());
-	result.append(rhs);
-	return result;
+	if constexpr (std::is_same_v<std::decay_t<T>, string>)
+	{
+		return std::forward<T>(t);
+	}
+	else if constexpr (std::is_same_v<std::decay_t<T>, std::string>)
+	{
+		return to_pmr_string(std::forward<T>(t));
+	}
+	else if constexpr (std::is_convertible_v<T, std::string>)
+	{
+		return to_pmr_string(std::string(std::forward<T>(t)));
+	}
+	else
+	{
+		// For other types, try to construct via std::string
+		return to_pmr_string(std::string(t));
+	}
 }
 
 // Hash specializations for PMR string types (delegating to basic_string_hash in hash.h)

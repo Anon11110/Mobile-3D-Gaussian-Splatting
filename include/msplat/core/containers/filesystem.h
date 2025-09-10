@@ -30,7 +30,9 @@ namespace filesystem = std::filesystem;
 // Following LuisaCompute pattern: directly use path's templated string() method
 [[nodiscard]] inline string to_string(const filesystem::path &path)
 {
-	return path.string<char, std::char_traits<char>, std::pmr::polymorphic_allocator<char>>();
+	// Create a PMR-based string first, then convert to our string class
+	auto pmr_str = path.string<char, std::char_traits<char>, std::pmr::polymorphic_allocator<char>>();
+	return string(pmr_str.data(), pmr_str.size(), pmr_str.get_allocator());
 }
 
 }        // namespace msplat::container

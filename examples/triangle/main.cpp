@@ -4,6 +4,7 @@
 #include <iostream>
 #include <vector>
 
+#include "core/containers/memory.h"        // For container::pmr::GetUpstreamAllocator()
 #include "core/log.h"
 #include "core/math/math.h"
 #include "core/timer.h"
@@ -27,7 +28,7 @@ struct UniformBufferObject
 	float      padding[3];        // Alignment padding
 };
 
-std::vector<uint8_t> LoadShaderCode(const std::string &filename)
+container::vector<uint8_t> LoadShaderCode(const container::string &filename)
 {
 	return vfs::readFile(filename);
 }
@@ -91,8 +92,8 @@ int main()
 
 		// Load and create shaders
 		LOG_INFO("Loading shaders");
-		auto vertexCode   = LoadShaderCode("shaders/compiled/triangle.vert.spv");
-		auto fragmentCode = LoadShaderCode("shaders/compiled/triangle.frag.spv");
+		auto vertexCode   = LoadShaderCode(container::to_string("shaders/compiled/triangle.vert.spv"));
+		auto fragmentCode = LoadShaderCode(container::to_string("shaders/compiled/triangle.frag.spv"));
 
 		rhi::ShaderDesc vsDesc{};
 		vsDesc.stage      = rhi::ShaderStage::VERTEX;

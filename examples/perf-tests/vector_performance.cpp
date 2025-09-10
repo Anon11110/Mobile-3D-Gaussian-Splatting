@@ -2,6 +2,7 @@
 #include <msplat/core/containers/memory.h>
 #include <msplat/core/containers/vector.h>
 #include <msplat/core/log.h>
+#include <msplat/core/memory/frame_arena.h>
 #include <msplat/core/timer.h>
 #include <vector>
 

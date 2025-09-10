@@ -26,12 +26,19 @@ set(CORE_HEADERS
     # Platform headers
     ${CMAKE_SOURCE_DIR}/include/msplat/core/platform.h
 
-    # Memory/Containers headers
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/memory.h
+    # Container headers
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/array.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/filesystem.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/functional.h
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/hash.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/memory.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/queue.h
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/string.h
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/unordered_map.h
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/vector.h
+
+    # Memory headers
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/memory/frame_arena.h
 )
 
 set(CORE_SOURCES

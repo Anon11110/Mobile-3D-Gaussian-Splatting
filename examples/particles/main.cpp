@@ -4,6 +4,7 @@
 #include <iostream>
 #include <vector>
 
+#include "core/containers/memory.h"        // For container::pmr::GetUpstreamAllocator()
 #include "core/log.h"
 #include "core/math/math.h"
 #include "core/timer.h"
@@ -34,7 +35,7 @@ struct SimulationParams
 	math::vec2 bounds;
 };
 
-std::vector<uint8_t> LoadShaderCode(const std::string &filename)
+container::vector<uint8_t> LoadShaderCode(const container::string &filename)
 {
 	return vfs::readFile(filename);
 }
@@ -106,7 +107,7 @@ int main()
 		void *paramsDataPtr                        = paramsBuffer->Map();
 
 		LOG_INFO("Loading compute shader");
-		auto computeCode = LoadShaderCode("shaders/compiled/particle_compute.comp.spv");
+		auto computeCode = LoadShaderCode(container::to_string("shaders/compiled/particle_compute.comp.spv"));
 
 		rhi::ShaderDesc computeShaderDesc{};
 		computeShaderDesc.stage    = rhi::ShaderStage::COMPUTE;
@@ -165,8 +166,8 @@ int main()
 		computeDescriptorSetB->BindBuffer(2, outputBindingB);
 
 		LOG_INFO("Loading rendering shaders");
-		auto vertexCode   = LoadShaderCode("shaders/compiled/particle_render.vert.spv");
-		auto fragmentCode = LoadShaderCode("shaders/compiled/particle_render.frag.spv");
+		auto vertexCode   = LoadShaderCode(container::to_string("shaders/compiled/particle_render.vert.spv"));
+		auto fragmentCode = LoadShaderCode(container::to_string("shaders/compiled/particle_render.frag.spv"));
 
 		rhi::ShaderDesc vsDesc{};
 		vsDesc.stage      = rhi::ShaderStage::VERTEX;

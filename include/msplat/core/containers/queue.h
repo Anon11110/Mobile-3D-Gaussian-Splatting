@@ -1,8 +1,8 @@
 #pragma once
 
-#include "memory.h"
 #include <deque>
 #include <memory_resource>
+#include <msplat/core/containers/memory.h>
 #include <queue>
 
 namespace msplat::container
