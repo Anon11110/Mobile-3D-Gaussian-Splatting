@@ -111,6 +111,26 @@ TEST(get_backtrace_basic)
 
 // In debug builds should have some frames, in release might be empty
 #ifndef NDEBUG
+	if (!backtrace.empty())
+	{
+		// Verify that TraceItem fields are populated
+		for (const auto &item : backtrace)
+		{
+			// At least address should be non-zero
+			if (item.address == 0)
+				return false;
+			// Module and symbol might be "unknown" but should not be empty
+			if (item.module.empty() || item.symbol.empty())
+				return false;
+		}
+
+		// Optionally print first few frames for debugging
+		LOG_INFO("Backtrace (first 3 frames):");
+		for (size_t i = 0; i < std::min(size_t(3), backtrace.size()); ++i)
+		{
+			LOG_INFO("  {}", msplat::core::to_string(backtrace[i]));
+		}
+	}
 	return !backtrace.empty();
 #else
 	return true;        // Always pass in release builds

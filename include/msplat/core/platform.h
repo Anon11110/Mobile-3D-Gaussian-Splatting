@@ -1,8 +1,10 @@
 #pragma once
 
+#include "msplat/core/containers/string.h"
+#include "msplat/core/containers/vector.h"
 #include <cstddef>
+#include <cstdint>
 #include <string>
-#include <vector>
 
 namespace msplat::core
 {
@@ -38,11 +40,30 @@ size_t get_page_size();
 size_t get_cache_line_size();
 
 /**
+ * Backtrace item containing detailed stack frame information
+ */
+struct TraceItem
+{
+	msplat::container::string module;         // Binary/module name
+	uint64_t                  address;        // Memory address
+	msplat::container::string symbol;         // Function name (demangled if possible)
+	size_t                    offset;         // Offset within function
+};
+
+/**
+ * Convert TraceItem to a formatted string representation
+ *
+ * @param item The TraceItem to format
+ * @return Formatted string representation
+ */
+[[nodiscard]] std::string to_string(const TraceItem &item) noexcept;
+
+/**
  * Get current stack backtrace for debugging (debug builds only)
  *
  * @param max_frames Maximum number of frames to capture
- * @return Vector of symbol names/addresses
+ * @return Vector of TraceItem structures with detailed frame information
  */
-std::vector<std::string> get_backtrace(int max_frames = 32);
+[[nodiscard]] msplat::container::vector<TraceItem> get_backtrace(int max_frames = 32);
 
 }        // namespace msplat::core

@@ -1,8 +1,10 @@
 #include "msplat/core/platform.h"
 
-#include <cstdlib>
-#include <sstream>
 #include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <iomanip>
+#include <sstream>
 
 // Platform detection
 #if defined(_WIN32) || defined(_WIN64)
@@ -18,6 +20,7 @@
 #	include <execinfo.h>
 #	include <sys/sysctl.h>
 #	include <unistd.h>
+#	include <cxxabi.h>
 #	if TARGET_OS_IOS
 #		define MSPLAT_PLATFORM_IOS
 #	else
@@ -34,10 +37,38 @@
 #	include <dlfcn.h>
 #	include <execinfo.h>
 #	include <unistd.h>
+#	include <cxxabi.h>
 #endif
 
 namespace msplat::core
 {
+
+// Helper function to demangle C++ symbols
+namespace
+{
+#if defined(MSPLAT_PLATFORM_APPLE) || defined(MSPLAT_PLATFORM_LINUX)
+msplat::container::string demangle(const char *name) noexcept
+{
+	int                       status = 0;
+	char                     *buffer = abi::__cxa_demangle(name, nullptr, nullptr, &status);
+	msplat::container::string demangled{buffer == nullptr ? name : buffer};
+	free(buffer);
+	return demangled;
+}
+#elif defined(MSPLAT_PLATFORM_WINDOWS)
+msplat::container::string demangle(const char *name) noexcept
+{
+	// Windows symbols from SymFromAddr are already somewhat readable
+	// For full demangling, would need UnDecorateSymbolName
+	return msplat::container::string(name);
+}
+#else
+msplat::container::string demangle(const char *name) noexcept
+{
+	return msplat::container::string(name);
+}
+#endif
+}        // anonymous namespace
 
 void *aligned_malloc(size_t size, size_t alignment)
 {
@@ -57,7 +88,7 @@ void *aligned_malloc(size_t size, size_t alignment)
 #	else
 	// POSIX-compliant systems (macOS, iOS, Linux)
 	// posix_memalign requires alignment to be a power of 2 and >= sizeof(void*)
-	size_t min_alignment = std::max(alignment, sizeof(void*));
+	size_t min_alignment = std::max(alignment, sizeof(void *));
 	if (posix_memalign(&ptr, min_alignment, size) != 0)
 	{
 		ptr = nullptr;
@@ -165,9 +196,21 @@ size_t get_cache_line_size()
 #endif
 }
 
-std::vector<std::string> get_backtrace(int max_frames)
+std::string to_string(const TraceItem &item) noexcept
 {
-	std::vector<std::string> result;
+	std::ostringstream oss;
+	oss << item.module << "(" << item.symbol;
+	if (item.offset > 0)
+	{
+		oss << "+0x" << std::hex << item.offset;
+	}
+	oss << ") [0x" << std::hex << item.address << "]";
+	return oss.str();
+}
+
+msplat::container::vector<TraceItem> get_backtrace(int max_frames)
+{
+	msplat::container::vector<TraceItem> result;
 
 #ifndef NDEBUG        // Only in debug builds
 
@@ -177,27 +220,54 @@ std::vector<std::string> get_backtrace(int max_frames)
 
 	SymInitialize(process, nullptr, TRUE);
 
-	WORD frames = CaptureStackBackTrace(0, min(max_frames, 256), stack, nullptr);
+	WORD frames = CaptureStackBackTrace(0, std::min(max_frames, 256), stack, nullptr);
 
-	for (int i = 0; i < frames; ++i)
+	result.reserve(frames > 0 ? frames - 1 : 0);
+	for (int i = 1; i < frames; ++i)        // Skip first frame (current function)
 	{
-		DWORD64 address = reinterpret_cast<DWORD64>(stack[i]);
+		TraceItem item{};
+		item.address = reinterpret_cast<uint64_t>(stack[i]);
 
 		char         buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
 		PSYMBOL_INFO symbol  = reinterpret_cast<PSYMBOL_INFO>(buffer);
 		symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
 		symbol->MaxNameLen   = MAX_SYM_NAME;
 
-		std::ostringstream oss;
-		if (SymFromAddr(process, address, nullptr, symbol))
+		DWORD64 displacement = 0;
+		if (SymFromAddr(process, item.address, &displacement, symbol))
 		{
-			oss << symbol->Name << " [0x" << std::hex << address << "]";
+			item.symbol = demangle(symbol->Name);
+			item.offset = static_cast<size_t>(displacement);
+
+			// Get module name
+			HMODULE hModule = nullptr;
+			if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			                      reinterpret_cast<LPCTSTR>(item.address), &hModule))
+			{
+				char module_name[MAX_PATH];
+				if (GetModuleFileNameA(hModule, module_name, MAX_PATH))
+				{
+					// Extract just the filename from the full path
+					const char *last_slash = strrchr(module_name, '\\');
+					item.module            = msplat::container::string(last_slash ? last_slash + 1 : module_name);
+				}
+				else
+				{
+					item.module = msplat::container::string("unknown");
+				}
+			}
+			else
+			{
+				item.module = msplat::container::string("unknown");
+			}
 		}
 		else
 		{
-			oss << "Unknown [0x" << std::hex << address << "]";
+			item.symbol = msplat::container::string("unknown");
+			item.module = msplat::container::string("unknown");
+			item.offset = 0;
 		}
-		result.push_back(oss.str());
+		result.emplace_back(std::move(item));
 	}
 
 #	elif defined(MSPLAT_PLATFORM_APPLE) || defined(MSPLAT_PLATFORM_LINUX)
@@ -207,9 +277,86 @@ std::vector<std::string> get_backtrace(int max_frames)
 
 	if (symbols)
 	{
-		for (int i = 0; i < frames; ++i)
+		result.reserve(frames > 0 ? frames - 1 : 0);
+		for (int i = 1; i < frames; ++i)        // Skip first frame (current function)
 		{
-			result.push_back(std::string(symbols[i]));
+			TraceItem item{};
+#		ifdef MSPLAT_PLATFORM_APPLE
+			// Apple format: "index module address symbol + offset"
+			std::istringstream iss{symbols[i]};
+			int                index = 0;
+			char               plus  = '+';
+			std::string        module_str, symbol_str;
+			iss >> index >> module_str >> std::hex >> item.address >> symbol_str >> plus >> std::dec >> item.offset;
+			item.module = msplat::container::string(module_str.c_str());
+			item.symbol = demangle(symbol_str.c_str());
+#		else
+			// Linux format: "binary_name(function_name+offset) [address]"
+			std::string_view raw_item{symbols[i]};
+			if (!raw_item.empty())
+			{
+				// Parse address
+				auto right_bracket = raw_item.rfind(']');
+				auto left_bracket  = raw_item.rfind("[0x");
+				if (right_bracket != std::string::npos &&
+				    left_bracket != std::string::npos &&
+				    right_bracket > left_bracket + 3)
+				{
+					left_bracket += 3;
+					auto address_str = raw_item.substr(left_bracket, right_bracket - left_bracket);
+					item.address     = std::strtoull(address_str.data(), nullptr, 16);
+
+					// Parse function name and offset
+					raw_item               = raw_item.substr(0, left_bracket - 3);
+					auto right_parenthesis = raw_item.rfind(')');
+					auto left_parenthesis  = raw_item.rfind('(');
+					if (right_parenthesis != std::string::npos &&
+					    left_parenthesis != std::string::npos &&
+					    right_parenthesis > left_parenthesis)
+					{
+						auto function_and_offset = raw_item.substr(left_parenthesis + 1, right_parenthesis - left_parenthesis - 1);
+						auto plus                = function_and_offset.rfind("+0x");
+						if (plus != std::string::npos)
+						{
+							plus += 3;
+							auto offset_str = function_and_offset.substr(plus);
+							auto function   = function_and_offset.substr(0, plus - 3);
+							item.offset     = std::strtoull(offset_str.data(), nullptr, 16);
+							item.symbol     = function.empty() ? msplat::container::string("unknown") : demangle(std::string(function).c_str());
+						}
+						else
+						{
+							item.symbol = function_and_offset.empty() ? msplat::container::string("unknown") : demangle(std::string(function_and_offset).c_str());
+							item.offset = 0;
+						}
+						// Binary name
+						auto binary_name = raw_item.substr(0, left_parenthesis);
+						item.module      = msplat::container::string(binary_name.data(), binary_name.size());
+					}
+					else
+					{
+						item.module = msplat::container::string("unknown");
+						item.symbol = msplat::container::string("unknown");
+						item.offset = 0;
+					}
+				}
+				else
+				{
+					item.address = reinterpret_cast<uint64_t>(stack[i]);
+					item.module  = msplat::container::string("unknown");
+					item.symbol  = msplat::container::string("unknown");
+					item.offset  = 0;
+				}
+			}
+			else
+			{
+				item.address = reinterpret_cast<uint64_t>(stack[i]);
+				item.module  = msplat::container::string("unknown");
+				item.symbol  = msplat::container::string("unknown");
+				item.offset  = 0;
+			}
+#		endif
+			result.emplace_back(std::move(item));
 		}
 		std::free(symbols);
 	}
@@ -218,15 +365,24 @@ std::vector<std::string> get_backtrace(int max_frames)
 	// Android unwind implementation
 	struct BacktraceData
 	{
-		std::vector<std::string> *result;
-		int                       count;
-		int                       max_frames;
+		msplat::container::vector<TraceItem> *result;
+		int                                   count;
+		int                                   max_frames;
+		bool                                  skip_first;
 	};
 
-	BacktraceData data = {&result, 0, max_frames};
+	BacktraceData data = {&result, 0, max_frames, true};
 
 	_Unwind_Backtrace([](struct _Unwind_Context *context, void *arg) -> _Unwind_Reason_Code {
 		BacktraceData *data = static_cast<BacktraceData *>(arg);
+
+		// Skip first frame
+		if (data->skip_first)
+		{
+			data->skip_first = false;
+			return _URC_NO_REASON;
+		}
+
 		if (data->count >= data->max_frames)
 		{
 			return _URC_END_OF_STACK;
@@ -234,21 +390,42 @@ std::vector<std::string> get_backtrace(int max_frames)
 
 		uintptr_t pc = _Unwind_GetIP(context);
 
+		TraceItem item{};
+		item.address = static_cast<uint64_t>(pc);
+
 		Dl_info info;
 		if (dladdr(reinterpret_cast<void *>(pc), &info))
 		{
-			std::ostringstream oss;
-			oss << (info.dli_sname ? info.dli_sname : "Unknown")
-			    << " [0x" << std::hex << pc << "]";
-			data->result->push_back(oss.str());
+			if (info.dli_fname)
+			{
+				// Extract just the filename from the full path
+				const char *last_slash = strrchr(info.dli_fname, '/');
+				item.module            = msplat::container::string(last_slash ? last_slash + 1 : info.dli_fname);
+			}
+			else
+			{
+				item.module = msplat::container::string("unknown");
+			}
+
+			if (info.dli_sname)
+			{
+				item.symbol = demangle(info.dli_sname);
+				item.offset = pc - reinterpret_cast<uintptr_t>(info.dli_saddr);
+			}
+			else
+			{
+				item.symbol = msplat::container::string("unknown");
+				item.offset = 0;
+			}
 		}
 		else
 		{
-			std::ostringstream oss;
-			oss << "Unknown [0x" << std::hex << pc << "]";
-			data->result->push_back(oss.str());
+			item.module = msplat::container::string("unknown");
+			item.symbol = msplat::container::string("unknown");
+			item.offset = 0;
 		}
 
+		data->result->emplace_back(std::move(item));
 		data->count++;
 		return _URC_NO_REASON;
 	},
