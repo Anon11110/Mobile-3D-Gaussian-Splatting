@@ -9,6 +9,7 @@
 #include "core/math/math.h"
 #include "core/timer.h"
 #include "core/vfs.h"
+#include "engine/shader_factory.h"
 #include "rhi/rhi.h"
 
 #include <GLFW/glfw3.h>
@@ -27,11 +28,6 @@ struct UniformBufferObject
 	float      time;              // Animation time
 	float      padding[3];        // Alignment padding
 };
-
-container::vector<uint8_t> LoadShaderCode(const container::string &filename)
-{
-	return vfs::readFile(filename);
-}
 
 int main()
 {
@@ -90,22 +86,15 @@ int main()
 		ubDesc.hints.persistently_mapped = true;
 		auto uniformBuffer               = device->CreateBuffer(ubDesc);
 
-		// Load and create shaders
-		LOG_INFO("Loading shaders");
-		auto vertexCode   = LoadShaderCode(container::to_string("shaders/compiled/triangle.vert.spv"));
-		auto fragmentCode = LoadShaderCode(container::to_string("shaders/compiled/triangle.frag.spv"));
+		// Create shader factory and load shaders
+		msplat::engine::ShaderFactory shaderFactory(device.get());
 
-		rhi::ShaderDesc vsDesc{};
-		vsDesc.stage      = rhi::ShaderStage::VERTEX;
-		vsDesc.code       = vertexCode.data();
-		vsDesc.codeSize   = vertexCode.size();
-		auto vertexShader = device->CreateShader(vsDesc);
-
-		rhi::ShaderDesc fsDesc{};
-		fsDesc.stage        = rhi::ShaderStage::FRAGMENT;
-		fsDesc.code         = fragmentCode.data();
-		fsDesc.codeSize     = fragmentCode.size();
-		auto fragmentShader = device->CreateShader(fsDesc);
+		auto vertexShader = shaderFactory.getOrCreateShader(
+		    "shaders/compiled/triangle.vert.spv",
+		    rhi::ShaderStage::VERTEX);
+		auto fragmentShader = shaderFactory.getOrCreateShader(
+		    "shaders/compiled/triangle.frag.spv",
+		    rhi::ShaderStage::FRAGMENT);
 
 		// Create descriptor set layout for uniform buffer
 		rhi::DescriptorSetLayoutDesc layoutDesc{};

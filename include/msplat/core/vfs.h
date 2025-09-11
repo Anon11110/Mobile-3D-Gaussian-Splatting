@@ -268,14 +268,4 @@ class RootFileSystem final : public IFileSystem
 	container::vector<std::pair<container::string, container::shared_ptr<IFileSystem>>> m_mountPoints;
 };
 
-//=========================================================================
-// Utility Functions
-//=========================================================================
-
-/// @brief Read entire file into memory (utility function)
-/// @param path File path to read
-/// @return File contents as byte vector
-/// @throws std::runtime_error if file cannot be read
-container::vector<uint8_t> readFile(const container::string &path);
-
 }        // namespace msplat::vfs

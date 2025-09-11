@@ -9,6 +9,7 @@
 #include "core/math/math.h"
 #include "core/timer.h"
 #include "core/vfs.h"
+#include "engine/shader_factory.h"
 #include "rhi/rhi.h"
 
 #include <GLFW/glfw3.h>
@@ -34,11 +35,6 @@ struct SimulationParams
 	float      gravity;
 	math::vec2 bounds;
 };
-
-container::vector<uint8_t> LoadShaderCode(const container::string &filename)
-{
-	return vfs::readFile(filename);
-}
 
 int main()
 {
@@ -106,14 +102,12 @@ int main()
 		auto  paramsBuffer                         = device->CreateBuffer(paramsBufferDesc);
 		void *paramsDataPtr                        = paramsBuffer->Map();
 
-		LOG_INFO("Loading compute shader");
-		auto computeCode = LoadShaderCode(container::to_string("shaders/compiled/particle_compute.comp.spv"));
+		// Create shader factory
+		msplat::engine::ShaderFactory shaderFactory(device.get());
 
-		rhi::ShaderDesc computeShaderDesc{};
-		computeShaderDesc.stage    = rhi::ShaderStage::COMPUTE;
-		computeShaderDesc.code     = computeCode.data();
-		computeShaderDesc.codeSize = computeCode.size();
-		auto computeShader         = device->CreateShader(computeShaderDesc);
+		auto computeShader = shaderFactory.getOrCreateShader(
+		    "shaders/compiled/particle_compute.comp.spv",
+		    rhi::ShaderStage::COMPUTE);
 
 		// Create compute descriptor set layout
 		rhi::DescriptorSetLayoutDesc computeLayoutDesc{};
@@ -165,21 +159,12 @@ int main()
 		computeDescriptorSetB->BindBuffer(1, inputBindingB);
 		computeDescriptorSetB->BindBuffer(2, outputBindingB);
 
-		LOG_INFO("Loading rendering shaders");
-		auto vertexCode   = LoadShaderCode(container::to_string("shaders/compiled/particle_render.vert.spv"));
-		auto fragmentCode = LoadShaderCode(container::to_string("shaders/compiled/particle_render.frag.spv"));
-
-		rhi::ShaderDesc vsDesc{};
-		vsDesc.stage      = rhi::ShaderStage::VERTEX;
-		vsDesc.code       = vertexCode.data();
-		vsDesc.codeSize   = vertexCode.size();
-		auto vertexShader = device->CreateShader(vsDesc);
-
-		rhi::ShaderDesc fsDesc{};
-		fsDesc.stage        = rhi::ShaderStage::FRAGMENT;
-		fsDesc.code         = fragmentCode.data();
-		fsDesc.codeSize     = fragmentCode.size();
-		auto fragmentShader = device->CreateShader(fsDesc);
+		auto vertexShader = shaderFactory.getOrCreateShader(
+		    "shaders/compiled/particle_render.vert.spv",
+		    rhi::ShaderStage::VERTEX);
+		auto fragmentShader = shaderFactory.getOrCreateShader(
+		    "shaders/compiled/particle_render.frag.spv",
+		    rhi::ShaderStage::FRAGMENT);
 
 		// Create MVP uniform buffer
 		rhi::BufferDesc mvpBufferDesc{};
