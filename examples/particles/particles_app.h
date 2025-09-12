@@ -30,7 +30,7 @@ class DeviceManager;
 // Use msplat namespace to avoid repetitive prefixes
 using namespace msplat;
 
-constexpr uint32_t PARTICLE_COUNT       = 10000;
+constexpr uint32_t PARTICLE_COUNT       = 100000;
 constexpr uint32_t WORKGROUP_SIZE       = 64;
 constexpr int      MAX_FRAMES_IN_FLIGHT = 2;
 constexpr float    FIXED_TIMESTEP       = 1.0f / 60.0f;
