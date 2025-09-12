@@ -22,7 +22,8 @@ class IStream;
 class IFileSystem;
 
 /// @brief Callback type for file/directory enumeration, using the project's custom function wrapper.
-using enumerate_callback_t = container::function<void(const container::filesystem::path &)>;
+/// Note: Uses std::filesystem::path for ABI stability across translation units
+using enumerate_callback_t = container::function<void(const std::filesystem::path &)>;
 
 //=========================================================================
 // Blob Interface & Implementation
@@ -111,7 +112,7 @@ class FileStream final : public IStream
 	/// @brief Attempts to open a file and create a stream.
 	/// @param path The path to the file.
 	/// @return A unique_ptr to the stream, or nullptr on failure.
-	static container::unique_ptr<FileStream> open(const container::filesystem::path &path);
+	static container::unique_ptr<FileStream> open(const std::filesystem::path &path);
 
 	/// @brief Closes the file handle upon destruction.
 	~FileStream() override;
@@ -176,28 +177,28 @@ class IFileSystem
 	/// @brief Opens a file for stream-based reading.
 	/// @param path The virtual path to the file.
 	/// @return A unique_ptr to an IStream, or nullptr if the file cannot be opened.
-	virtual container::unique_ptr<IStream> openStream(const container::filesystem::path &path) = 0;
+	virtual container::unique_ptr<IStream> openStream(const std::filesystem::path &path) = 0;
 
 	/// @brief Reads an entire file into a blob.
 	/// @param path The virtual path to the file.
 	/// @return A unique_ptr to an IBlob, or nullptr if the file cannot be read.
-	virtual container::unique_ptr<IBlob> readFile(const container::filesystem::path &path) = 0;
+	virtual container::unique_ptr<IBlob> readFile(const std::filesystem::path &path) = 0;
 
 	/// @brief Checks if a file exists at the given virtual path.
-	virtual bool fileExists(const container::filesystem::path &path) = 0;
+	virtual bool fileExists(const std::filesystem::path &path) = 0;
 
 	/// @brief Checks if a folder exists at the given virtual path.
-	virtual bool folderExists(const container::filesystem::path &path) = 0;
+	virtual bool folderExists(const std::filesystem::path &path) = 0;
 
 	/// @brief Enumerates all files in a directory.
 	/// @param path The virtual path to the directory.
 	/// @param callback A function to be called for each file found.
-	virtual void enumerateFiles(const container::filesystem::path &path, enumerate_callback_t callback) = 0;
+	virtual void enumerateFiles(const std::filesystem::path &path, enumerate_callback_t callback) = 0;
 
 	/// @brief Enumerates all subdirectories in a directory.
 	/// @param path The virtual path to the directory.
 	/// @param callback A function to be called for each directory found.
-	virtual void enumerateDirectories(const container::filesystem::path &path, enumerate_callback_t callback) = 0;
+	virtual void enumerateDirectories(const std::filesystem::path &path, enumerate_callback_t callback) = 0;
 };
 
 /**
@@ -209,21 +210,21 @@ class NativeFileSystem final : public IFileSystem
   public:
 	/// @brief Constructs a native file system rooted at a specific base path.
 	/// @param basePath The root path on the physical file system.
-	explicit NativeFileSystem(const container::filesystem::path &basePath);
+	explicit NativeFileSystem(const std::filesystem::path &basePath);
 
 	/// @brief IFileSystem interface implementation.
-	container::unique_ptr<IStream> openStream(const container::filesystem::path &path) override;
-	container::unique_ptr<IBlob>   readFile(const container::filesystem::path &path) override;
-	bool                           fileExists(const container::filesystem::path &path) override;
-	bool                           folderExists(const container::filesystem::path &path) override;
-	void                           enumerateFiles(const container::filesystem::path &path, enumerate_callback_t callback) override;
-	void                           enumerateDirectories(const container::filesystem::path &path, enumerate_callback_t callback) override;
+	container::unique_ptr<IStream> openStream(const std::filesystem::path &path) override;
+	container::unique_ptr<IBlob>   readFile(const std::filesystem::path &path) override;
+	bool                           fileExists(const std::filesystem::path &path) override;
+	bool                           folderExists(const std::filesystem::path &path) override;
+	void                           enumerateFiles(const std::filesystem::path &path, enumerate_callback_t callback) override;
+	void                           enumerateDirectories(const std::filesystem::path &path, enumerate_callback_t callback) override;
 
   private:
 	/// @brief Resolves a virtual path to a physical path and validates it.
-	container::filesystem::path resolve(const container::filesystem::path &path) const;
+	std::filesystem::path resolve(const std::filesystem::path &path) const;
 
-	container::filesystem::path m_basePath;
+	std::filesystem::path m_basePath;
 };
 
 /**
@@ -239,28 +240,28 @@ class RootFileSystem final : public IFileSystem
 	/// @brief Mounts a file system at a given virtual path.
 	/// @param path The virtual path to mount at (e.g., "/assets").
 	/// @param fs The file system instance to mount.
-	void mount(const container::filesystem::path &path, container::shared_ptr<IFileSystem> fs);
+	void mount(const std::filesystem::path &path, container::shared_ptr<IFileSystem> fs);
 
 	/// @brief Unmounts a file system at a given virtual path.
 	/// @param path The virtual path to unmount.
 	/// @return True if successful, false otherwise.
-	bool unmount(const container::filesystem::path &path);
+	bool unmount(const std::filesystem::path &path);
 
 	/// @brief IFileSystem interface implementation.
 	/// These methods find the correct mount point and forward the call.
-	container::unique_ptr<IStream> openStream(const container::filesystem::path &path) override;
-	container::unique_ptr<IBlob>   readFile(const container::filesystem::path &path) override;
-	bool                           fileExists(const container::filesystem::path &path) override;
-	bool                           folderExists(const container::filesystem::path &path) override;
-	void                           enumerateFiles(const container::filesystem::path &path, enumerate_callback_t callback) override;
-	void                           enumerateDirectories(const container::filesystem::path &path, enumerate_callback_t callback) override;
+	container::unique_ptr<IStream> openStream(const std::filesystem::path &path) override;
+	container::unique_ptr<IBlob>   readFile(const std::filesystem::path &path) override;
+	bool                           fileExists(const std::filesystem::path &path) override;
+	bool                           folderExists(const std::filesystem::path &path) override;
+	void                           enumerateFiles(const std::filesystem::path &path, enumerate_callback_t callback) override;
+	void                           enumerateDirectories(const std::filesystem::path &path, enumerate_callback_t callback) override;
 
   private:
 	/// @brief Finds the file system and relative path for a given virtual path.
 	/// @param path The full virtual path.
 	/// @param[out] outRelativePath The path relative to the found file system.
 	/// @return A pointer to the file system that handles this path, or nullptr.
-	IFileSystem *findMountPoint(const container::filesystem::path &path, container::filesystem::path &outRelativePath) const;
+	IFileSystem *findMountPoint(const std::filesystem::path &path, std::filesystem::path &outRelativePath) const;
 
 	// Using a vector of pairs sorted by path length (desc) to handle nested mounts correctly.
 	// e.g., if "/assets" and "/assets/textures" are mounted, a lookup for

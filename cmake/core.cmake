@@ -54,6 +54,9 @@ set(CORE_SOURCES
 
     # Platform sources
     ${CMAKE_SOURCE_DIR}/src/core/platform.cpp
+    
+    # Container sources
+    ${CMAKE_SOURCE_DIR}/src/core/containers/filesystem.cpp
 
     # Third-party sources
     ${CMAKE_SOURCE_DIR}/third-party/mimalloc/src/static.c

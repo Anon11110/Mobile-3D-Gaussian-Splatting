@@ -169,7 +169,7 @@ size_t MemoryStream::length() const
 //=========================================================================
 
 NativeFileSystem::NativeFileSystem(const std::filesystem::path &basePath) :
-    m_basePath(std::filesystem::canonical(basePath))
+    m_basePath(container::filesystem::canonical(basePath))
 {
 	if (!container::filesystem::exists(m_basePath))
 	{
