@@ -10,9 +10,14 @@ from utils.terminal import term
 
 
 ALLOWED_EXTENSIONS = {
+    # C++
     ".h",
     ".hpp",
     ".cpp",
+    # Shaders
+    ".vert",
+    ".frag",
+    ".comp",
 }
 
 # Hardcoded directories to skip (takes priority over FORMAT_DIRS)
