@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -140,6 +141,10 @@ inline string to_string(T &&t)
 	else if constexpr (std::is_same_v<std::decay_t<T>, std::string>)
 	{
 		return to_pmr_string(std::forward<T>(t));
+	}
+	else if constexpr (std::is_same_v<std::decay_t<T>, std::filesystem::path>)
+	{
+		return to_pmr_string(t.string());
 	}
 	else if constexpr (std::is_convertible_v<T, std::string>)
 	{

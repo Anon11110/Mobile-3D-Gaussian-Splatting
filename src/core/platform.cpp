@@ -220,7 +220,7 @@ msplat::container::vector<TraceItem> get_backtrace(int max_frames)
 
 	SymInitialize(process, nullptr, TRUE);
 
-	WORD frames = CaptureStackBackTrace(0, std::min(max_frames, 256), stack, nullptr);
+	WORD frames = CaptureStackBackTrace(0, (std::min) (max_frames, 256), stack, nullptr);
 
 	result.reserve(frames > 0 ? frames - 1 : 0);
 	for (int i = 1; i < frames; ++i)        // Skip first frame (current function)

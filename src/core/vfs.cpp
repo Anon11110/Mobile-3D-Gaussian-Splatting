@@ -168,8 +168,8 @@ size_t MemoryStream::length() const
 // NativeFileSystem Implementation
 //=========================================================================
 
-NativeFileSystem::NativeFileSystem(const container::filesystem::path &basePath) :
-    m_basePath(container::filesystem::canonical(basePath))
+NativeFileSystem::NativeFileSystem(const std::filesystem::path &basePath) :
+    m_basePath(std::filesystem::canonical(basePath))
 {
 	if (!container::filesystem::exists(m_basePath))
 	{
@@ -186,7 +186,7 @@ NativeFileSystem::NativeFileSystem(const container::filesystem::path &basePath) 
 	LOG_DEBUG(container::string("NativeFileSystem initialized with base path: ") + container::to_string(m_basePath));
 }
 
-container::filesystem::path NativeFileSystem::resolve(const container::filesystem::path &path) const
+std::filesystem::path NativeFileSystem::resolve(const std::filesystem::path &path) const
 {
 	// Combine base path with requested path
 	auto fullPath = m_basePath / path;
@@ -215,7 +215,7 @@ container::filesystem::path NativeFileSystem::resolve(const container::filesyste
 	return canonical;
 }
 
-container::unique_ptr<IStream> NativeFileSystem::openStream(const container::filesystem::path &path)
+container::unique_ptr<IStream> NativeFileSystem::openStream(const std::filesystem::path &path)
 {
 	auto fullPath = resolve(path);
 	if (fullPath.empty())
@@ -226,7 +226,7 @@ container::unique_ptr<IStream> NativeFileSystem::openStream(const container::fil
 	return FileStream::open(fullPath);
 }
 
-container::unique_ptr<IBlob> NativeFileSystem::readFile(const container::filesystem::path &path)
+container::unique_ptr<IBlob> NativeFileSystem::readFile(const std::filesystem::path &path)
 {
 	auto stream = openStream(path);
 	if (!stream)
@@ -250,7 +250,7 @@ container::unique_ptr<IBlob> NativeFileSystem::readFile(const container::filesys
 	return container::make_unique<Blob>(std::move(buffer));
 }
 
-bool NativeFileSystem::fileExists(const container::filesystem::path &path)
+bool NativeFileSystem::fileExists(const std::filesystem::path &path)
 {
 	auto fullPath = resolve(path);
 	if (fullPath.empty())
@@ -261,7 +261,7 @@ bool NativeFileSystem::fileExists(const container::filesystem::path &path)
 	return container::filesystem::exists(fullPath) && container::filesystem::is_regular_file(fullPath);
 }
 
-bool NativeFileSystem::folderExists(const container::filesystem::path &path)
+bool NativeFileSystem::folderExists(const std::filesystem::path &path)
 {
 	auto fullPath = resolve(path);
 	if (fullPath.empty())
@@ -272,7 +272,7 @@ bool NativeFileSystem::folderExists(const container::filesystem::path &path)
 	return container::filesystem::exists(fullPath) && container::filesystem::is_directory(fullPath);
 }
 
-void NativeFileSystem::enumerateFiles(const container::filesystem::path &path, enumerate_callback_t callback)
+void NativeFileSystem::enumerateFiles(const std::filesystem::path &path, enumerate_callback_t callback)
 {
 	auto fullPath = resolve(path);
 	if (fullPath.empty() || !container::filesystem::is_directory(fullPath))
@@ -298,7 +298,7 @@ void NativeFileSystem::enumerateFiles(const container::filesystem::path &path, e
 	}
 }
 
-void NativeFileSystem::enumerateDirectories(const container::filesystem::path &path, enumerate_callback_t callback)
+void NativeFileSystem::enumerateDirectories(const std::filesystem::path &path, enumerate_callback_t callback)
 {
 	auto fullPath = resolve(path);
 	if (fullPath.empty() || !container::filesystem::is_directory(fullPath))
@@ -333,7 +333,7 @@ RootFileSystem::RootFileSystem() :
 {
 }
 
-void RootFileSystem::mount(const container::filesystem::path &path, container::shared_ptr<IFileSystem> fs)
+void RootFileSystem::mount(const std::filesystem::path &path, std::shared_ptr<IFileSystem> fs)
 {
 	if (!fs)
 	{
@@ -364,7 +364,7 @@ void RootFileSystem::mount(const container::filesystem::path &path, container::s
 	LOG_DEBUG(container::string("Mounted filesystem at: ") + pathStr);
 }
 
-bool RootFileSystem::unmount(const container::filesystem::path &path)
+bool RootFileSystem::unmount(const std::filesystem::path &path)
 {
 	container::string pathStr = container::to_string(path);
 
@@ -390,8 +390,8 @@ bool RootFileSystem::unmount(const container::filesystem::path &path)
 	return removed;
 }
 
-IFileSystem *RootFileSystem::findMountPoint(const container::filesystem::path &path,
-                                            container::filesystem::path       &outRelativePath) const
+IFileSystem *RootFileSystem::findMountPoint(const std::filesystem::path &path,
+                                            std::filesystem::path       &outRelativePath) const
 {
 	container::string pathStr = container::to_string(path);
 
@@ -433,10 +433,10 @@ IFileSystem *RootFileSystem::findMountPoint(const container::filesystem::path &p
 	return nullptr;
 }
 
-container::unique_ptr<IStream> RootFileSystem::openStream(const container::filesystem::path &path)
+container::unique_ptr<IStream> RootFileSystem::openStream(const std::filesystem::path &path)
 {
-	container::filesystem::path relativePath;
-	IFileSystem                *fs = findMountPoint(path, relativePath);
+	std::filesystem::path relativePath;
+	IFileSystem          *fs = findMountPoint(path, relativePath);
 
 	if (!fs)
 	{
@@ -447,10 +447,10 @@ container::unique_ptr<IStream> RootFileSystem::openStream(const container::files
 	return fs->openStream(relativePath);
 }
 
-container::unique_ptr<IBlob> RootFileSystem::readFile(const container::filesystem::path &path)
+container::unique_ptr<IBlob> RootFileSystem::readFile(const std::filesystem::path &path)
 {
-	container::filesystem::path relativePath;
-	IFileSystem                *fs = findMountPoint(path, relativePath);
+	std::filesystem::path relativePath;
+	IFileSystem          *fs = findMountPoint(path, relativePath);
 
 	if (!fs)
 	{
@@ -461,10 +461,10 @@ container::unique_ptr<IBlob> RootFileSystem::readFile(const container::filesyste
 	return fs->readFile(relativePath);
 }
 
-bool RootFileSystem::fileExists(const container::filesystem::path &path)
+bool RootFileSystem::fileExists(const std::filesystem::path &path)
 {
-	container::filesystem::path relativePath;
-	IFileSystem                *fs = findMountPoint(path, relativePath);
+	std::filesystem::path relativePath;
+	IFileSystem          *fs = findMountPoint(path, relativePath);
 
 	if (!fs)
 	{
@@ -474,10 +474,10 @@ bool RootFileSystem::fileExists(const container::filesystem::path &path)
 	return fs->fileExists(relativePath);
 }
 
-bool RootFileSystem::folderExists(const container::filesystem::path &path)
+bool RootFileSystem::folderExists(const std::filesystem::path &path)
 {
-	container::filesystem::path relativePath;
-	IFileSystem                *fs = findMountPoint(path, relativePath);
+	std::filesystem::path relativePath;
+	IFileSystem          *fs = findMountPoint(path, relativePath);
 
 	if (!fs)
 	{
@@ -487,10 +487,10 @@ bool RootFileSystem::folderExists(const container::filesystem::path &path)
 	return fs->folderExists(relativePath);
 }
 
-void RootFileSystem::enumerateFiles(const container::filesystem::path &path, enumerate_callback_t callback)
+void RootFileSystem::enumerateFiles(const std::filesystem::path &path, enumerate_callback_t callback)
 {
-	container::filesystem::path relativePath;
-	IFileSystem                *fs = findMountPoint(path, relativePath);
+	std::filesystem::path relativePath;
+	IFileSystem          *fs = findMountPoint(path, relativePath);
 
 	if (!fs)
 	{
@@ -505,15 +505,15 @@ void RootFileSystem::enumerateFiles(const container::filesystem::path &path, enu
 		mountPrefix += '/';
 	}
 
-	fs->enumerateFiles(relativePath, [&mountPrefix, &callback](const container::filesystem::path &p) {
-		callback(container::filesystem::path(mountPrefix) / p);
+	fs->enumerateFiles(relativePath, [&mountPrefix, &callback](const std::filesystem::path &p) {
+		callback(std::filesystem::path(container::to_std_string(mountPrefix)) / p);
 	});
 }
 
-void RootFileSystem::enumerateDirectories(const container::filesystem::path &path, enumerate_callback_t callback)
+void RootFileSystem::enumerateDirectories(const std::filesystem::path &path, enumerate_callback_t callback)
 {
-	container::filesystem::path relativePath;
-	IFileSystem                *fs = findMountPoint(path, relativePath);
+	std::filesystem::path relativePath;
+	IFileSystem          *fs = findMountPoint(path, relativePath);
 
 	if (!fs)
 	{
@@ -528,8 +528,8 @@ void RootFileSystem::enumerateDirectories(const container::filesystem::path &pat
 		mountPrefix += '/';
 	}
 
-	fs->enumerateDirectories(relativePath, [&mountPrefix, &callback](const container::filesystem::path &p) {
-		callback(container::filesystem::path(mountPrefix) / p);
+	fs->enumerateDirectories(relativePath, [&mountPrefix, &callback](const std::filesystem::path &p) {
+		callback(std::filesystem::path(container::to_std_string(mountPrefix)) / p);
 	});
 }
 
