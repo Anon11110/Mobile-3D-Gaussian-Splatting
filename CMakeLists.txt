@@ -19,6 +19,9 @@ include(cmake/core.cmake)
 # Include engine library configuration
 include(cmake/engine.cmake)
 
+# Include app library configuration
+include(cmake/app.cmake)
+
 # Add subdirectories
 add_subdirectory(rhi)
 add_subdirectory(examples)

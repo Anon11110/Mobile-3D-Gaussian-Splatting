@@ -1,8 +1,12 @@
 # Triangle Example Executable
-add_executable(triangle main.cpp)
+add_executable(triangle 
+	main.cpp
+	triangle_app.cpp
+	triangle_app.h
+)
 
-# Link with RHI, core, and engine libraries
-target_link_libraries(triangle PRIVATE RHI core engine)
+# Link with RHI, core, engine, and app libraries
+target_link_libraries(triangle PRIVATE RHI core engine app)
 
 # Set C++ standard
 target_compile_features(triangle PRIVATE cxx_std_20)

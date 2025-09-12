@@ -1,0 +1,133 @@
+#pragma once
+
+#include "core/containers/memory.h"
+#include "core/containers/vector.h"
+#include "core/math/math.h"
+#include "core/timer.h"
+#include "engine/shader_factory.h"
+#include "msplat/app/application.h"
+
+namespace rhi
+{
+class IRHIBuffer;
+class IRHIShader;
+class IRHIDescriptorSetLayout;
+class IRHIDescriptorSet;
+class IRHIPipeline;
+class IRHISemaphore;
+class IRHIFence;
+class IRHICommandList;
+}        // namespace rhi
+
+namespace msplat
+{
+namespace app
+{
+class DeviceManager;
+}        // namespace app
+}        // namespace msplat
+
+// Use msplat namespace to avoid repetitive prefixes
+using namespace msplat;
+
+constexpr uint32_t PARTICLE_COUNT       = 10000;
+constexpr uint32_t WORKGROUP_SIZE       = 64;
+constexpr int      MAX_FRAMES_IN_FLIGHT = 2;
+constexpr float    FIXED_TIMESTEP       = 1.0f / 60.0f;
+
+/**
+ * @class ParticlesApp
+ * @brief GPU particle simulation application with compute shaders.
+ *
+ * This application demonstrates GPU-based particle physics simulation
+ * using compute shaders and double buffering for optimal performance.
+ */
+class ParticlesApp : public app::IApplication
+{
+  public:
+	ParticlesApp()           = default;
+	~ParticlesApp() override = default;
+
+	// IApplication interface
+	bool onInit(app::DeviceManager *deviceManager) override;
+	void onUpdate(float deltaTime) override;
+	void onRender() override;
+	void onShutdown() override;
+	void onKey(int key, int action, int mods) override;
+	void onMouseButton(int button, int action, int mods) override;
+	void onMouseMove(double xpos, double ypos) override;
+
+  private:
+	// Particle structure (matches shader layout)
+	struct Particle
+	{
+		math::vec3 position;
+		float      padding1;
+		math::vec3 velocity;
+		float      padding2;
+	};
+
+	// Simulation parameters (matches shader layout)
+	struct SimulationParams
+	{
+		float      deltaTime;
+		float      gravity;
+		math::vec2 bounds;
+	};
+
+	// Device manager reference
+	app::DeviceManager *m_deviceManager = nullptr;
+
+	// Particle buffers (double buffered for compute)
+	container::unique_ptr<rhi::IRHIBuffer> m_particleBufferA;
+	container::unique_ptr<rhi::IRHIBuffer> m_particleBufferB;
+	container::unique_ptr<rhi::IRHIBuffer> m_paramsBuffer;
+	void                                  *m_paramsDataPtr = nullptr;        // Persistently mapped
+
+	// MVP uniform buffer for rendering
+	container::unique_ptr<rhi::IRHIBuffer> m_mvpBuffer;
+	void                                  *m_mvpDataPtr = nullptr;        // Persistently mapped
+
+	// Shader factory and shaders
+	container::unique_ptr<engine::ShaderFactory> m_shaderFactory;
+	container::shared_ptr<rhi::IRHIShader>       m_computeShader;
+	container::shared_ptr<rhi::IRHIShader>       m_vertexShader;
+	container::shared_ptr<rhi::IRHIShader>       m_fragmentShader;
+
+	// Compute pipeline resources
+	container::unique_ptr<rhi::IRHIDescriptorSetLayout> m_computeDescriptorSetLayout;
+	container::unique_ptr<rhi::IRHIDescriptorSet>       m_computeDescriptorSetA;        // A->B
+	container::unique_ptr<rhi::IRHIDescriptorSet>       m_computeDescriptorSetB;        // B->A
+	container::unique_ptr<rhi::IRHIPipeline>            m_computePipeline;
+
+	// Graphics pipeline resources
+	container::unique_ptr<rhi::IRHIDescriptorSetLayout> m_graphicsDescriptorSetLayout;
+	container::unique_ptr<rhi::IRHIDescriptorSet>       m_graphicsDescriptorSet;
+	container::unique_ptr<rhi::IRHIPipeline>            m_graphicsPipeline;
+
+	// Synchronization objects (per frame in flight)
+	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_imageAvailableSemaphores;
+	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_computeFinishedSemaphores;
+	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_graphicsReleasedSemaphores;
+	container::vector<container::unique_ptr<rhi::IRHIFence>>     m_inFlightFences;
+
+	// Render finished semaphores (per swapchain image)
+	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_renderFinishedSemaphores;
+
+	// Command lists (per frame in flight)
+	container::vector<container::unique_ptr<rhi::IRHICommandList>> m_computeCommandLists;
+	container::vector<container::unique_ptr<rhi::IRHICommandList>> m_graphicsPreCommandLists;
+	container::vector<container::unique_ptr<rhi::IRHICommandList>> m_graphicsCommandLists;
+
+	// Swapchain state tracking
+	container::vector<bool> m_imageFirstUse;
+
+	// Application state
+	timer::Timer      m_applicationTimer;
+	timer::FPSCounter m_fpsCounter;
+	float             m_lastTime     = 0.0f;
+	float             m_accumulator  = 0.0f;        // Physics accumulator for fixed timestep
+	bool              m_useBufferA   = true;        // true = A->B, false = B->A
+	uint32_t          m_currentFrame = 0;
+	bool              m_firstFrame   = true;        // Track first frame for initial transitions
+};

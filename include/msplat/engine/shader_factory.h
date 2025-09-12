@@ -124,7 +124,7 @@ class ShaderFactory
 	 * @return A hash value suitable for use as a map key
 	 *
 	 * This combines the filepath, stage, and macros into a single hash value
-	 * using the custom msplat::container::hash implementation.
+	 * using the custom container::hash implementation.
 	 */
 	size_t generateCacheKey(const container::string           &filepath,
 	                        rhi::ShaderStage                   stage,

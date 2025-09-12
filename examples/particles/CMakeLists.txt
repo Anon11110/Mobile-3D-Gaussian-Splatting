@@ -1,6 +1,10 @@
-add_executable(particles main.cpp)
+add_executable(particles 
+	main.cpp
+	particles_app.cpp
+	particles_app.h
+)
 
-target_link_libraries(particles PRIVATE RHI core engine)
+target_link_libraries(particles PRIVATE RHI core engine app)
 
 target_compile_features(particles PRIVATE cxx_std_20)
 

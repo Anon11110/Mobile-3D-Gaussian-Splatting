@@ -10,12 +10,12 @@ The project provides several runnable targets and libraries:
 
 - **`triangle`** - Vulkan triangle example showcasing the RHI (Rendering Hardware Interface) and core library integration
 <p align="left">
-  <img src="screenshots/example_triangle.png" alt="Triangle Example Screenshot" width="500"/>
+  <img src="docs/screenshots/example_triangle.png" alt="Triangle Example Screenshot" width="500"/>
 </p>
 
 - **`particles`** - GPU-accelerated particle simulation demonstrating compute shader capabilities
 <p align="left">
-  <img src="screenshots/example_particles.png" alt="Particles Example Screenshot" width="500"/>
+  <img src="docs/screenshots/example_particles.png" alt="Particles Example Screenshot" width="500"/>
 </p>
 
 - **`splat-loader`** - 3D Gaussian Splatting PLY file loader and analyzer
