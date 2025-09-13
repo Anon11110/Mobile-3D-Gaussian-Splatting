@@ -409,45 +409,6 @@ void ParticlesApp::OnRender()
 	// Direct write to persistently mapped buffer
 	memcpy(m_mvpDataPtr, &mvp, sizeof(math::mat4));
 
-	uint32_t imageIndex;
-	// Use the semaphore for the CURRENT frame to acquire the image
-	rhi::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, m_imageAvailableSemaphores[m_currentFrame].get());
-
-	if (acquireStatus == rhi::SwapchainStatus::OUT_OF_DATE)
-	{
-		LOG_WARNING("Swapchain out of date, recreating");
-		int width, height;
-		glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
-		while (width == 0 || height == 0)
-		{
-			glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
-			glfwWaitEvents();
-		}
-		swapchain->Resize(width, height);
-		for (auto &firstUse : m_imageFirstUse)
-		{
-			firstUse = true;
-		}
-		m_imageFirstUse.resize(swapchain->GetImageCount(), true);
-
-		// Recreate render finished semaphores if swapchain image count changed
-		if (m_renderFinishedSemaphores.size() != swapchain->GetImageCount())
-		{
-			m_renderFinishedSemaphores.clear();
-			m_renderFinishedSemaphores.resize(swapchain->GetImageCount());
-			for (uint32_t i = 0; i < swapchain->GetImageCount(); i++)
-			{
-				m_renderFinishedSemaphores[i] = device->CreateSemaphore();
-			}
-		}
-		return;
-	}
-	else if (acquireStatus == rhi::SwapchainStatus::ERROR_OCCURRED)
-	{
-		LOG_ERROR("Failed to acquire swapchain image");
-		return;
-	}
-
 	auto *inputBuffer  = m_useBufferA ? m_particleBufferA.get() : m_particleBufferB.get();
 	auto *outputBuffer = m_useBufferA ? m_particleBufferB.get() : m_particleBufferA.get();
 
@@ -550,6 +511,45 @@ void ParticlesApp::OnRender()
 		device->SubmitCommandLists(computeCmdListSpan, rhi::QueueType::COMPUTE, computeSubmit);
 
 		m_useBufferA = !m_useBufferA;
+	}
+
+	uint32_t imageIndex;
+	// Use the semaphore for the CURRENT frame to acquire the image
+	rhi::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, m_imageAvailableSemaphores[m_currentFrame].get());
+
+	if (acquireStatus == rhi::SwapchainStatus::OUT_OF_DATE)
+	{
+		LOG_WARNING("Swapchain out of date, recreating");
+		int width, height;
+		glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+		while (width == 0 || height == 0)
+		{
+			glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+			glfwWaitEvents();
+		}
+		swapchain->Resize(width, height);
+		for (auto &firstUse : m_imageFirstUse)
+		{
+			firstUse = true;
+		}
+		m_imageFirstUse.resize(swapchain->GetImageCount(), true);
+
+		// Recreate render finished semaphores if swapchain image count changed
+		if (m_renderFinishedSemaphores.size() != swapchain->GetImageCount())
+		{
+			m_renderFinishedSemaphores.clear();
+			m_renderFinishedSemaphores.resize(swapchain->GetImageCount());
+			for (uint32_t i = 0; i < swapchain->GetImageCount(); i++)
+			{
+				m_renderFinishedSemaphores[i] = device->CreateSemaphore();
+			}
+		}
+		return;
+	}
+	else if (acquireStatus == rhi::SwapchainStatus::ERROR_OCCURRED)
+	{
+		LOG_ERROR("Failed to acquire swapchain image");
+		return;
 	}
 
 	// GRAPHICS PHASE (Consumer)
