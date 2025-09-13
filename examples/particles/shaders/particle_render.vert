@@ -2,20 +2,25 @@
 
 layout(location = 0) in vec3 inPosition;
 
+// We pass the emitter ID (0 or 1) to the fragment shader.
+// 'flat' ensures the value is not interpolated for point primitives.
+layout(location = 0) out flat float fragEmitterID;
+layout(location = 1) out vec3 fragPosition;
+
 layout(set = 0, binding = 0) uniform MVP
 {
 	mat4 mvp;
 }
 ubo;
 
-layout(location = 0) out vec3 fragColor;
-
 void main()
 {
-	gl_Position  = ubo.mvp * vec4(inPosition, 1.0);
-	gl_PointSize = 3.0;
+	gl_Position = ubo.mvp * vec4(inPosition, 1.0);
 
-	// Color based on particle height
-	float normalizedHeight = (inPosition.y + 1.0) / 2.0;
-	fragColor              = mix(vec3(1.0, 0.8, 0.2), vec3(0.2, 0.4, 1.0), normalizedHeight);
+	// Make particles small for a fine smoke effect
+	gl_PointSize = 2.0;
+
+	// Determine emitter ID from the vertex index and pass to fragment shader
+	fragEmitterID = float(gl_VertexIndex & 1u);
+	fragPosition  = inPosition;
 }

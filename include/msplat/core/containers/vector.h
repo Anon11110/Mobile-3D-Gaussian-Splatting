@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <initializer_list>
+#include <iterator>
 #include <memory>
 #include <memory_resource>
 #include <type_traits>
@@ -435,6 +437,45 @@ class vector
 	{
 		destroy_elements(mData, mData + mSize);
 		mSize = 0;
+	}
+
+	// Assign methods for STL compatibility
+	// Assign from initializer list
+	void assign(std::initializer_list<T> ilist)
+	{
+		clear();
+		reserve(ilist.size());
+		for (const T &value : ilist)
+		{
+			push_back(value);
+		}
+	}
+
+	// Assign count copies of value
+	void assign(size_t count, const T &value)
+	{
+		clear();
+		resize(count, value);
+	}
+
+	// Assign from iterator range
+	template <typename InputIt, typename = std::enable_if_t<!std::is_integral_v<InputIt>>>
+	void assign(InputIt first, InputIt last)
+	{
+		clear();
+
+		// For random access iterators, we can reserve the exact size
+		if constexpr (std::is_base_of_v<std::random_access_iterator_tag,
+		                                typename std::iterator_traits<InputIt>::iterator_category>)
+		{
+			size_t count = std::distance(first, last);
+			reserve(count);
+		}
+
+		for (InputIt it = first; it != last; ++it)
+		{
+			push_back(*it);
+		}
 	}
 
 	void shrink_to_fit()

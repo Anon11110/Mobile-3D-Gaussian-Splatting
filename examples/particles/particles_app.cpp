@@ -7,8 +7,46 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <numbers>
 
 using namespace msplat;
+
+// Helper function to generate vertices and indices for a wireframe sphere (icosphere)
+void createSphereWireframe(container::vector<math::vec3> &vertices, container::vector<uint32_t> &indices, int subdivisions)
+{
+	const float X = 0.525731112119133606f;
+	const float Z = 0.850650808352039932f;
+
+	// Icosahedron vertices
+	vertices.assign({{-X, 0.0, Z}, {X, 0.0, Z}, {-X, 0.0, -Z}, {X, 0.0, -Z}, {0.0, Z, X}, {0.0, Z, -X}, {0.0, -Z, X}, {0.0, -Z, -X}, {Z, X, 0.0}, {-Z, X, 0.0}, {Z, -X, 0.0}, {-Z, -X, 0.0}});
+
+	// Triangle indices for icosahedron (20 triangles)
+	container::vector<uint32_t> triangleIndices;
+	triangleIndices.assign({0, 1, 4, 0, 4, 9, 9, 4, 5, 4, 8, 5, 4, 1, 8,
+	                        8, 1, 10, 8, 10, 3, 5, 8, 3, 5, 3, 2, 5, 2, 9,
+	                        9, 2, 11, 0, 9, 11, 0, 11, 6, 0, 6, 1, 1, 6, 10,
+	                        3, 10, 7, 3, 7, 2, 2, 7, 11, 6, 11, 7, 6, 7, 10});
+
+	// Convert triangle indices to line indices for wireframe
+	// Each triangle (A,B,C) becomes three edges: A-B, B-C, C-A
+	indices.clear();
+	indices.reserve(triangleIndices.size() * 2);        // Each triangle has 3 edges, each edge needs 2 indices
+
+	for (size_t i = 0; i < triangleIndices.size(); i += 3)
+	{
+		uint32_t a = triangleIndices[i];
+		uint32_t b = triangleIndices[i + 1];
+		uint32_t c = triangleIndices[i + 2];
+
+		// Add three edges for this triangle
+		indices.push_back(a);
+		indices.push_back(b);        // Edge A-B
+		indices.push_back(b);
+		indices.push_back(c);        // Edge B-C
+		indices.push_back(c);
+		indices.push_back(a);        // Edge C-A
+	}
+}
 
 bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 {
@@ -81,9 +119,9 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	m_computeDescriptorSetB = device->CreateDescriptorSet(m_computeDescriptorSetLayout.get(), rhi::QueueType::COMPUTE);
 
 	// Bind compute descriptor sets
-	rhi::BufferBinding paramsBinding{};
-	paramsBinding.buffer = m_paramsBuffer.get();
-	paramsBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
+	rhi::BufferBinding paramsBindingCompute{};
+	paramsBindingCompute.buffer = m_paramsBuffer.get();
+	paramsBindingCompute.type   = rhi::DescriptorType::UNIFORM_BUFFER;
 
 	rhi::BufferBinding inputBindingA{};
 	inputBindingA.buffer = m_particleBufferA.get();
@@ -102,15 +140,16 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	outputBindingB.type   = rhi::DescriptorType::STORAGE_BUFFER;
 
 	// Set A: reads from A, writes to B
-	m_computeDescriptorSetA->BindBuffer(0, paramsBinding);
+	m_computeDescriptorSetA->BindBuffer(0, paramsBindingCompute);
 	m_computeDescriptorSetA->BindBuffer(1, inputBindingA);
 	m_computeDescriptorSetA->BindBuffer(2, outputBindingA);
 
 	// Set B: reads from B, writes to A
-	m_computeDescriptorSetB->BindBuffer(0, paramsBinding);
+	m_computeDescriptorSetB->BindBuffer(0, paramsBindingCompute);
 	m_computeDescriptorSetB->BindBuffer(1, inputBindingB);
 	m_computeDescriptorSetB->BindBuffer(2, outputBindingB);
 
+	// --- Graphics Resources for Particles ---
 	m_vertexShader = m_shaderFactory->getOrCreateShader(
 	    "shaders/compiled/particle_render.vert.spv",
 	    rhi::ShaderStage::VERTEX);
@@ -130,7 +169,8 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	// Create graphics descriptor set layout
 	rhi::DescriptorSetLayoutDesc graphicsLayoutDesc{};
 	graphicsLayoutDesc.bindings = {
-	    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::VERTEX}        // MVP matrix
+	    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},         // MVP matrix
+	    {1, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::FRAGMENT}        // Simulation params for time
 	};
 	m_graphicsDescriptorSetLayout = device->CreateDescriptorSetLayout(graphicsLayoutDesc);
 
@@ -142,13 +182,19 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	mvpBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
 	m_graphicsDescriptorSet->BindBuffer(0, mvpBinding);
 
+	// Also bind the simulation parameters buffer for the fragment shader
+	rhi::BufferBinding paramsBindingGfx{};
+	paramsBindingGfx.buffer = m_paramsBuffer.get();
+	paramsBindingGfx.type   = rhi::DescriptorType::UNIFORM_BUFFER;
+	m_graphicsDescriptorSet->BindBuffer(1, paramsBindingGfx);
+
 	// Create graphics pipeline
 	rhi::GraphicsPipelineDesc pipelineDesc{};
 	pipelineDesc.vertexShader   = m_vertexShader.get();
 	pipelineDesc.fragmentShader = m_fragmentShader.get();
 
 	pipelineDesc.vertexLayout.attributes = {
-	    {0, 0, rhi::VertexFormat::R32G32B32_SFLOAT, 0}        // position
+	    {0, 0, rhi::VertexFormat::R32G32B32_SFLOAT, offsetof(Particle, position)}        // position
 	};
 	pipelineDesc.vertexLayout.bindings = {{0, sizeof(Particle), false}};
 
@@ -159,8 +205,14 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	pipelineDesc.rasterizationState.polygonMode = rhi::PolygonMode::FILL;
 
 	pipelineDesc.colorBlendAttachments.resize(1);
-	pipelineDesc.colorBlendAttachments[0].blendEnable    = false;
-	pipelineDesc.colorBlendAttachments[0].colorWriteMask = 0xF;
+	pipelineDesc.colorBlendAttachments[0].blendEnable         = true;
+	pipelineDesc.colorBlendAttachments[0].srcColorBlendFactor = rhi::BlendFactor::ONE;
+	pipelineDesc.colorBlendAttachments[0].dstColorBlendFactor = rhi::BlendFactor::ONE;
+	pipelineDesc.colorBlendAttachments[0].colorBlendOp        = rhi::BlendOp::ADD;
+	pipelineDesc.colorBlendAttachments[0].srcAlphaBlendFactor = rhi::BlendFactor::ONE;
+	pipelineDesc.colorBlendAttachments[0].dstAlphaBlendFactor = rhi::BlendFactor::ONE;
+	pipelineDesc.colorBlendAttachments[0].alphaBlendOp        = rhi::BlendOp::ADD;
+	pipelineDesc.colorBlendAttachments[0].colorWriteMask      = 0xF;
 
 	pipelineDesc.targetSignature.colorFormats = {swapchain->GetBackBuffer(0)->GetFormat()};
 	pipelineDesc.targetSignature.depthFormat  = rhi::TextureFormat::UNDEFINED;
@@ -169,6 +221,67 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	pipelineDesc.descriptorSetLayouts = {m_graphicsDescriptorSetLayout.get()};
 
 	m_graphicsPipeline = device->CreateGraphicsPipeline(pipelineDesc);
+
+	// --- Debug Sphere Resources ---
+	m_debugVertexShader = m_shaderFactory->getOrCreateShader(
+	    "shaders/compiled/debug_sphere.vert.spv",
+	    rhi::ShaderStage::VERTEX);
+	m_debugFragmentShader = m_shaderFactory->getOrCreateShader(
+	    "shaders/compiled/debug_sphere.frag.spv",
+	    rhi::ShaderStage::FRAGMENT);
+
+	container::vector<math::vec3> sphereVertices;
+	createSphereWireframe(sphereVertices, m_sphereIndices, 2);
+
+	rhi::BufferDesc sphereVbDesc{};
+	sphereVbDesc.size          = sizeof(math::vec3) * sphereVertices.size();
+	sphereVbDesc.usage         = rhi::BufferUsage::VERTEX;
+	sphereVbDesc.resourceUsage = rhi::ResourceUsage::DynamicUpload;
+	sphereVbDesc.initialData   = sphereVertices.data();
+	m_sphereVertexBuffer       = device->CreateBuffer(sphereVbDesc);
+
+	rhi::BufferDesc sphereIbDesc{};
+	sphereIbDesc.size          = sizeof(uint32_t) * m_sphereIndices.size();
+	sphereIbDesc.usage         = rhi::BufferUsage::INDEX;
+	sphereIbDesc.resourceUsage = rhi::ResourceUsage::DynamicUpload;
+	sphereIbDesc.initialData   = m_sphereIndices.data();
+	m_sphereIndexBuffer        = device->CreateBuffer(sphereIbDesc);
+
+	// Descriptor set for the debug sphere's UBO
+	rhi::DescriptorSetLayoutDesc debugLayoutDesc{};
+	debugLayoutDesc.bindings = {
+	    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::VERTEX}        // Debug UBO
+	};
+	m_debugDescriptorSetLayout = device->CreateDescriptorSetLayout(debugLayoutDesc);
+	m_debugDescriptorSet       = device->CreateDescriptorSet(m_debugDescriptorSetLayout.get(), rhi::QueueType::GRAPHICS);
+
+	rhi::BufferDesc debugUboDesc{};
+	debugUboDesc.size                      = sizeof(DebugUBO);
+	debugUboDesc.usage                     = rhi::BufferUsage::UNIFORM;
+	debugUboDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
+	debugUboDesc.hints.persistently_mapped = true;
+	m_debugUboBuffer                       = device->CreateBuffer(debugUboDesc);
+	m_debugUboDataPtr                      = m_debugUboBuffer->Map();
+
+	rhi::BufferBinding debugUboBinding{};
+	debugUboBinding.buffer = m_debugUboBuffer.get();
+	debugUboBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
+	m_debugDescriptorSet->BindBuffer(0, debugUboBinding);
+
+	// Pipeline for the debug sphere (wireframe)
+	rhi::GraphicsPipelineDesc debugPipelineDesc{};
+	debugPipelineDesc.vertexShader                   = m_debugVertexShader.get();
+	debugPipelineDesc.fragmentShader                 = m_debugFragmentShader.get();
+	debugPipelineDesc.vertexLayout.attributes        = {{0, 0, rhi::VertexFormat::R32G32B32_SFLOAT, 0}};
+	debugPipelineDesc.vertexLayout.bindings          = {{0, sizeof(math::vec3), false}};
+	debugPipelineDesc.topology                       = rhi::PrimitiveTopology::LINE_LIST;
+	debugPipelineDesc.rasterizationState.polygonMode = rhi::PolygonMode::FILL;
+	debugPipelineDesc.rasterizationState.cullMode    = rhi::CullMode::NONE;
+	debugPipelineDesc.colorBlendAttachments.resize(1);
+	debugPipelineDesc.colorBlendAttachments[0].colorWriteMask = 0xF;
+	debugPipelineDesc.targetSignature.colorFormats            = {swapchain->GetBackBuffer(0)->GetFormat()};
+	debugPipelineDesc.descriptorSetLayouts                    = {m_debugDescriptorSetLayout.get()};
+	m_debugPipeline                                           = device->CreateGraphicsPipeline(debugPipelineDesc);
 
 	// Create synchronization objects for frames in flight
 	m_imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
@@ -219,6 +332,51 @@ void ParticlesApp::onUpdate(float deltaTime)
 	m_lastTime        = currentTime;
 
 	m_accumulator += frameDelta;
+
+	// Update emission sphere positions (bounce within box boundaries)
+	// Using the fixed timestep for consistent physics
+	if (m_accumulator >= FIXED_TIMESTEP)
+	{
+		// Update sphere 1 position
+		m_sphere1Pos += m_sphere1Vel * FIXED_TIMESTEP;
+
+		// Bounce sphere 1 off walls using msplat::math functions
+		if (math::abs(m_sphere1Pos.x) > 2.0f - m_sphereRadius)
+		{
+			m_sphere1Pos.x = math::sign(m_sphere1Pos.x) * (2.0f - m_sphereRadius);
+			m_sphere1Vel.x = -m_sphere1Vel.x * 0.9f;
+		}
+		if (math::abs(m_sphere1Pos.y) > 1.0f - m_sphereRadius)
+		{
+			m_sphere1Pos.y = math::sign(m_sphere1Pos.y) * (1.0f - m_sphereRadius);
+			m_sphere1Vel.y = -m_sphere1Vel.y * 0.9f;
+		}
+		if (math::abs(m_sphere1Pos.z) > 2.0f - m_sphereRadius)
+		{
+			m_sphere1Pos.z = math::sign(m_sphere1Pos.z) * (2.0f - m_sphereRadius);
+			m_sphere1Vel.z = -m_sphere1Vel.z * 0.9f;
+		}
+
+		// Update sphere 2 position
+		m_sphere2Pos += m_sphere2Vel * FIXED_TIMESTEP;
+
+		// Bounce sphere 2 off walls using msplat::math functions
+		if (math::abs(m_sphere2Pos.x) > 2.0f - m_sphereRadius)
+		{
+			m_sphere2Pos.x = math::sign(m_sphere2Pos.x) * (2.0f - m_sphereRadius);
+			m_sphere2Vel.x = -m_sphere2Vel.x * 0.9f;
+		}
+		if (math::abs(m_sphere2Pos.y) > 1.0f - m_sphereRadius)
+		{
+			m_sphere2Pos.y = math::sign(m_sphere2Pos.y) * (1.0f - m_sphereRadius);
+			m_sphere2Vel.y = -m_sphere2Vel.y * 0.9f;
+		}
+		if (math::abs(m_sphere2Pos.z) > 2.0f - m_sphereRadius)
+		{
+			m_sphere2Pos.z = math::sign(m_sphere2Pos.z) * (2.0f - m_sphereRadius);
+			m_sphere2Vel.z = -m_sphere2Vel.z * 0.9f;
+		}
+	}
 }
 
 void ParticlesApp::onRender()
@@ -235,9 +393,14 @@ void ParticlesApp::onRender()
 	if (shouldRunPhysics)
 	{
 		SimulationParams simParams{};
-		simParams.deltaTime = FIXED_TIMESTEP;
-		simParams.gravity   = -2.0f;
-		simParams.bounds    = math::vec2(2.0f, 2.0f);
+		simParams.deltaTime    = FIXED_TIMESTEP;
+		simParams.time         = static_cast<float>(m_applicationTimer.elapsedSeconds());
+		simParams.bounds       = math::vec2(2.0f, 2.0f);
+		simParams.sphere1Pos   = m_sphere1Pos;
+		simParams.sphereRadius = m_sphereRadius;
+		simParams.sphere1Vel   = m_sphere1Vel;
+		simParams.sphere2Pos   = m_sphere2Pos;
+		simParams.sphere2Vel   = m_sphere2Vel;
 
 		memcpy(m_paramsDataPtr, &simParams, sizeof(SimulationParams));
 
@@ -251,7 +414,7 @@ void ParticlesApp::onRender()
 
 	// Simple camera setup
 	math::mat4 view = math::lookAt(
-	    math::vec3(0.0f, 0.0f, 3.0f),         // eye
+	    math::vec3(0.0f, 0.0f, 6.0f),         // eye
 	    math::vec3(0.0f, 0.0f, 0.0f),         // center
 	    math::vec3(0.0f, 1.0f, 0.0f));        // up
 
@@ -455,7 +618,7 @@ void ParticlesApp::onRender()
 	colorAttachment.view       = swapchain->GetBackBufferView(imageIndex);
 	colorAttachment.loadOp     = rhi::LoadOp::CLEAR;
 	colorAttachment.storeOp    = rhi::StoreOp::STORE;
-	colorAttachment.clearValue = {{0.0f, 0.0f, 0.1f, 1.0f}};
+	colorAttachment.clearValue = {{0.05f, 0.0f, 0.1f, 1.0f}};
 	renderingInfo.colorAttachments.push_back(colorAttachment);
 
 	graphicsCmdList->BeginRendering(renderingInfo);
@@ -463,6 +626,7 @@ void ParticlesApp::onRender()
 	graphicsCmdList->SetViewport(0, 0, float(backBufferWidth), float(backBufferHeight));
 	graphicsCmdList->SetScissor(0, 0, backBufferWidth, backBufferHeight);
 
+	// --- Draw Particles ---
 	graphicsCmdList->SetPipeline(m_graphicsPipeline.get());
 	graphicsCmdList->BindDescriptorSet(0, m_graphicsDescriptorSet.get());
 
@@ -470,6 +634,24 @@ void ParticlesApp::onRender()
 	auto *renderBuffer = shouldRunPhysics ? outputBuffer : (m_useBufferA ? m_particleBufferA.get() : m_particleBufferB.get());
 	graphicsCmdList->SetVertexBuffer(0, renderBuffer);
 	graphicsCmdList->Draw(PARTICLE_COUNT);
+
+	// --- Draw Debug Spheres ---
+	graphicsCmdList->SetPipeline(m_debugPipeline.get());
+	graphicsCmdList->BindDescriptorSet(0, m_debugDescriptorSet.get());
+	graphicsCmdList->SetVertexBuffer(0, m_sphereVertexBuffer.get());
+	graphicsCmdList->BindIndexBuffer(m_sphereIndexBuffer.get(), 0);
+
+	// // Draw sphere 1
+	// DebugUBO debugUbo1;
+	// debugUbo1.mvp = mvp * math::translate(math::mat4(1.0f), m_sphere1Pos) * math::scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
+	// memcpy(m_debugUboDataPtr, &debugUbo1, sizeof(DebugUBO));
+	// graphicsCmdList->DrawIndexed((uint32_t)m_sphereIndices.size());
+
+	// // Draw sphere 2
+	// DebugUBO debugUbo2;
+	// debugUbo2.mvp = mvp * math::translate(math::mat4(1.0f), m_sphere2Pos) * math::scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
+	// memcpy(m_debugUboDataPtr, &debugUbo2, sizeof(DebugUBO));
+	// graphicsCmdList->DrawIndexed((uint32_t)m_sphereIndices.size());
 
 	graphicsCmdList->EndRendering();
 
@@ -572,11 +754,15 @@ void ParticlesApp::onShutdown()
 		m_paramsBuffer->Unmap();
 		m_paramsDataPtr = nullptr;
 	}
-
 	if (m_mvpBuffer && m_mvpDataPtr)
 	{
 		m_mvpBuffer->Unmap();
 		m_mvpDataPtr = nullptr;
+	}
+	if (m_debugUboBuffer && m_debugUboDataPtr)
+	{
+		m_debugUboBuffer->Unmap();
+		m_debugUboDataPtr = nullptr;
 	}
 
 	// Clear resources (unique_ptrs will auto-delete)
@@ -588,16 +774,29 @@ void ParticlesApp::onShutdown()
 	m_graphicsReleasedSemaphores.clear();
 	m_computeFinishedSemaphores.clear();
 	m_imageAvailableSemaphores.clear();
+
+	m_debugPipeline.reset();
+	m_debugDescriptorSet.reset();
+	m_debugDescriptorSetLayout.reset();
+	m_debugFragmentShader.reset();
+	m_debugVertexShader.reset();
+	m_debugUboBuffer.reset();
+	m_sphereIndexBuffer.reset();
+	m_sphereVertexBuffer.reset();
+
 	m_graphicsPipeline.reset();
 	m_graphicsDescriptorSet.reset();
 	m_graphicsDescriptorSetLayout.reset();
+
 	m_computePipeline.reset();
 	m_computeDescriptorSetB.reset();
 	m_computeDescriptorSetA.reset();
 	m_computeDescriptorSetLayout.reset();
+
 	m_fragmentShader.reset();
 	m_vertexShader.reset();
 	m_computeShader.reset();
+
 	m_shaderFactory.reset();
 	m_mvpBuffer.reset();
 	m_paramsBuffer.reset();

@@ -1,7 +1,12 @@
 #version 450
 
+// This compute shader simulates particle physics for a dual-emitter system.
+// It uses a "flow field" composed of cross-emitter attraction and curl noise
+// to create an organic, swirling smoke effect between the two emitters.
+
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
+// Particle data structure
 struct Particle
 {
 	vec3  position;
@@ -10,27 +15,42 @@ struct Particle
 	float padding2;
 };
 
+// Uniform buffer with simulation parameters
 layout(set = 0, binding = 0) uniform SimulationParams
 {
 	float deltaTime;
-	float gravity;
-	vec2  bounds;
+	float time;        // Global time for animating noise
+	vec2  padding1;
+	// Emitter Sphere 1
+	vec3  sphere1Pos;
+	float sphereRadius;
+	vec3  sphere1Vel;
+	float padding2;
+	// Emitter Sphere 2
+	vec3  sphere2Pos;
+	float padding3;
+	vec3  sphere2Vel;
+	float padding4;
 }
 params;
 
+// Input particle buffer (read-only)
 layout(set = 0, binding = 1) readonly buffer ParticlesIn
 {
 	Particle particles[];
 }
 particlesIn;
 
+// Output particle buffer (write-only)
 layout(set = 0, binding = 2) buffer ParticlesOut
 {
 	Particle particles[];
 }
 particlesOut;
 
-// Fast PCG hash function for pseudo-random numbers
+// --- UTILITY FUNCTIONS ---
+
+// PCG hash for pseudo-random number generation
 uint pcg_hash(uint seed)
 {
 	uint state = seed * 747796405u + 2891336453u;
@@ -38,87 +58,146 @@ uint pcg_hash(uint seed)
 	return (word >> 22u) ^ word;
 }
 
-// Convert hash to float in range [-0.5, 0.5]
+// Convert hash to a float in [-1, 1]
 float hash_to_float(uint hash)
 {
-	return float(hash) * (1.0 / 4294967296.0) - 0.5;
+	return float(hash) * (1.0 / 2147483648.0) - 1.0;
+}
+
+// Convert hash to a float in [0, 1]
+float hash_to_float01(uint hash)
+{
+	return float(hash) * (1.0 / 4294967296.0);
+}
+
+// Generates a 3D random vector using the hash function
+vec3 random_vec3(uint seed)
+{
+	return vec3(
+	    hash_to_float(pcg_hash(seed)),
+	    hash_to_float(pcg_hash(seed + 1000u)),
+	    hash_to_float(pcg_hash(seed + 2000u)));
+}
+
+// --- NOISE AND FORCE FUNCTIONS ---
+
+// Simplex-like noise function for creating the base of the curl noise
+float noise(vec3 x)
+{
+	vec3 p    = floor(x);
+	vec3 f    = fract(x);
+	f         = f * f * (3.0 - 2.0 * f);
+	uint seed = uint(p.x) + uint(p.y * 157.0) + uint(p.z * 113.0);
+	return mix(mix(mix(hash_to_float01(pcg_hash(seed)), hash_to_float01(pcg_hash(seed + 1u)), f.x),
+	               mix(hash_to_float01(pcg_hash(seed + 157u)), hash_to_float01(pcg_hash(seed + 158u)), f.x), f.y),
+	           mix(mix(hash_to_float01(pcg_hash(seed + 113u)), hash_to_float01(pcg_hash(seed + 114u)), f.x),
+	               mix(hash_to_float01(pcg_hash(seed + 270u)), hash_to_float01(pcg_hash(seed + 271u)), f.x), f.y),
+	           f.z);
+}
+
+// Curl noise generates a divergence-free vector field, ideal for fluid-like motion.
+// It's calculated by taking the curl of a noise field.
+vec3 curlNoise(vec3 pos)
+{
+	const float e  = 0.1;
+	float       n1 = noise(pos + vec3(0.0, e, 0.0));
+	float       n2 = noise(pos - vec3(0.0, e, 0.0));
+	float       n3 = noise(pos + vec3(0.0, 0.0, e));
+	float       n4 = noise(pos - vec3(0.0, 0.0, e));
+	float       n5 = noise(pos + vec3(e, 0.0, 0.0));
+	float       n6 = noise(pos - vec3(e, 0.0, 0.0));
+
+	float x = n1 - n2 - n3 + n4;
+	float y = n3 - n4 - n5 + n6;
+	float z = n5 - n6 - n1 + n2;
+
+	return normalize(vec3(x, y, z));
 }
 
 void main()
 {
 	uint index = gl_GlobalInvocationID.x;
-
 	if (index >= particlesIn.particles.length())
+	{
 		return;
+	}
 
 	Particle p = particlesIn.particles[index];
 
-	// Calculate distance to vortex center - optimized
-	vec3  toCenter  = -p.position;                          // Center is at origin
-	float distXZ2   = dot(toCenter.xz, toCenter.xz);        // Squared distance, avoid sqrt
-	float distXZ    = sqrt(max(distXZ2, 0.01));             // Prevent singularity
-	float invDistXZ = 1.0 / distXZ;                         // Calculate reciprocal once
+	// --- PARTICLE EMISSION AND RECYCLING ---
 
-	// Optimized centripetal force (reuse invDistXZ for normalization)
-	const float attractionStrength = 2.0;
-	float       attractionMag      = attractionStrength * (1.0 - exp(-distXZ * 0.3));
-	vec3        centripetal        = toCenter * (invDistXZ * attractionMag);
+	// Assign particle to an emitter (0 or 1)
+	float selector       = float(index & 1u);
+	vec3  emissionCenter = mix(params.sphere1Pos, params.sphere2Pos, selector);
+	vec3  sphereVelocity = mix(params.sphere1Vel, params.sphere2Vel, selector);
 
-	// Optimized tangential force (manual normalization)
-	vec2        tangentXZ        = vec2(-toCenter.z, toCenter.x) * invDistXZ;
-	const float swirlingStrength = 3.0;
-	float       swirlingMag      = swirlingStrength * fma(distXZ, 0.2, 1.0);        // Use FMA
-	vec3        tangential       = vec3(tangentXZ.x * swirlingMag, 0.0, tangentXZ.y * swirlingMag);
+	uint seed    = index + uint(params.time * 1000.0);
+	vec3 randVec = random_vec3(seed);
 
-	// Vertical oscillation - keep sin() as it's needed for wave pattern
-	const float waveFreq            = 2.0;
-	const float waveAmp             = 1.5;
-	float       phase               = fma(distXZ, waveFreq, fma(params.deltaTime, 3.0, float(index) * 0.1));
-	float       verticalOscillation = sin(phase) * waveAmp;
+	float distFromCenter = length(p.position - emissionCenter);
 
-	// Apply all forces using FMA operations
-	vec3 totalForce = centripetal + tangential;
-	totalForce.y += verticalOscillation;
-	p.velocity = fma(totalForce, vec3(params.deltaTime), p.velocity);
+	// Recycle particle if it's too far from the center of the simulation,
+	// has a very low velocity, or on the first frame.
+	const float recycleDist  = 7.0;
+	bool        needsRecycle = (distFromCenter > recycleDist) || (length(p.velocity) < 0.01 && distFromCenter > 1.0) || (params.time < 0.1);
 
-	// Optimized damping (use multiplication instead of constant)
-	const float dampingFactor = 0.998;
-	p.velocity *= dampingFactor;
+	if (needsRecycle)
+	{
+		// Generate a random point on a slightly flattened sphere for emission
+		float theta = randVec.x * 3.14159265;
+		float phi   = acos(2.0 * randVec.y * 0.5 - 1.0);
+		vec3  spherePoint;
+		spherePoint.x = sin(phi) * cos(theta);
+		spherePoint.y = sin(phi) * sin(theta);
+		spherePoint.z = cos(phi);
+		p.position    = emissionCenter + spherePoint * params.sphereRadius;
 
-	// Branchless velocity clamping
-	const float maxSpeed    = 10.0;
-	float       speed       = length(p.velocity);
-	float       clampFactor = min(1.0, maxSpeed / max(speed, 0.001));
-	p.velocity *= clampFactor;
+		// Give it an initial velocity directed away from the center plus emitter velocity
+		p.velocity = normalize(randVec + vec3(0, 0.5, 0)) * 2.0 + sphereVelocity;
+	}
 
-	// Update position using FMA
-	p.position = fma(p.velocity, vec3(params.deltaTime), p.position);
+	// --- SMOKE FLOW FORCE FIELD ---
 
-	// Optimized Y-axis boundaries (combine floor and ceiling)
-	float yBounce = step(abs(p.position.y), 1.0);
-	p.position.y  = mix(sign(p.position.y) * (2.0 - abs(p.position.y)), p.position.y, yBounce);
-	p.velocity.y  = mix(-p.velocity.y, p.velocity.y, yBounce);
+	// 1. Cross-Attraction: Particles are attracted to the *other* sphere
+	const float crossAttractionStrength = 0.8;
+	vec3        flowTarget              = mix(params.sphere2Pos, params.sphere1Pos, selector);
+	vec3        toTarget                = flowTarget - p.position;
+	vec3        crossAttractionForce    = normalize(toTarget) * crossAttractionStrength;
 
-	// Optimized X boundary check
-	float xBounce = step(abs(p.position.x), params.bounds.x);
-	float xSign   = sign(p.position.x);
-	p.position.x  = mix(xSign * (2.0 * params.bounds.x - abs(p.position.x)), p.position.x, xBounce);
-	p.velocity.x  = mix(-p.velocity.x, p.velocity.x, xBounce);
+	// 2. Curl Noise: Adds swirling, turbulent motion
+	const float noiseFrequency = 0.5;
+	const float noiseStrength  = 2.5;
+	vec3        noisePos       = p.position * noiseFrequency;
+	noisePos.x += params.time * 0.1;        // Animate the noise field over time
+	vec3 noiseForce = curlNoise(noisePos) * noiseStrength;
 
-	// Optimized Z boundary check
-	float zBounce = step(abs(p.position.z), params.bounds.y);
-	float zSign   = sign(p.position.z);
-	p.position.z  = mix(zSign * (2.0 * params.bounds.y - abs(p.position.z)), p.position.z, zBounce);
-	p.velocity.z  = mix(-p.velocity.z, p.velocity.z, zBounce);
+	// 3. Center Attraction: A weak pull back to the simulation origin to keep it contained
+	const float centerAttractionStrength = 0.1;
+	vec3        centerAttractionForce    = -p.position * centerAttractionStrength;
 
-	// Fast turbulence using PCG hash instead of sin()
-	const float turbulence = 0.3;
-	uint        seed       = index + uint(params.deltaTime * 1000.0);
-	vec3        randomForce;
-	randomForce.x = hash_to_float(pcg_hash(seed)) * turbulence;
-	randomForce.y = hash_to_float(pcg_hash(seed + 1000u)) * turbulence;
-	randomForce.z = hash_to_float(pcg_hash(seed + 2000u)) * turbulence;
-	p.velocity    = fma(randomForce, vec3(params.deltaTime), p.velocity);
+	// Combine all forces
+	vec3 totalForce = crossAttractionForce + noiseForce + centerAttractionForce;
 
+	// --- INTEGRATION ---
+
+	// Apply forces (Verlet integration)
+	p.velocity += totalForce * params.deltaTime;
+
+	// Apply damping (air resistance)
+	const float damping = 0.98;
+	p.velocity *= damping;
+
+	// Clamp velocity to a maximum speed
+	const float maxSpeed = 5.0;
+	float       speed    = length(p.velocity);
+	if (speed > maxSpeed)
+	{
+		p.velocity = p.velocity * (maxSpeed / speed);
+	}
+
+	// Update position
+	p.position += p.velocity * params.deltaTime;
+
+	// Write the updated particle data to the output buffer
 	particlesOut.particles[index] = p;
 }

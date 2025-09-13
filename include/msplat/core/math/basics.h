@@ -43,4 +43,10 @@ constexpr T smoothstep(T edge0, T edge1, T x)
 	return glm::smoothstep(edge0, edge1, x);
 }
 
+template <typename T>
+constexpr T sign(T x)
+{
+	return glm::sign(x);
+}
+
 }        // namespace msplat::math

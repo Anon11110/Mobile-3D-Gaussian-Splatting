@@ -30,7 +30,7 @@ class DeviceManager;
 // Use msplat namespace to avoid repetitive prefixes
 using namespace msplat;
 
-constexpr uint32_t PARTICLE_COUNT       = 100000;
+constexpr uint32_t PARTICLE_COUNT       = 2000000;
 constexpr uint32_t WORKGROUP_SIZE       = 64;
 constexpr int      MAX_FRAMES_IN_FLIGHT = 2;
 constexpr float    FIXED_TIMESTEP       = 1.0f / 60.0f;
@@ -68,11 +68,24 @@ class ParticlesApp : public app::IApplication
 	};
 
 	// Simulation parameters (matches shader layout)
-	struct SimulationParams
+	struct alignas(16) SimulationParams
 	{
 		float      deltaTime;
-		float      gravity;
+		float      time;
 		math::vec2 bounds;
+		// Emission sphere 1
+		math::vec3 sphere1Pos;
+		float      sphereRadius;
+		math::vec3 sphere1Vel;
+		// Emission sphere 2
+		math::vec3 sphere2Pos;
+		math::vec3 sphere2Vel;
+	};
+
+	// UBO for debug sphere rendering
+	struct DebugUBO
+	{
+		math::mat4 mvp;
 	};
 
 	// Device manager reference
@@ -105,6 +118,18 @@ class ParticlesApp : public app::IApplication
 	container::unique_ptr<rhi::IRHIDescriptorSet>       m_graphicsDescriptorSet;
 	container::unique_ptr<rhi::IRHIPipeline>            m_graphicsPipeline;
 
+	// Debug sphere rendering resources
+	container::unique_ptr<rhi::IRHIBuffer>              m_sphereVertexBuffer;
+	container::unique_ptr<rhi::IRHIBuffer>              m_sphereIndexBuffer;
+	container::vector<uint32_t>                         m_sphereIndices;
+	container::unique_ptr<rhi::IRHIBuffer>              m_debugUboBuffer;
+	void                                               *m_debugUboDataPtr = nullptr;
+	container::shared_ptr<rhi::IRHIShader>              m_debugVertexShader;
+	container::shared_ptr<rhi::IRHIShader>              m_debugFragmentShader;
+	container::unique_ptr<rhi::IRHIDescriptorSetLayout> m_debugDescriptorSetLayout;
+	container::unique_ptr<rhi::IRHIDescriptorSet>       m_debugDescriptorSet;
+	container::unique_ptr<rhi::IRHIPipeline>            m_debugPipeline;
+
 	// Synchronization objects (per frame in flight)
 	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_imageAvailableSemaphores;
 	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_computeFinishedSemaphores;
@@ -130,4 +155,11 @@ class ParticlesApp : public app::IApplication
 	bool              m_useBufferA   = true;        // true = A->B, false = B->A
 	uint32_t          m_currentFrame = 0;
 	bool              m_firstFrame   = true;        // Track first frame for initial transitions
+
+	// Emission sphere state (for bouncing simulation)
+	math::vec3 m_sphere1Pos   = math::vec3(-2.0f, -0.5f, 0.0f);
+	math::vec3 m_sphere1Vel   = math::vec3(1.5f, 0.8f, 1.2f);
+	math::vec3 m_sphere2Pos   = math::vec3(2.0f, -0.5f, 0.0f);
+	math::vec3 m_sphere2Vel   = math::vec3(-1.2f, 1.0f, -0.9f);
+	float      m_sphereRadius = 0.5f;
 };
