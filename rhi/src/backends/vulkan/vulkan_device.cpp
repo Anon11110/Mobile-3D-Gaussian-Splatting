@@ -1,4 +1,5 @@
 #include <cstring>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -41,6 +42,17 @@ class VulkanDevice final : public IRHIDevice
 	// Device feature flags
 	bool hasDynamicRendering;
 
+	// Deferred deletion for async uploads
+	struct DeferredDeletion
+	{
+		VkBuffer                   stagingBuffer;
+		VmaAllocation              stagingAllocation;
+		VkCommandBuffer            commandBuffer;
+		std::shared_ptr<IRHIFence> fence;
+	};
+	std::vector<DeferredDeletion> deferredDeletions;
+	std::mutex                    deferredDeletionsMutex;
+
 #if defined(DEBUG) || defined(_DEBUG)
 	VkDebugUtilsMessengerEXT debugMessenger;
 #endif
@@ -70,6 +82,9 @@ class VulkanDevice final : public IRHIDevice
 		{
 			vkDeviceWaitIdle(device);
 		}
+
+		// Clean up all deferred deletions
+		ProcessDeferredDeletions(true);
 
 		// Destroy descriptor pools first
 		if (graphicsDescriptorPool != VK_NULL_HANDLE)
@@ -266,21 +281,100 @@ class VulkanDevice final : public IRHIDevice
 	{
 		auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
 
-		if (vkBuffer->IsMappable())
+		if (!vkBuffer->IsMappable())
 		{
-			// Direct memory mapping approach for mappable buffers
-			void *mapped = vkBuffer->Map();
-			memcpy(static_cast<char *>(mapped) + offset, data, size);
-			vmaFlushAllocation(allocator, vkBuffer->GetAllocation(), offset, size);
+			throw std::logic_error("UpdateBuffer cannot be used on non-mappable buffers. "
+			                       "Use UploadBufferAsync for device-local resources.");
+		}
 
-			vkBuffer->Unmap();
-		}
-		else
+		// Direct memory mapping approach for mappable buffers
+		void *mapped = vkBuffer->Map();
+		memcpy(static_cast<char *>(mapped) + offset, data, size);
+		vmaFlushAllocation(allocator, vkBuffer->GetAllocation(), offset, size);
+		vkBuffer->Unmap();
+	}
+
+	std::shared_ptr<IRHIFence> UploadBufferAsync(IRHIBuffer *dstBuffer, const void *data, size_t size, size_t offset = 0) override
+	{
+		// Process any completed deferred deletions first
+		ProcessDeferredDeletions(false);
+
+		auto *vkBuffer = static_cast<VulkanBuffer *>(dstBuffer);
+
+		// Create staging buffer in host-visible memory
+		VkBufferCreateInfo stagingInfo{};
+		stagingInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		stagingInfo.size        = size;
+		stagingInfo.usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		VmaAllocationCreateInfo stagingAllocInfo{};
+		stagingAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+		stagingAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+		VkBuffer          stagingBuffer;
+		VmaAllocation     stagingAllocation;
+		VmaAllocationInfo stagingAllocResult;
+
+		if (vmaCreateBuffer(allocator, &stagingInfo, &stagingAllocInfo, &stagingBuffer, &stagingAllocation,
+		                    &stagingAllocResult) != VK_SUCCESS)
 		{
-			// Staging buffer approach for device-local buffers
-			// TODO: This currently stalls the GPU with vkQueueWaitIdle, it's better to implement async transfer
-			UploadToBuffer(vkBuffer, data, size, offset);
+			throw std::runtime_error("Failed to create staging buffer for async upload");
 		}
+
+		// Copy data to staging buffer
+		memcpy(stagingAllocResult.pMappedData, data, size);
+		vmaFlushAllocation(allocator, stagingAllocation, 0, VK_WHOLE_SIZE);
+
+		// Allocate command buffer for the copy
+		VkCommandBufferAllocateInfo cmdAllocInfo{};
+		cmdAllocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		cmdAllocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cmdAllocInfo.commandPool        = transferCommandPool;
+		cmdAllocInfo.commandBufferCount = 1;
+
+		VkCommandBuffer copyCmd;
+		vkAllocateCommandBuffers(device, &cmdAllocInfo, &copyCmd);
+
+		// Record copy command
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+		vkBeginCommandBuffer(copyCmd, &beginInfo);
+
+		VkBufferCopy copyRegion{};
+		copyRegion.srcOffset = 0;
+		copyRegion.dstOffset = offset;
+		copyRegion.size      = size;
+		vkCmdCopyBuffer(copyCmd, stagingBuffer, vkBuffer->GetHandle(), 1, &copyRegion);
+
+		vkEndCommandBuffer(copyCmd);
+
+		auto    fence       = std::make_shared<VulkanFence>(device, false);
+		VkFence fenceHandle = fence->GetHandle();
+
+		// Submit the command buffer, signaling the fence
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers    = &copyCmd;
+
+		if (vkQueueSubmit(transferQueue, 1, &submitInfo, fenceHandle) != VK_SUCCESS)
+		{
+			vkFreeCommandBuffers(device, transferCommandPool, 1, &copyCmd);
+			vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+			throw std::runtime_error("Failed to submit async buffer upload");
+		}
+
+		// Store a copy of the shared_ptr for the backend's tracking
+		// The reference count is now at least 2 (one for the user, one for the backend)
+		{
+			std::lock_guard<std::mutex> lock(deferredDeletionsMutex);
+			deferredDeletions.push_back({stagingBuffer, stagingAllocation, copyCmd, fence});
+		}
+
+		return fence;
 	}
 
 	void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
@@ -380,6 +474,41 @@ class VulkanDevice final : public IRHIDevice
 	}
 
   private:
+	void ProcessDeferredDeletions(bool waitForAll)
+	{
+		std::lock_guard<std::mutex> lock(deferredDeletionsMutex);
+
+		auto it = deferredDeletions.begin();
+		while (it != deferredDeletions.end())
+		{
+			bool shouldDelete = false;
+
+			if (waitForAll)
+			{
+				// In destructor, wait for all fences to ensure GPU work is complete
+				it->fence->Wait(UINT64_MAX);
+				shouldDelete = true;
+			}
+			else
+			{
+				// During normal operation, only clean up signaled fences
+				shouldDelete = it->fence->IsSignaled();
+			}
+
+			if (shouldDelete)
+			{
+				vkFreeCommandBuffers(device, transferCommandPool, 1, &it->commandBuffer);
+				vmaDestroyBuffer(allocator, it->stagingBuffer, it->stagingAllocation);
+
+				it = deferredDeletions.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
+	}
+
 	VkDescriptorPool GetDescriptorPool(QueueType queueType)
 	{
 		switch (queueType)

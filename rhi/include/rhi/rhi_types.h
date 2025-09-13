@@ -34,10 +34,12 @@ class IRHISampler;
 // Enumerations
 enum class BufferUsage : uint32_t
 {
-	VERTEX  = 1 << 0,
-	INDEX   = 1 << 1,
-	UNIFORM = 1 << 2,
-	STORAGE = 1 << 3
+	VERTEX       = 1 << 0,
+	INDEX        = 1 << 1,
+	UNIFORM      = 1 << 2,
+	STORAGE      = 1 << 3,
+	TRANSFER_DST = 1 << 4,
+	TRANSFER_SRC = 1 << 5
 };
 
 // Index buffer data type

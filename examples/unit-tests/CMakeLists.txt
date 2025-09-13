@@ -11,11 +11,13 @@ add_executable(unit-tests
     test_custom_vector.cpp
     test_hash.cpp
     test_string.cpp
+    test_async_buffer_upload.cpp
 )
 
-# Link with core library
+# Link with core library and RHI
 target_link_libraries(unit-tests PRIVATE
     core
+    RHI
     Threads::Threads
 )
 

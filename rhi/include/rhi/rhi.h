@@ -29,6 +29,12 @@ class IRHIDevice
 	// Buffer operations
 	virtual void UpdateBuffer(IRHIBuffer *buffer, const void *RHI_RESTRICT data, size_t size, size_t offset = 0) = 0;
 
+	virtual std::shared_ptr<IRHIFence> UploadBufferAsync(
+	    IRHIBuffer *dstBuffer,
+	    const void *data,
+	    size_t      size,
+	    size_t      offset = 0) = 0;
+
 	// Queue operations
 	virtual void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
 	                                QueueType                         queueType       = QueueType::GRAPHICS,

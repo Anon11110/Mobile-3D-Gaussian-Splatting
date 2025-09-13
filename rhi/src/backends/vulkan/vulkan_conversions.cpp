@@ -127,9 +127,14 @@ VkBufferUsageFlags BufferUsageToVulkan(BufferUsage usage)
 	{
 		result |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	}
-
-	// Always add transfer bits for staging operations
-	result |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	if (static_cast<uint32_t>(usage) & static_cast<uint32_t>(BufferUsage::TRANSFER_DST))
+	{
+		result |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	}
+	if (static_cast<uint32_t>(usage) & static_cast<uint32_t>(BufferUsage::TRANSFER_SRC))
+	{
+		result |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	}
 
 	return result;
 }
