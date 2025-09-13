@@ -527,12 +527,28 @@ class vector
 		}
 	}
 
+	// Swap contents with another vector
+	void swap(vector &other) noexcept
+	{
+		std::swap(mData, other.mData);
+		std::swap(mSize, other.mSize);
+		std::swap(mCapacity, other.mCapacity);
+		std::swap(mMemoryResource, other.mMemoryResource);
+	}
+
 	// Memory resource access
 	std::pmr::memory_resource *get_memory_resource() const noexcept
 	{
 		return mMemoryResource;
 	}
 };
+
+// Non-member swap for ADL (Argument-Dependent Lookup)
+template <typename T>
+void swap(vector<T> &lhs, vector<T> &rhs) noexcept
+{
+	lhs.swap(rhs);
+}
 
 #endif        // MSPLAT_USE_SYSTEM_STL
 

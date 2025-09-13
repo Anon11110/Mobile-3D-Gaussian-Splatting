@@ -15,6 +15,6 @@ ubo;
 
 void main()
 {
-	// Transform the input vertex position by the MVP matrix.
+	// Transform the vertex position by the MVP matrix.
 	gl_Position = ubo.mvp * vec4(inPosition, 1.0);
 }

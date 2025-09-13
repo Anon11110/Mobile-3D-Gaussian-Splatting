@@ -8,5 +8,5 @@ layout(location = 0) out vec4 outColor;
 void main()
 {
 	// Output a constant, bright green color for the wireframe lines.
-	outColor = vec4(0.0, 1.0, 0.0, 1.0);
+	outColor = vec4(1.0, 1.0, 1.0, 1.0);
 }

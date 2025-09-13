@@ -7,8 +7,8 @@
 namespace msplat::container
 {
 
-template <typename K, typename V>
-using unordered_map = std::unordered_map<K, V>;
+template <typename K, typename V, typename Hash = std::hash<K>, typename Pred = std::equal_to<K>>
+using unordered_map = std::unordered_map<K, V, Hash, Pred>;
 
 }
 #else

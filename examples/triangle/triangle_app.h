@@ -1,11 +1,11 @@
 #pragma once
 
+#include "app/application.h"
 #include "core/containers/memory.h"
 #include "core/containers/vector.h"
 #include "core/math/math.h"
 #include "core/timer.h"
 #include "engine/shader_factory.h"
-#include "msplat/app/application.h"
 
 namespace rhi
 {

@@ -40,6 +40,13 @@ enum class BufferUsage : uint32_t
 	STORAGE = 1 << 3
 };
 
+// Index buffer data type
+enum class IndexType : uint8_t
+{
+	UINT16,        // 2 bytes per index, max 65,536 vertices
+	UINT32         // 4 bytes per index, max 4,294,967,296 vertices
+};
+
 // Bitwise operators for BufferUsage
 constexpr inline BufferUsage operator|(BufferUsage lhs, BufferUsage rhs)
 {
@@ -106,7 +113,9 @@ enum class PrimitiveTopology
 
 enum class PolygonMode
 {
-	FILL
+	FILL,
+	LINE,
+	POINT
 };
 
 enum class CullMode
@@ -489,6 +498,7 @@ struct BufferDesc
 	size_t          size;
 	BufferUsage     usage;
 	ResourceUsage   resourceUsage = ResourceUsage::Static;
+	IndexType       indexType     = IndexType::UINT32;        // Default to UINT32 for flexibility
 	AllocationHints hints         = {};
 	const void     *initialData   = nullptr;
 };

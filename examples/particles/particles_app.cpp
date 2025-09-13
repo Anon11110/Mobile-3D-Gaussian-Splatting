@@ -1,52 +1,18 @@
-#include "particles_app.h"
-#include "core/log.h"
-#include "engine/shader_factory.h"
-#include "msplat/app/device_manager.h"
-#include "rhi/rhi.h"
-#include <GLFW/glfw3.h>
-#include <array>
 #include <cmath>
 #include <cstring>
 #include <numbers>
 
+#include "app/device_manager.h"
+#include "core/containers/array.h"
+#include "core/log.h"
+#include "engine/mesh_generator.h"
+#include "engine/shader_factory.h"
+#include "particles_app.h"
+#include "rhi/rhi.h"
+
+#include <GLFW/glfw3.h>
+
 using namespace msplat;
-
-// Helper function to generate vertices and indices for a wireframe sphere (icosphere)
-void createSphereWireframe(container::vector<math::vec3> &vertices, container::vector<uint32_t> &indices, int subdivisions)
-{
-	const float X = 0.525731112119133606f;
-	const float Z = 0.850650808352039932f;
-
-	// Icosahedron vertices
-	vertices.assign({{-X, 0.0, Z}, {X, 0.0, Z}, {-X, 0.0, -Z}, {X, 0.0, -Z}, {0.0, Z, X}, {0.0, Z, -X}, {0.0, -Z, X}, {0.0, -Z, -X}, {Z, X, 0.0}, {-Z, X, 0.0}, {Z, -X, 0.0}, {-Z, -X, 0.0}});
-
-	// Triangle indices for icosahedron (20 triangles)
-	container::vector<uint32_t> triangleIndices;
-	triangleIndices.assign({0, 1, 4, 0, 4, 9, 9, 4, 5, 4, 8, 5, 4, 1, 8,
-	                        8, 1, 10, 8, 10, 3, 5, 8, 3, 5, 3, 2, 5, 2, 9,
-	                        9, 2, 11, 0, 9, 11, 0, 11, 6, 0, 6, 1, 1, 6, 10,
-	                        3, 10, 7, 3, 7, 2, 2, 7, 11, 6, 11, 7, 6, 7, 10});
-
-	// Convert triangle indices to line indices for wireframe
-	// Each triangle (A,B,C) becomes three edges: A-B, B-C, C-A
-	indices.clear();
-	indices.reserve(triangleIndices.size() * 2);        // Each triangle has 3 edges, each edge needs 2 indices
-
-	for (size_t i = 0; i < triangleIndices.size(); i += 3)
-	{
-		uint32_t a = triangleIndices[i];
-		uint32_t b = triangleIndices[i + 1];
-		uint32_t c = triangleIndices[i + 2];
-
-		// Add three edges for this triangle
-		indices.push_back(a);
-		indices.push_back(b);        // Edge A-B
-		indices.push_back(b);
-		indices.push_back(c);        // Edge B-C
-		indices.push_back(c);
-		indices.push_back(a);        // Edge C-A
-	}
-}
 
 bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 {
@@ -223,6 +189,8 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	m_graphicsPipeline = device->CreateGraphicsPipeline(pipelineDesc);
 
 	// --- Debug Sphere Resources ---
+	// Always initialize debug resources for runtime toggling
+
 	m_debugVertexShader = m_shaderFactory->getOrCreateShader(
 	    "shaders/compiled/debug_sphere.vert.spv",
 	    rhi::ShaderStage::VERTEX);
@@ -230,43 +198,58 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	    "shaders/compiled/debug_sphere.frag.spv",
 	    rhi::ShaderStage::FRAGMENT);
 
-	container::vector<math::vec3> sphereVertices;
-	createSphereWireframe(sphereVertices, m_sphereIndices, 2);
+	// Generate sphere wireframe with icosahedron subdivision
+	auto sphereMesh = engine::generateIcosphereWireframe(2);
+	m_sphereIndices = sphereMesh.indices;
 
 	rhi::BufferDesc sphereVbDesc{};
-	sphereVbDesc.size          = sizeof(math::vec3) * sphereVertices.size();
+	sphereVbDesc.size          = sizeof(math::vec3) * sphereMesh.vertices.size();
 	sphereVbDesc.usage         = rhi::BufferUsage::VERTEX;
 	sphereVbDesc.resourceUsage = rhi::ResourceUsage::DynamicUpload;
-	sphereVbDesc.initialData   = sphereVertices.data();
+	sphereVbDesc.initialData   = sphereMesh.vertices.data();
 	m_sphereVertexBuffer       = device->CreateBuffer(sphereVbDesc);
 
 	rhi::BufferDesc sphereIbDesc{};
-	sphereIbDesc.size          = sizeof(uint32_t) * m_sphereIndices.size();
+	sphereIbDesc.size          = sizeof(uint16_t) * m_sphereIndices.size();
 	sphereIbDesc.usage         = rhi::BufferUsage::INDEX;
 	sphereIbDesc.resourceUsage = rhi::ResourceUsage::DynamicUpload;
+	sphereIbDesc.indexType     = rhi::IndexType::UINT16;        // Explicitly specify UINT16
 	sphereIbDesc.initialData   = m_sphereIndices.data();
 	m_sphereIndexBuffer        = device->CreateBuffer(sphereIbDesc);
 
 	// Descriptor set for the debug sphere's UBO
 	rhi::DescriptorSetLayoutDesc debugLayoutDesc{};
 	debugLayoutDesc.bindings = {
-	    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::VERTEX}        // Debug UBO
-	};
+	    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::VERTEX}};
 	m_debugDescriptorSetLayout = device->CreateDescriptorSetLayout(debugLayoutDesc);
-	m_debugDescriptorSet       = device->CreateDescriptorSet(m_debugDescriptorSetLayout.get(), rhi::QueueType::GRAPHICS);
+
+	// Create two separate descriptor sets and uniform buffers for each sphere
+	m_debugDescriptorSet1 = device->CreateDescriptorSet(m_debugDescriptorSetLayout.get(), rhi::QueueType::GRAPHICS);
+	m_debugDescriptorSet2 = device->CreateDescriptorSet(m_debugDescriptorSetLayout.get(), rhi::QueueType::GRAPHICS);
 
 	rhi::BufferDesc debugUboDesc{};
 	debugUboDesc.size                      = sizeof(DebugUBO);
 	debugUboDesc.usage                     = rhi::BufferUsage::UNIFORM;
 	debugUboDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
 	debugUboDesc.hints.persistently_mapped = true;
-	m_debugUboBuffer                       = device->CreateBuffer(debugUboDesc);
-	m_debugUboDataPtr                      = m_debugUboBuffer->Map();
 
-	rhi::BufferBinding debugUboBinding{};
-	debugUboBinding.buffer = m_debugUboBuffer.get();
-	debugUboBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
-	m_debugDescriptorSet->BindBuffer(0, debugUboBinding);
+	// Create separate buffers for each sphere
+	m_debugUboBuffer1  = device->CreateBuffer(debugUboDesc);
+	m_debugUboDataPtr1 = m_debugUboBuffer1->Map();
+
+	m_debugUboBuffer2  = device->CreateBuffer(debugUboDesc);
+	m_debugUboDataPtr2 = m_debugUboBuffer2->Map();
+
+	// Bind buffers to their respective descriptor sets
+	rhi::BufferBinding debugUboBinding1{};
+	debugUboBinding1.buffer = m_debugUboBuffer1.get();
+	debugUboBinding1.type   = rhi::DescriptorType::UNIFORM_BUFFER;
+	m_debugDescriptorSet1->BindBuffer(0, debugUboBinding1);
+
+	rhi::BufferBinding debugUboBinding2{};
+	debugUboBinding2.buffer = m_debugUboBuffer2.get();
+	debugUboBinding2.type   = rhi::DescriptorType::UNIFORM_BUFFER;
+	m_debugDescriptorSet2->BindBuffer(0, debugUboBinding2);
 
 	// Pipeline for the debug sphere (wireframe)
 	rhi::GraphicsPipelineDesc debugPipelineDesc{};
@@ -275,8 +258,8 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	debugPipelineDesc.vertexLayout.attributes        = {{0, 0, rhi::VertexFormat::R32G32B32_SFLOAT, 0}};
 	debugPipelineDesc.vertexLayout.bindings          = {{0, sizeof(math::vec3), false}};
 	debugPipelineDesc.topology                       = rhi::PrimitiveTopology::LINE_LIST;
-	debugPipelineDesc.rasterizationState.polygonMode = rhi::PolygonMode::FILL;
-	debugPipelineDesc.rasterizationState.cullMode    = rhi::CullMode::NONE;
+	debugPipelineDesc.rasterizationState.polygonMode = rhi::PolygonMode::FILL;        // FILL mode required for LINE_LIST primitives
+	debugPipelineDesc.rasterizationState.cullMode    = rhi::CullMode::NONE;           // No culling for lines
 	debugPipelineDesc.colorBlendAttachments.resize(1);
 	debugPipelineDesc.colorBlendAttachments[0].colorWriteMask = 0xF;
 	debugPipelineDesc.targetSignature.colorFormats            = {swapchain->GetBackBuffer(0)->GetFormat()};
@@ -337,23 +320,24 @@ void ParticlesApp::onUpdate(float deltaTime)
 	// Using the fixed timestep for consistent physics
 	if (m_accumulator >= FIXED_TIMESTEP)
 	{
+		// Always update sphere physics for smooth runtime toggling
 		// Update sphere 1 position
 		m_sphere1Pos += m_sphere1Vel * FIXED_TIMESTEP;
 
 		// Bounce sphere 1 off walls using msplat::math functions
-		if (math::abs(m_sphere1Pos.x) > 2.0f - m_sphereRadius)
+		if (math::abs(m_sphere1Pos.x) > m_wallBoundsX - m_sphereRadius)
 		{
-			m_sphere1Pos.x = math::sign(m_sphere1Pos.x) * (2.0f - m_sphereRadius);
+			m_sphere1Pos.x = math::sign(m_sphere1Pos.x) * (m_wallBoundsX - m_sphereRadius);
 			m_sphere1Vel.x = -m_sphere1Vel.x * 0.9f;
 		}
-		if (math::abs(m_sphere1Pos.y) > 1.0f - m_sphereRadius)
+		if (math::abs(m_sphere1Pos.y) > m_wallBoundsY - m_sphereRadius)
 		{
-			m_sphere1Pos.y = math::sign(m_sphere1Pos.y) * (1.0f - m_sphereRadius);
+			m_sphere1Pos.y = math::sign(m_sphere1Pos.y) * (m_wallBoundsY - m_sphereRadius);
 			m_sphere1Vel.y = -m_sphere1Vel.y * 0.9f;
 		}
-		if (math::abs(m_sphere1Pos.z) > 2.0f - m_sphereRadius)
+		if (math::abs(m_sphere1Pos.z) > m_wallBoundsZ - m_sphereRadius)
 		{
-			m_sphere1Pos.z = math::sign(m_sphere1Pos.z) * (2.0f - m_sphereRadius);
+			m_sphere1Pos.z = math::sign(m_sphere1Pos.z) * (m_wallBoundsZ - m_sphereRadius);
 			m_sphere1Vel.z = -m_sphere1Vel.z * 0.9f;
 		}
 
@@ -361,19 +345,19 @@ void ParticlesApp::onUpdate(float deltaTime)
 		m_sphere2Pos += m_sphere2Vel * FIXED_TIMESTEP;
 
 		// Bounce sphere 2 off walls using msplat::math functions
-		if (math::abs(m_sphere2Pos.x) > 2.0f - m_sphereRadius)
+		if (math::abs(m_sphere2Pos.x) > m_wallBoundsX - m_sphereRadius)
 		{
-			m_sphere2Pos.x = math::sign(m_sphere2Pos.x) * (2.0f - m_sphereRadius);
+			m_sphere2Pos.x = math::sign(m_sphere2Pos.x) * (m_wallBoundsX - m_sphereRadius);
 			m_sphere2Vel.x = -m_sphere2Vel.x * 0.9f;
 		}
-		if (math::abs(m_sphere2Pos.y) > 1.0f - m_sphereRadius)
+		if (math::abs(m_sphere2Pos.y) > m_wallBoundsY - m_sphereRadius)
 		{
-			m_sphere2Pos.y = math::sign(m_sphere2Pos.y) * (1.0f - m_sphereRadius);
+			m_sphere2Pos.y = math::sign(m_sphere2Pos.y) * (m_wallBoundsY - m_sphereRadius);
 			m_sphere2Vel.y = -m_sphere2Vel.y * 0.9f;
 		}
-		if (math::abs(m_sphere2Pos.z) > 2.0f - m_sphereRadius)
+		if (math::abs(m_sphere2Pos.z) > m_wallBoundsZ - m_sphereRadius)
 		{
-			m_sphere2Pos.z = math::sign(m_sphere2Pos.z) * (2.0f - m_sphereRadius);
+			m_sphere2Pos.z = math::sign(m_sphere2Pos.z) * (m_wallBoundsZ - m_sphereRadius);
 			m_sphere2Vel.z = -m_sphere2Vel.z * 0.9f;
 		}
 	}
@@ -395,7 +379,7 @@ void ParticlesApp::onRender()
 		SimulationParams simParams{};
 		simParams.deltaTime    = FIXED_TIMESTEP;
 		simParams.time         = static_cast<float>(m_applicationTimer.elapsedSeconds());
-		simParams.bounds       = math::vec2(2.0f, 2.0f);
+		simParams.bounds       = math::vec2(m_wallBoundsX, m_wallBoundsZ);
 		simParams.sphere1Pos   = m_sphere1Pos;
 		simParams.sphereRadius = m_sphereRadius;
 		simParams.sphere1Vel   = m_sphere1Vel;
@@ -480,12 +464,12 @@ void ParticlesApp::onRender()
 		releaseToCompute.before = rhi::ResourceState::VertexBuffer;        // last frame's draw state
 		releaseToCompute.after  = rhi::ResourceState::VertexBuffer;        // ownership-only transfer
 
-		gfxPre->ReleaseToQueue(rhi::QueueType::COMPUTE, std::array{releaseToCompute}, {});
+		gfxPre->ReleaseToQueue(rhi::QueueType::COMPUTE, container::array{releaseToCompute}, {});
 		gfxPre->End();
 
 		rhi::SubmitInfo preSubmit{};
-		preSubmit.signalSemaphores = std::array{m_graphicsReleasedSemaphores[m_currentFrame].get()};
-		auto gfxPreSpan            = std::array{gfxPre.get()};
+		preSubmit.signalSemaphores = container::array{m_graphicsReleasedSemaphores[m_currentFrame].get()};
+		auto gfxPreSpan            = container::array{gfxPre.get()};
 		device->SubmitCommandLists(gfxPreSpan, rhi::QueueType::GRAPHICS, preSubmit);
 
 		didPreRelease = true;
@@ -508,7 +492,7 @@ void ParticlesApp::onRender()
 
 			computeCmdList->AcquireFromQueue(
 			    rhi::QueueType::GRAPHICS,
-			    std::array{acquireFromGraphics},
+			    container::array{acquireFromGraphics},
 			    {});
 		}
 		else
@@ -527,7 +511,7 @@ void ParticlesApp::onRender()
 			computeCmdList->Barrier(
 			    rhi::PipelineScope::Compute,
 			    rhi::PipelineScope::Compute,
-			    std::array{initInput, initOutput},
+			    container::array{initInput, initOutput},
 			    {},
 			    {});
 		}
@@ -546,7 +530,7 @@ void ParticlesApp::onRender()
 
 		computeCmdList->ReleaseToQueue(
 		    rhi::QueueType::GRAPHICS,
-		    std::array{releaseOutput},
+		    container::array{releaseOutput},
 		    {});
 
 		computeCmdList->End();
@@ -560,9 +544,9 @@ void ParticlesApp::onRender()
 
 		rhi::SubmitInfo computeSubmit{};
 		computeSubmit.waitSemaphores   = computeWaits;
-		computeSubmit.signalSemaphores = std::array{m_computeFinishedSemaphores[m_currentFrame].get()};
+		computeSubmit.signalSemaphores = container::array{m_computeFinishedSemaphores[m_currentFrame].get()};
 
-		auto computeCmdListSpan = std::array{computeCmdList.get()};
+		auto computeCmdListSpan = container::array{computeCmdList.get()};
 		device->SubmitCommandLists(computeCmdListSpan, rhi::QueueType::COMPUTE, computeSubmit);
 
 		m_useBufferA = !m_useBufferA;
@@ -587,7 +571,7 @@ void ParticlesApp::onRender()
 
 		graphicsCmdList->AcquireFromQueue(
 		    rhi::QueueType::COMPUTE,
-		    std::array{acquireBuffer},
+		    container::array{acquireBuffer},
 		    {});
 	}
 
@@ -601,7 +585,7 @@ void ParticlesApp::onRender()
 	    rhi::PipelineScope::Graphics,
 	    rhi::PipelineScope::Graphics,
 	    {},
-	    std::array{swapchainTransition},
+	    container::array{swapchainTransition},
 	    {});
 
 	m_imageFirstUse[imageIndex] = false;
@@ -636,22 +620,30 @@ void ParticlesApp::onRender()
 	graphicsCmdList->Draw(PARTICLE_COUNT);
 
 	// --- Draw Debug Spheres ---
-	graphicsCmdList->SetPipeline(m_debugPipeline.get());
-	graphicsCmdList->BindDescriptorSet(0, m_debugDescriptorSet.get());
-	graphicsCmdList->SetVertexBuffer(0, m_sphereVertexBuffer.get());
-	graphicsCmdList->BindIndexBuffer(m_sphereIndexBuffer.get(), 0);
+	if (m_enableDebugSpheres)
+	{
+		graphicsCmdList->SetPipeline(m_debugPipeline.get());
+		graphicsCmdList->SetVertexBuffer(0, m_sphereVertexBuffer.get());
+		graphicsCmdList->BindIndexBuffer(m_sphereIndexBuffer.get(), 0);
 
-	// // Draw sphere 1
-	// DebugUBO debugUbo1;
-	// debugUbo1.mvp = mvp * math::translate(math::mat4(1.0f), m_sphere1Pos) * math::scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
-	// memcpy(m_debugUboDataPtr, &debugUbo1, sizeof(DebugUBO));
-	// graphicsCmdList->DrawIndexed((uint32_t)m_sphereIndices.size());
+		// Prepare and draw sphere 1
+		DebugUBO debugUbo1;
+		debugUbo1.mvp = mvp * math::translate(math::mat4(1.0f), m_sphere1Pos) * math::scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
+		memcpy(m_debugUboDataPtr1, &debugUbo1, sizeof(DebugUBO));
 
-	// // Draw sphere 2
-	// DebugUBO debugUbo2;
-	// debugUbo2.mvp = mvp * math::translate(math::mat4(1.0f), m_sphere2Pos) * math::scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
-	// memcpy(m_debugUboDataPtr, &debugUbo2, sizeof(DebugUBO));
-	// graphicsCmdList->DrawIndexed((uint32_t)m_sphereIndices.size());
+		graphicsCmdList->BindDescriptorSet(0, m_debugDescriptorSet1.get());
+
+		graphicsCmdList->DrawIndexed((uint32_t) m_sphereIndices.size());
+
+		// Prepare and draw sphere 2
+		DebugUBO debugUbo2;
+		debugUbo2.mvp = mvp * math::translate(math::mat4(1.0f), m_sphere2Pos) * math::scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
+		memcpy(m_debugUboDataPtr2, &debugUbo2, sizeof(DebugUBO));
+
+		graphicsCmdList->BindDescriptorSet(0, m_debugDescriptorSet2.get());
+
+		graphicsCmdList->DrawIndexed((uint32_t) m_sphereIndices.size());
+	}
 
 	graphicsCmdList->EndRendering();
 
@@ -663,7 +655,7 @@ void ParticlesApp::onRender()
 	    rhi::PipelineScope::Graphics,
 	    rhi::PipelineScope::Graphics,
 	    {},
-	    std::array{swapchainTransition},
+	    container::array{swapchainTransition},
 	    {});
 
 	graphicsCmdList->End();
@@ -682,11 +674,11 @@ void ParticlesApp::onRender()
 	signalSemaphores.push_back(m_renderFinishedSemaphores[imageIndex].get());
 
 	rhi::SubmitInfo submitInfo{};
-	submitInfo.waitSemaphores   = std::span<const rhi::SemaphoreWaitInfo>(waitSemaphores.data(), waitSemaphores.size());
+	submitInfo.waitSemaphores   = container::span<const rhi::SemaphoreWaitInfo>(waitSemaphores.data(), waitSemaphores.size());
 	submitInfo.signalSemaphores = signalSemaphores;
 	submitInfo.signalFence      = m_inFlightFences[m_currentFrame].get();
 
-	auto graphicsCmdListSpan = std::array{graphicsCmdList.get()};
+	auto graphicsCmdListSpan = container::array{graphicsCmdList.get()};
 	device->SubmitCommandLists(graphicsCmdListSpan, rhi::QueueType::GRAPHICS, submitInfo);
 
 	// Present - wait on the render finished semaphore for the IMAGE
@@ -759,10 +751,17 @@ void ParticlesApp::onShutdown()
 		m_mvpBuffer->Unmap();
 		m_mvpDataPtr = nullptr;
 	}
-	if (m_debugUboBuffer && m_debugUboDataPtr)
+
+	// Clean up debug sphere resources (always initialized)
+	if (m_debugUboBuffer1 && m_debugUboDataPtr1)
 	{
-		m_debugUboBuffer->Unmap();
-		m_debugUboDataPtr = nullptr;
+		m_debugUboBuffer1->Unmap();
+		m_debugUboDataPtr1 = nullptr;
+	}
+	if (m_debugUboBuffer2 && m_debugUboDataPtr2)
+	{
+		m_debugUboBuffer2->Unmap();
+		m_debugUboDataPtr2 = nullptr;
 	}
 
 	// Clear resources (unique_ptrs will auto-delete)
@@ -775,12 +774,15 @@ void ParticlesApp::onShutdown()
 	m_computeFinishedSemaphores.clear();
 	m_imageAvailableSemaphores.clear();
 
+	// Clear debug sphere resources (always initialized)
 	m_debugPipeline.reset();
-	m_debugDescriptorSet.reset();
+	m_debugDescriptorSet2.reset();
+	m_debugDescriptorSet1.reset();
 	m_debugDescriptorSetLayout.reset();
 	m_debugFragmentShader.reset();
 	m_debugVertexShader.reset();
-	m_debugUboBuffer.reset();
+	m_debugUboBuffer2.reset();
+	m_debugUboBuffer1.reset();
 	m_sphereIndexBuffer.reset();
 	m_sphereVertexBuffer.reset();
 
@@ -806,11 +808,19 @@ void ParticlesApp::onShutdown()
 
 void ParticlesApp::onKey(int key, int action, int mods)
 {
-	// Handle keyboard input if needed
-	// For now, ESC key can close the application
-	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+	// Handle keyboard input
+	if (action == GLFW_PRESS)
 	{
-		glfwSetWindowShouldClose(m_deviceManager->getWindow(), GLFW_TRUE);
+		// ESC key closes the application
+		if (key == GLFW_KEY_ESCAPE)
+		{
+			glfwSetWindowShouldClose(m_deviceManager->getWindow(), GLFW_TRUE);
+		}
+		// D key toggles debug sphere rendering
+		else if (key == GLFW_KEY_D)
+		{
+			m_enableDebugSpheres = !m_enableDebugSpheres;
+		}
 	}
 }
 

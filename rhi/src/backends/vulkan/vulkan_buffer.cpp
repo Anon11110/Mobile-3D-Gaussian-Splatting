@@ -7,7 +7,7 @@ namespace rhi::vulkan
 {
 
 VulkanBuffer::VulkanBuffer(VmaAllocator allocator, const BufferDesc &desc) :
-    allocator(allocator), buffer(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), size(desc.size), mappedData(nullptr), isPersistentlyMapped(false)
+    allocator(allocator), buffer(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), size(desc.size), mappedData(nullptr), isPersistentlyMapped(false), indexType(desc.indexType)
 {
 	// Create buffer info
 	VkBufferCreateInfo bufferInfo{};
@@ -104,7 +104,8 @@ VulkanBuffer::VulkanBuffer(VulkanBuffer &&other) noexcept :
     allocation(other.allocation),
     size(other.size),
     mappedData(other.mappedData),
-    isPersistentlyMapped(other.isPersistentlyMapped)
+    isPersistentlyMapped(other.isPersistentlyMapped),
+    indexType(other.indexType)
 {
 	other.allocator            = VK_NULL_HANDLE;
 	other.buffer               = VK_NULL_HANDLE;
@@ -129,6 +130,7 @@ VulkanBuffer &VulkanBuffer::operator=(VulkanBuffer &&other) noexcept
 		size                 = other.size;
 		mappedData           = other.mappedData;
 		isPersistentlyMapped = other.isPersistentlyMapped;
+		indexType            = other.indexType;
 
 		other.allocator            = VK_NULL_HANDLE;
 		other.buffer               = VK_NULL_HANDLE;

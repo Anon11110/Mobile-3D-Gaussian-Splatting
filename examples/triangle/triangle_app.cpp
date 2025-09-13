@@ -1,11 +1,13 @@
-#include "triangle_app.h"
-#include "core/log.h"
-#include "engine/shader_factory.h"
-#include "msplat/app/device_manager.h"
-#include "rhi/rhi.h"
-#include <GLFW/glfw3.h>
 #include <array>
 #include <cstring>
+
+#include "app/device_manager.h"
+#include "core/log.h"
+#include "engine/shader_factory.h"
+#include "rhi/rhi.h"
+#include "triangle_app.h"
+
+#include <GLFW/glfw3.h>
 
 using namespace msplat;
 

@@ -1,6 +1,7 @@
 #include "test_framework.h"
 #include <msplat/core/containers/hash.h>
 #include <msplat/core/containers/unordered_map.h>
+#include <msplat/core/containers/unordered_set.h>
 #include <msplat/core/log.h>
 #include <string>
 #include <vector>
@@ -440,6 +441,191 @@ TEST(hash_with_seed_functionality)
 	return true;
 }
 #endif        // MSPLAT_USE_SYSTEM_STL
+
+// Basic unordered_set test
+TEST(unordered_set_basic)
+{
+	msplat::container::unordered_set<int> set;
+
+	// Test empty set
+	if (!set.empty())
+		return false;
+	if (set.size() != 0)
+		return false;
+
+	// Test insertion
+	set.insert(1);
+	set.insert(2);
+	set.insert(3);
+
+	if (set.empty())
+		return false;
+	if (set.size() != 3)
+		return false;
+
+	// Test lookup
+	if (set.find(1) == set.end())
+		return false;
+	if (set.find(2) == set.end())
+		return false;
+	if (set.find(3) == set.end())
+		return false;
+
+	// Test non-existent key
+	if (set.find(99) != set.end())
+		return false;
+
+	return true;
+}
+
+// Unordered_set with string values test
+TEST(unordered_set_string)
+{
+	msplat::container::unordered_set<std::string> set;
+
+	set.insert("hello");
+	set.insert("world");
+	set.insert("test");
+
+	if (set.size() != 3)
+		return false;
+
+	if (set.find("hello") == set.end())
+		return false;
+	if (set.find("world") == set.end())
+		return false;
+	if (set.find("test") == set.end())
+		return false;
+
+	// Test duplicate insertion
+	auto result = set.insert("hello");
+	if (result.second)        // Should be false since "hello" already exists
+		return false;
+	if (set.size() != 3)        // Size should remain the same
+		return false;
+
+	return true;
+}
+
+// Unordered_set operations test
+TEST(unordered_set_operations)
+{
+	msplat::container::unordered_set<int> set;
+
+	// Insert some elements
+	for (int i = 0; i < 10; ++i)
+	{
+		set.insert(i);
+	}
+
+	if (set.size() != 10)
+		return false;
+
+	// Test iteration
+	int count = 0;
+	for (const auto &value : set)
+	{
+		if (value < 0 || value >= 10)
+			return false;
+		++count;
+	}
+	if (count != 10)
+		return false;
+
+	// Test erase
+	set.erase(5);
+	if (set.size() != 9)
+		return false;
+	if (set.find(5) != set.end())
+		return false;
+
+	// Test clear
+	set.clear();
+	if (!set.empty())
+		return false;
+	if (set.size() != 0)
+		return false;
+
+	return true;
+}
+
+// Unordered_set with custom struct test
+TEST(unordered_set_custom_struct)
+{
+	msplat::container::unordered_set<TestPoint> set;
+
+	TestPoint p1{1.0f, 2.0f, 3.0f};
+	TestPoint p2{4.0f, 5.0f, 6.0f};
+	TestPoint p3{7.0f, 8.0f, 9.0f};
+
+	set.insert(p1);
+	set.insert(p2);
+	set.insert(p3);
+
+	if (set.size() != 3)
+		return false;
+
+	if (set.find(p1) == set.end())
+		return false;
+	if (set.find(p2) == set.end())
+		return false;
+	if (set.find(p3) == set.end())
+		return false;
+
+	// Test with identical point
+	TestPoint p1_copy{1.0f, 2.0f, 3.0f};
+	if (set.find(p1_copy) == set.end())
+		return false;
+
+	// Inserting duplicate shouldn't change size
+	auto result = set.insert(p1_copy);
+	if (result.second)        // Should be false since p1_copy equals p1
+		return false;
+	if (set.size() != 3)
+		return false;
+
+	return true;
+}
+
+// Unordered_set duplicates test
+TEST(unordered_set_duplicates)
+{
+	msplat::container::unordered_set<int> set;
+
+	// Test multiple insertions of same value
+	set.insert(42);
+	auto result1 = set.insert(42);
+	auto result2 = set.insert(42);
+
+	// All subsequent insertions should fail
+	if (result1.second)
+		return false;
+	if (result2.second)
+		return false;
+
+	// Size should remain 1
+	if (set.size() != 1)
+		return false;
+
+	// Insert different values
+	set.insert(10);
+	set.insert(20);
+	set.insert(30);
+
+	if (set.size() != 4)
+		return false;
+
+	// Try to insert existing values again
+	auto result3 = set.insert(10);
+	auto result4 = set.insert(20);
+
+	if (result3.second || result4.second)
+		return false;
+	if (set.size() != 4)
+		return false;
+
+	return true;
+}
 
 // Register all hash tests
 void register_hash_tests()

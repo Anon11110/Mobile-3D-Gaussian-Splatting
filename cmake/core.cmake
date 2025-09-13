@@ -35,6 +35,7 @@ set(CORE_HEADERS
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/queue.h
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/string.h
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/unordered_map.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/unordered_set.h
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/vector.h
 
     # Memory headers
@@ -54,7 +55,7 @@ set(CORE_SOURCES
 
     # Platform sources
     ${CMAKE_SOURCE_DIR}/src/core/platform.cpp
-    
+
     # Container sources
     ${CMAKE_SOURCE_DIR}/src/core/containers/filesystem.cpp
 

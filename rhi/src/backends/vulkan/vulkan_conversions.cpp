@@ -235,6 +235,10 @@ VkPolygonMode PolygonModeToVulkan(PolygonMode mode)
 	{
 		case PolygonMode::FILL:
 			return VK_POLYGON_MODE_FILL;
+		case PolygonMode::LINE:
+			return VK_POLYGON_MODE_LINE;
+		case PolygonMode::POINT:
+			return VK_POLYGON_MODE_POINT;
 		default:
 			return VK_POLYGON_MODE_FILL;
 	}

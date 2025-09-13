@@ -49,4 +49,41 @@ constexpr T sign(T x)
 	return glm::sign(x);
 }
 
+// Common math functions
+template <typename T>
+constexpr T sqrt(T x)
+{
+	return glm::sqrt(x);
+}
+
+template <typename T>
+constexpr T min(T a, T b)
+{
+	return glm::min(a, b);
+}
+
+template <typename T>
+constexpr T max(T a, T b)
+{
+	return glm::max(a, b);
+}
+
+template <typename T>
+constexpr T pow(T base, T exponent)
+{
+	return glm::pow(base, exponent);
+}
+
+template <typename T>
+constexpr T exp(T x)
+{
+	return glm::exp(x);
+}
+
+template <typename T>
+constexpr T log(T x)
+{
+	return glm::log(x);
+}
+
 }        // namespace msplat::math

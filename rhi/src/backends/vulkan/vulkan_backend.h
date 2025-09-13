@@ -36,6 +36,7 @@ class VulkanBuffer final : public IRHIBuffer
 	size_t        size;
 	void         *mappedData;
 	bool          isPersistentlyMapped;
+	IndexType     indexType;        // Store index type for index buffers
 
   public:
 	VulkanBuffer(VmaAllocator allocator, const BufferDesc &desc);
@@ -59,6 +60,11 @@ class VulkanBuffer final : public IRHIBuffer
 	[[nodiscard]] VmaAllocation GetAllocation() const noexcept
 	{
 		return allocation;
+	}
+
+	[[nodiscard]] IndexType GetIndexType() const noexcept
+	{
+		return indexType;
 	}
 };
 

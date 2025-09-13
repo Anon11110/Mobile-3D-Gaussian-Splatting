@@ -242,7 +242,23 @@ void VulkanCommandList::SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, si
 void VulkanCommandList::BindIndexBuffer(IRHIBuffer *buffer, size_t offset)
 {
 	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
-	vkCmdBindIndexBuffer(commandBuffer, vkBuffer->GetHandle(), offset, VK_INDEX_TYPE_UINT16);
+
+	// Map RHI IndexType to Vulkan index type
+	VkIndexType vkIndexType;
+	switch (vkBuffer->GetIndexType())
+	{
+		case IndexType::UINT16:
+			vkIndexType = VK_INDEX_TYPE_UINT16;
+			break;
+		case IndexType::UINT32:
+			vkIndexType = VK_INDEX_TYPE_UINT32;
+			break;
+		default:
+			vkIndexType = VK_INDEX_TYPE_UINT32;        // Safe default
+			break;
+	}
+
+	vkCmdBindIndexBuffer(commandBuffer, vkBuffer->GetHandle(), offset, vkIndexType);
 }
 
 void VulkanCommandList::BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *descriptorSet,
