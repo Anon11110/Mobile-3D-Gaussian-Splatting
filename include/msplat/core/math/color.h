@@ -28,7 +28,7 @@ constexpr Color3 PURPLE{0.5f, 0.0f, 1.0f};
 }        // namespace Colors
 
 // Color conversion functions
-inline Color3 hsvToRgb(float h, float s, float v)
+inline Color3 HsvToRgb(float h, float s, float v)
 {
 	float c = v * s;
 	float x = c * (1.0f - std::abs(std::fmod(h / 60.0f, 2.0f) - 1.0f));
@@ -63,12 +63,12 @@ inline Color3 hsvToRgb(float h, float s, float v)
 	return rgb + Color3(m);
 }
 
-inline Color3 hsvToRgb(const vec3 &hsv)
+inline Color3 HsvToRgb(const vec3 &hsv)
 {
-	return hsvToRgb(hsv.x, hsv.y, hsv.z);
+	return HsvToRgb(hsv.x, hsv.y, hsv.z);
 }
 
-inline vec3 rgbToHsv(const Color3 &rgb)
+inline vec3 RgbToHsv(const Color3 &rgb)
 {
 	float maxVal = std::max({rgb.r, rgb.g, rgb.b});
 	float minVal = std::min({rgb.r, rgb.g, rgb.b});
@@ -113,7 +113,7 @@ inline vec3 rgbToHsv(const Color3 &rgb)
 }
 
 // Gamma correction
-inline Color3 linearToSrgb(const Color3 &linear)
+inline Color3 LinearToSrgb(const Color3 &linear)
 {
 	Color3 srgb;
 	for (int i = 0; i < 3; ++i)
@@ -130,7 +130,7 @@ inline Color3 linearToSrgb(const Color3 &linear)
 	return srgb;
 }
 
-inline Color3 srgbToLinear(const Color3 &srgb)
+inline Color3 SrgbToLinear(const Color3 &srgb)
 {
 	Color3 linear;
 	for (int i = 0; i < 3; ++i)
@@ -148,7 +148,7 @@ inline Color3 srgbToLinear(const Color3 &srgb)
 }
 
 // Simple gamma correction
-inline Color3 gammaCorrect(const Color3 &color, float gamma = 2.2f)
+inline Color3 GammaCorrect(const Color3 &color, float gamma = 2.2f)
 {
 	return Color3(
 	    std::pow(color.r, 1.0f / gamma),
@@ -156,7 +156,7 @@ inline Color3 gammaCorrect(const Color3 &color, float gamma = 2.2f)
 	    std::pow(color.b, 1.0f / gamma));
 }
 
-inline Color3 inverseGammaCorrect(const Color3 &color, float gamma = 2.2f)
+inline Color3 InverseGammaCorrect(const Color3 &color, float gamma = 2.2f)
 {
 	return Color3(
 	    std::pow(color.r, gamma),
@@ -165,7 +165,7 @@ inline Color3 inverseGammaCorrect(const Color3 &color, float gamma = 2.2f)
 }
 
 // Color blending
-inline Color4 alphaBlend(const Color4 &source, const Color4 &dest)
+inline Color4 AlphaBlend(const Color4 &source, const Color4 &dest)
 {
 	float srcAlpha    = source.a;
 	float invSrcAlpha = 1.0f - srcAlpha;
@@ -178,7 +178,7 @@ inline Color4 alphaBlend(const Color4 &source, const Color4 &dest)
 }
 
 // Color temperature to RGB (approximate)
-inline Color3 temperatureToRgb(float temperature)
+inline Color3 TemperatureToRgb(float temperature)
 {
 	// Temperature in Kelvin, typically 1000-12000
 	temperature = glm::clamp(temperature, 1000.0f, 12000.0f) / 100.0f;
@@ -226,24 +226,24 @@ inline Color3 temperatureToRgb(float temperature)
 }
 
 // Luminance calculation
-inline float luminance(const Color3 &color)
+inline float Luminance(const Color3 &color)
 {
 	return 0.299f * color.r + 0.587f * color.g + 0.114f * color.b;
 }
 
 // Color distance
-inline float colorDistance(const Color3 &a, const Color3 &b)
+inline float ColorDistance(const Color3 &a, const Color3 &b)
 {
 	return glm::length(a - b);
 }
 
 // Premultiplied alpha operations
-inline Color4 premultiplyAlpha(const Color4 &color)
+inline Color4 PremultiplyAlpha(const Color4 &color)
 {
 	return Color4(vec3(color) * color.a, color.a);
 }
 
-inline Color4 unpremultiplyAlpha(const Color4 &color)
+inline Color4 UnpremultiplyAlpha(const Color4 &color)
 {
 	if (color.a == 0.0f)
 		return Color4(0.0f);

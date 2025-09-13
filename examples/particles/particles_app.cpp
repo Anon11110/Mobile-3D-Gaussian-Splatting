@@ -14,14 +14,14 @@
 
 using namespace msplat;
 
-bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
+bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 {
 	m_deviceManager = deviceManager;
 
 	LOG_INFO("Initializing Particles application");
 
-	auto *device    = m_deviceManager->getDevice();
-	auto *swapchain = m_deviceManager->getSwapchain();
+	auto *device    = m_deviceManager->GetDevice();
+	auto *swapchain = m_deviceManager->GetSwapchain();
 
 	// Initialize particle data
 	container::vector<Particle> initialParticles;
@@ -199,7 +199,7 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	    rhi::ShaderStage::FRAGMENT);
 
 	// Generate sphere wireframe with icosahedron subdivision
-	auto sphereMesh = engine::generateIcosphereWireframe(2);
+	auto sphereMesh = engine::GenerateIcosphereWireframe(2);
 	m_sphereIndices = sphereMesh.indices;
 
 	rhi::BufferDesc sphereVbDesc{};
@@ -308,7 +308,7 @@ bool ParticlesApp::onInit(app::DeviceManager *deviceManager)
 	return true;
 }
 
-void ParticlesApp::onUpdate(float deltaTime)
+void ParticlesApp::OnUpdate(float deltaTime)
 {
 	float currentTime = static_cast<float>(m_applicationTimer.elapsedSeconds());
 	float frameDelta  = currentTime - m_lastTime;
@@ -325,19 +325,19 @@ void ParticlesApp::onUpdate(float deltaTime)
 		m_sphere1Pos += m_sphere1Vel * FIXED_TIMESTEP;
 
 		// Bounce sphere 1 off walls using msplat::math functions
-		if (math::abs(m_sphere1Pos.x) > m_wallBoundsX - m_sphereRadius)
+		if (math::Abs(m_sphere1Pos.x) > m_wallBoundsX - m_sphereRadius)
 		{
-			m_sphere1Pos.x = math::sign(m_sphere1Pos.x) * (m_wallBoundsX - m_sphereRadius);
+			m_sphere1Pos.x = math::Sign(m_sphere1Pos.x) * (m_wallBoundsX - m_sphereRadius);
 			m_sphere1Vel.x = -m_sphere1Vel.x * 0.9f;
 		}
-		if (math::abs(m_sphere1Pos.y) > m_wallBoundsY - m_sphereRadius)
+		if (math::Abs(m_sphere1Pos.y) > m_wallBoundsY - m_sphereRadius)
 		{
-			m_sphere1Pos.y = math::sign(m_sphere1Pos.y) * (m_wallBoundsY - m_sphereRadius);
+			m_sphere1Pos.y = math::Sign(m_sphere1Pos.y) * (m_wallBoundsY - m_sphereRadius);
 			m_sphere1Vel.y = -m_sphere1Vel.y * 0.9f;
 		}
-		if (math::abs(m_sphere1Pos.z) > m_wallBoundsZ - m_sphereRadius)
+		if (math::Abs(m_sphere1Pos.z) > m_wallBoundsZ - m_sphereRadius)
 		{
-			m_sphere1Pos.z = math::sign(m_sphere1Pos.z) * (m_wallBoundsZ - m_sphereRadius);
+			m_sphere1Pos.z = math::Sign(m_sphere1Pos.z) * (m_wallBoundsZ - m_sphereRadius);
 			m_sphere1Vel.z = -m_sphere1Vel.z * 0.9f;
 		}
 
@@ -345,28 +345,28 @@ void ParticlesApp::onUpdate(float deltaTime)
 		m_sphere2Pos += m_sphere2Vel * FIXED_TIMESTEP;
 
 		// Bounce sphere 2 off walls using msplat::math functions
-		if (math::abs(m_sphere2Pos.x) > m_wallBoundsX - m_sphereRadius)
+		if (math::Abs(m_sphere2Pos.x) > m_wallBoundsX - m_sphereRadius)
 		{
-			m_sphere2Pos.x = math::sign(m_sphere2Pos.x) * (m_wallBoundsX - m_sphereRadius);
+			m_sphere2Pos.x = math::Sign(m_sphere2Pos.x) * (m_wallBoundsX - m_sphereRadius);
 			m_sphere2Vel.x = -m_sphere2Vel.x * 0.9f;
 		}
-		if (math::abs(m_sphere2Pos.y) > m_wallBoundsY - m_sphereRadius)
+		if (math::Abs(m_sphere2Pos.y) > m_wallBoundsY - m_sphereRadius)
 		{
-			m_sphere2Pos.y = math::sign(m_sphere2Pos.y) * (m_wallBoundsY - m_sphereRadius);
+			m_sphere2Pos.y = math::Sign(m_sphere2Pos.y) * (m_wallBoundsY - m_sphereRadius);
 			m_sphere2Vel.y = -m_sphere2Vel.y * 0.9f;
 		}
-		if (math::abs(m_sphere2Pos.z) > m_wallBoundsZ - m_sphereRadius)
+		if (math::Abs(m_sphere2Pos.z) > m_wallBoundsZ - m_sphereRadius)
 		{
-			m_sphere2Pos.z = math::sign(m_sphere2Pos.z) * (m_wallBoundsZ - m_sphereRadius);
+			m_sphere2Pos.z = math::Sign(m_sphere2Pos.z) * (m_wallBoundsZ - m_sphereRadius);
 			m_sphere2Vel.z = -m_sphere2Vel.z * 0.9f;
 		}
 	}
 }
 
-void ParticlesApp::onRender()
+void ParticlesApp::OnRender()
 {
-	auto *device    = m_deviceManager->getDevice();
-	auto *swapchain = m_deviceManager->getSwapchain();
+	auto *device    = m_deviceManager->GetDevice();
+	auto *swapchain = m_deviceManager->GetSwapchain();
 
 	// Wait for the fence of the CURRENT frame to ensure its resources are free
 	m_inFlightFences[m_currentFrame]->Wait();
@@ -393,16 +393,16 @@ void ParticlesApp::onRender()
 
 	// Get current framebuffer size for correct aspect ratio
 	int fbw, fbh;
-	glfwGetFramebufferSize(m_deviceManager->getWindow(), &fbw, &fbh);
+	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &fbw, &fbh);
 	float aspect = static_cast<float>(fbw) / static_cast<float>(fbh);
 
 	// Simple camera setup
-	math::mat4 view = math::lookAt(
+	math::mat4 view = math::LookAt(
 	    math::vec3(0.0f, 0.0f, 6.0f),         // eye
 	    math::vec3(0.0f, 0.0f, 0.0f),         // center
 	    math::vec3(0.0f, 1.0f, 0.0f));        // up
 
-	math::mat4 proj = math::perspective(math::radians(45.0f), aspect, 0.1f, 100.0f);
+	math::mat4 proj = math::Perspective(math::Radians(45.0f), aspect, 0.1f, 100.0f);
 	proj[1][1] *= -1;
 	math::mat4 mvp = proj * view;
 
@@ -417,10 +417,10 @@ void ParticlesApp::onRender()
 	{
 		LOG_WARNING("Swapchain out of date, recreating");
 		int width, height;
-		glfwGetFramebufferSize(m_deviceManager->getWindow(), &width, &height);
+		glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 		while (width == 0 || height == 0)
 		{
-			glfwGetFramebufferSize(m_deviceManager->getWindow(), &width, &height);
+			glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 			glfwWaitEvents();
 		}
 		swapchain->Resize(width, height);
@@ -628,7 +628,7 @@ void ParticlesApp::onRender()
 
 		// Prepare and draw sphere 1
 		DebugUBO debugUbo1;
-		debugUbo1.mvp = mvp * math::translate(math::mat4(1.0f), m_sphere1Pos) * math::scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
+		debugUbo1.mvp = mvp * math::Translate(math::mat4(1.0f), m_sphere1Pos) * math::Scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
 		memcpy(m_debugUboDataPtr1, &debugUbo1, sizeof(DebugUBO));
 
 		graphicsCmdList->BindDescriptorSet(0, m_debugDescriptorSet1.get());
@@ -637,7 +637,7 @@ void ParticlesApp::onRender()
 
 		// Prepare and draw sphere 2
 		DebugUBO debugUbo2;
-		debugUbo2.mvp = mvp * math::translate(math::mat4(1.0f), m_sphere2Pos) * math::scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
+		debugUbo2.mvp = mvp * math::Translate(math::mat4(1.0f), m_sphere2Pos) * math::Scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
 		memcpy(m_debugUboDataPtr2, &debugUbo2, sizeof(DebugUBO));
 
 		graphicsCmdList->BindDescriptorSet(0, m_debugDescriptorSet2.get());
@@ -688,10 +688,10 @@ void ParticlesApp::onRender()
 	{
 		LOG_WARNING("Swapchain needs recreation");
 		int width, height;
-		glfwGetFramebufferSize(m_deviceManager->getWindow(), &width, &height);
+		glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 		while (width == 0 || height == 0)
 		{
-			glfwGetFramebufferSize(m_deviceManager->getWindow(), &width, &height);
+			glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 			glfwWaitEvents();
 		}
 		swapchain->Resize(width, height);
@@ -730,14 +730,14 @@ void ParticlesApp::onRender()
 	}
 }
 
-void ParticlesApp::onShutdown()
+void ParticlesApp::OnShutdown()
 {
 	LOG_INFO("Shutting down Particles application");
 
 	// Wait for GPU to finish
-	if (m_deviceManager && m_deviceManager->getDevice())
+	if (m_deviceManager && m_deviceManager->GetDevice())
 	{
-		m_deviceManager->getDevice()->WaitIdle();
+		m_deviceManager->GetDevice()->WaitIdle();
 	}
 
 	// Unmap buffers
@@ -806,7 +806,7 @@ void ParticlesApp::onShutdown()
 	m_particleBufferA.reset();
 }
 
-void ParticlesApp::onKey(int key, int action, int mods)
+void ParticlesApp::OnKey(int key, int action, int mods)
 {
 	// Handle keyboard input
 	if (action == GLFW_PRESS)
@@ -814,7 +814,7 @@ void ParticlesApp::onKey(int key, int action, int mods)
 		// ESC key closes the application
 		if (key == GLFW_KEY_ESCAPE)
 		{
-			glfwSetWindowShouldClose(m_deviceManager->getWindow(), GLFW_TRUE);
+			glfwSetWindowShouldClose(m_deviceManager->GetWindow(), GLFW_TRUE);
 		}
 		// D key toggles debug sphere rendering
 		else if (key == GLFW_KEY_D)
@@ -824,12 +824,12 @@ void ParticlesApp::onKey(int key, int action, int mods)
 	}
 }
 
-void ParticlesApp::onMouseButton(int button, int action, int mods)
+void ParticlesApp::OnMouseButton(int button, int action, int mods)
 {
 	// Handle mouse button input if needed
 }
 
-void ParticlesApp::onMouseMove(double xpos, double ypos)
+void ParticlesApp::OnMouseMove(double xpos, double ypos)
 {
 	// Handle mouse movement if needed
 }

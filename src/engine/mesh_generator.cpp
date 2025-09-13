@@ -7,13 +7,13 @@
 namespace msplat::engine
 {
 
-IcosphereMesh generateIcosphereWireframe(int subdivisions)
+IcosphereMesh GenerateIcosphereWireframe(int subdivisions)
 {
 	IcosphereMesh mesh;
 
 	// Icosahedron base geometry
-	const float t = (1.0f + math::sqrt(5.0f)) / 2.0f;
-	const float s = math::sqrt(1.0f + t * t);
+	const float t = (1.0f + math::Sqrt(5.0f)) / 2.0f;
+	const float s = math::Sqrt(1.0f + t * t);
 
 	// 12 vertices of icosahedron (normalized to unit sphere)
 	mesh.vertices.reserve(12);
@@ -101,7 +101,7 @@ IcosphereMesh generateIcosphereWireframe(int subdivisions)
 				return it->second;
 
 			// Create new midpoint vertex on unit sphere
-			math::vec3 mid      = math::normalize((mesh.vertices[v0] + mesh.vertices[v1]) * 0.5f);
+			math::vec3 mid      = math::Normalize((mesh.vertices[v0] + mesh.vertices[v1]) * 0.5f);
 			uint32_t   midIndex = static_cast<uint32_t>(mesh.vertices.size());
 			mesh.vertices.push_back(mid);
 			edgeMidpoints[edge] = midIndex;

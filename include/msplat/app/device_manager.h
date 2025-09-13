@@ -28,19 +28,19 @@ public:
 	 * @param title The title of the window.
 	 * @return 0 on success, non-zero on failure.
 	 */
-	int run(int width, int height, const char* title);
+	int Run(int width, int height, const char* title);
 
-	rhi::IRHIDevice* getDevice() const { return m_device.get(); }
-	rhi::IRHISwapchain* getSwapchain() const { return m_swapchain.get(); }
-	GLFWwindow* getWindow() const { return m_window; }
+	rhi::IRHIDevice* GetDevice() const { return m_device.get(); }
+	rhi::IRHISwapchain* GetSwapchain() const { return m_swapchain.get(); }
+	GLFWwindow* GetWindow() const { return m_window; }
 
 	IApplication* m_app; // Made public for callbacks
 
 private:
-	void initWindow(int width, int height, const char* title);
-	void initRHI();
-	void mainLoop();
-	void shutdown();
+	void InitWindow(int width, int height, const char* title);
+	void InitRHI();
+	void MainLoop();
+	void Shutdown();
 
 	GLFWwindow* m_window = nullptr;
 	container::unique_ptr<rhi::IRHIDevice> m_device;

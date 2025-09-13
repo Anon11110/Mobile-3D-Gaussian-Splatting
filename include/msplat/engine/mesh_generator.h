@@ -33,6 +33,6 @@ struct IcosphereMesh
  *
  * @return IcosphereMesh containing vertices on unit sphere and edge indices
  */
-IcosphereMesh generateIcosphereWireframe(int subdivisions = 2);
+IcosphereMesh GenerateIcosphereWireframe(int subdivisions = 2);
 
 }        // namespace msplat::engine

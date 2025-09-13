@@ -163,38 +163,38 @@ class Frustum
 };
 
 // Projection matrix creation
-inline mat4 perspective(float fovy, float aspect, float nearPlane, float farPlane)
+inline mat4 Perspective(float fovy, float aspect, float nearPlane, float farPlane)
 {
 	return glm::perspective(fovy, aspect, nearPlane, farPlane);
 }
 
-inline mat4 perspectiveInfinite(float fovy, float aspect, float nearPlane)
+inline mat4 PerspectiveInfinite(float fovy, float aspect, float nearPlane)
 {
 	return glm::infinitePerspective(fovy, aspect, nearPlane);
 }
 
-inline mat4 ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane)
+inline mat4 Ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane)
 {
 	return glm::ortho(left, right, bottom, top, nearPlane, farPlane);
 }
 
-inline mat4 frustumMatrix(float left, float right, float bottom, float top, float nearPlane, float farPlane)
+inline mat4 FrustumMatrix(float left, float right, float bottom, float top, float nearPlane, float farPlane)
 {
 	return glm::frustum(left, right, bottom, top, nearPlane, farPlane);
 }
 
 // View matrix creation
-inline mat4 lookAt(const vec3 &eye, const vec3 &center, const vec3 &up)
+inline mat4 LookAt(const vec3 &eye, const vec3 &center, const vec3 &up)
 {
 	return glm::lookAt(eye, center, up);
 }
 
-inline mat4 lookAtLH(const vec3 &eye, const vec3 &center, const vec3 &up)
+inline mat4 LookAtLH(const vec3 &eye, const vec3 &center, const vec3 &up)
 {
 	return glm::lookAtLH(eye, center, up);
 }
 
-inline mat4 lookAtRH(const vec3 &eye, const vec3 &center, const vec3 &up)
+inline mat4 LookAtRH(const vec3 &eye, const vec3 &center, const vec3 &up)
 {
 	return glm::lookAtRH(eye, center, up);
 }

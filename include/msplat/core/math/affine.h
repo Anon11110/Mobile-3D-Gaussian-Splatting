@@ -30,48 +30,48 @@ class Transform
 	// Create transformation matrix
 	mat4 toMatrix() const
 	{
-		mat4 t = translate(position);
-		mat4 r = quatToMat4(rotation);
-		mat4 s = math::scale(scale);
+		mat4 t = Translate(position);
+		mat4 r = QuatToMat4(rotation);
+		mat4 s = math::Scale(scale);
 		return t * r * s;
 	}
 
 	// Create inverse transformation matrix
 	mat4 toInverseMatrix() const
 	{
-		mat4 invS = math::scale(vec3(1.0f) / scale);
-		mat4 invR = quatToMat4(quatConjugate(rotation));
-		mat4 invT = translate(-position);
+		mat4 invS = math::Scale(vec3(1.0f) / scale);
+		mat4 invR = QuatToMat4(QuatConjugate(rotation));
+		mat4 invT = Translate(-position);
 		return invS * invR * invT;
 	}
 
 	// Transform a point
 	vec3 transformPoint(const vec3 &point) const
 	{
-		return position + quatRotate(rotation, scale * point);
+		return position + QuatRotate(rotation, scale * point);
 	}
 
 	// Transform a direction (no translation, no scale)
 	vec3 transformDirection(const vec3 &direction) const
 	{
-		return quatRotate(rotation, direction);
+		return QuatRotate(rotation, direction);
 	}
 
 	// Transform a normal (inverse transpose)
 	vec3 transformNormal(const vec3 &normal) const
 	{
-		return quatRotate(rotation, normal / scale);
+		return QuatRotate(rotation, normal / scale);
 	}
 
 	// Inverse transform operations
 	vec3 inverseTransformPoint(const vec3 &point) const
 	{
-		return (quatRotate(quatConjugate(rotation), point - position)) / scale;
+		return (QuatRotate(QuatConjugate(rotation), point - position)) / scale;
 	}
 
 	vec3 inverseTransformDirection(const vec3 &direction) const
 	{
-		return quatRotate(quatConjugate(rotation), direction);
+		return QuatRotate(QuatConjugate(rotation), direction);
 	}
 
 	// Combine transforms
@@ -80,7 +80,7 @@ class Transform
 		Transform result;
 		result.scale    = scale * other.scale;
 		result.rotation = rotation * other.rotation;
-		result.position = position + quatRotate(rotation, scale * other.position);
+		result.position = position + QuatRotate(rotation, scale * other.position);
 		return result;
 	}
 
@@ -94,9 +94,9 @@ class Transform
 	static Transform lerp(const Transform &a, const Transform &b, float t)
 	{
 		Transform result;
-		result.position = math::lerp(a.position, b.position, t);
-		result.rotation = quatSlerp(a.rotation, b.rotation, t);
-		result.scale    = math::lerp(a.scale, b.scale, t);
+		result.position = math::Lerp(a.position, b.position, t);
+		result.rotation = QuatSlerp(a.rotation, b.rotation, t);
+		result.scale    = math::Lerp(a.scale, b.scale, t);
 		return result;
 	}
 
@@ -118,7 +118,7 @@ class Transform
 		    vec3(matrix[0]) / result.scale.x,
 		    vec3(matrix[1]) / result.scale.y,
 		    vec3(matrix[2]) / result.scale.z);
-		result.rotation = matToQuat(rotMatrix);
+		result.rotation = MatToQuat(rotMatrix);
 
 		return result;
 	}
@@ -131,26 +131,26 @@ class Transform
 };
 
 // Create common transforms
-inline Transform makeTranslation(const vec3 &translation)
+inline Transform MakeTranslation(const vec3 &translation)
 {
 	return Transform(translation);
 }
 
-inline Transform makeRotation(const quat &rotation)
+inline Transform MakeRotation(const quat &rotation)
 {
 	return Transform(vec3(0.0f), rotation);
 }
 
-inline Transform makeScale(const vec3 &scale)
+inline Transform MakeScale(const vec3 &scale)
 {
 	Transform t;
 	t.scale = scale;
 	return t;
 }
 
-inline Transform makeScale(float scale)
+inline Transform MakeScale(float scale)
 {
-	return makeScale(vec3(scale));
+	return MakeScale(vec3(scale));
 }
 
 }        // namespace msplat::math

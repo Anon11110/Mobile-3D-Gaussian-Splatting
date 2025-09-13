@@ -20,23 +20,23 @@ public:
 	 * @param deviceManager A pointer to the DeviceManager instance.
 	 * @return True if initialization is successful, false otherwise.
 	 */
-	virtual bool onInit(DeviceManager* deviceManager) = 0;
+	virtual bool OnInit(DeviceManager* deviceManager) = 0;
 
 	/**
 	 * @brief Called every frame to update the application logic.
 	 * @param deltaTime The time elapsed since the last frame.
 	 */
-	virtual void onUpdate(float deltaTime) = 0;
+	virtual void OnUpdate(float deltaTime) = 0;
 
 	/**
 	 * @brief Called every frame to render the scene.
 	 */
-	virtual void onRender() = 0;
+	virtual void OnRender() = 0;
 
 	/**
 	 * @brief Called when the application is shutting down.
 	 */
-	virtual void onShutdown() = 0;
+	virtual void OnShutdown() = 0;
 
 	/**
 	 * @brief Handles keyboard input events.
@@ -44,7 +44,7 @@ public:
 	 * @param action The key action (e.g., press, release, repeat).
 	 * @param mods Key modifiers (e.g., shift, ctrl, alt).
 	 */
-	virtual void onKey(int key, int action, int mods) = 0;
+	virtual void OnKey(int key, int action, int mods) = 0;
 
 	/**
 	 * @brief Handles mouse button input events.
@@ -52,14 +52,14 @@ public:
 	 * @param action The button action (e.g., press, release).
 	 * @param mods Key modifiers.
 	 */
-	virtual void onMouseButton(int button, int action, int mods) = 0;
+	virtual void OnMouseButton(int button, int action, int mods) = 0;
 
 	/**
 	 * @brief Handles mouse movement events.
 	 * @param xpos The new x-coordinate of the mouse cursor.
 	 * @param ypos The new y-coordinate of the mouse cursor.
 	 */
-	virtual void onMouseMove(double xpos, double ypos) = 0;
+	virtual void OnMouseMove(double xpos, double ypos) = 0;
 };
 
 } // namespace msplat::app

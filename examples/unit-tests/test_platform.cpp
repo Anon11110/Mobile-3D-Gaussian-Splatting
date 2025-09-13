@@ -7,7 +7,7 @@
 
 TEST(aligned_malloc_basic)
 {
-	void *ptr = msplat::core::aligned_malloc(1024, 16);
+	void *ptr = msplat::core::AlignedMalloc(1024, 16);
 	if (!ptr)
 		return false;
 
@@ -15,13 +15,13 @@ TEST(aligned_malloc_basic)
 	uintptr_t addr    = reinterpret_cast<uintptr_t>(ptr);
 	bool      aligned = (addr % 16) == 0;
 
-	msplat::core::aligned_free(ptr);
+	msplat::core::AlignedFree(ptr);
 	return aligned;
 }
 
 TEST(aligned_malloc_large_alignment)
 {
-	void *ptr = msplat::core::aligned_malloc(1024, 256);
+	void *ptr = msplat::core::AlignedMalloc(1024, 256);
 	if (!ptr)
 		return false;
 
@@ -29,25 +29,25 @@ TEST(aligned_malloc_large_alignment)
 	uintptr_t addr    = reinterpret_cast<uintptr_t>(ptr);
 	bool      aligned = (addr % 256) == 0;
 
-	msplat::core::aligned_free(ptr);
+	msplat::core::AlignedFree(ptr);
 	return aligned;
 }
 
 TEST(aligned_malloc_zero_size)
 {
-	void *ptr = msplat::core::aligned_malloc(0, 16);
+	void *ptr = msplat::core::AlignedMalloc(0, 16);
 	return ptr == nullptr;        // Should return null for zero size
 }
 
 TEST(aligned_malloc_invalid_alignment)
 {
-	void *ptr = msplat::core::aligned_malloc(1024, 15);        // Not power of 2
-	return ptr == nullptr;                                     // Should return null for invalid alignment
+	void *ptr = msplat::core::AlignedMalloc(1024, 15);        // Not power of 2
+	return ptr == nullptr;                                    // Should return null for invalid alignment
 }
 
 TEST(aligned_malloc_write_test)
 {
-	void *ptr = msplat::core::aligned_malloc(1024, 64);
+	void *ptr = msplat::core::AlignedMalloc(1024, 64);
 	if (!ptr)
 		return false;
 
@@ -66,20 +66,20 @@ TEST(aligned_malloc_write_test)
 		}
 	}
 
-	msplat::core::aligned_free(ptr);
+	msplat::core::AlignedFree(ptr);
 	return success;
 }
 
 TEST(aligned_free_null)
 {
 	// Should not crash
-	msplat::core::aligned_free(nullptr);
+	msplat::core::AlignedFree(nullptr);
 	return true;
 }
 
 TEST(get_page_size)
 {
-	size_t page_size = msplat::core::get_page_size();
+	size_t page_size = msplat::core::GetPageSize();
 
 	// Page size should be a power of 2 and at least 1KB
 	if (page_size < 1024)
@@ -93,7 +93,7 @@ TEST(get_page_size)
 
 TEST(get_cache_line_size)
 {
-	size_t cache_line_size = msplat::core::get_cache_line_size();
+	size_t cache_line_size = msplat::core::GetCacheLineSize();
 
 	// Cache line size should be reasonable (16-256 bytes typically)
 	if (cache_line_size < 16 || cache_line_size > 256)
@@ -107,7 +107,7 @@ TEST(get_cache_line_size)
 
 TEST(get_backtrace_basic)
 {
-	auto backtrace = msplat::core::get_backtrace(10);
+	auto backtrace = msplat::core::GetBacktrace(10);
 
 // In debug builds should have some frames, in release might be empty
 #ifndef NDEBUG
@@ -128,7 +128,7 @@ TEST(get_backtrace_basic)
 		LOG_INFO("Backtrace (first 3 frames):");
 		for (size_t i = 0; i < std::min(size_t(3), backtrace.size()); ++i)
 		{
-			LOG_INFO("  {}", msplat::core::to_string(backtrace[i]));
+			LOG_INFO("  {}", msplat::core::ToString(backtrace[i]));
 		}
 	}
 	return !backtrace.empty();
@@ -139,7 +139,7 @@ TEST(get_backtrace_basic)
 
 TEST(get_backtrace_large_request)
 {
-	auto backtrace = msplat::core::get_backtrace(1000);
+	auto backtrace = msplat::core::GetBacktrace(1000);
 
 	// Should not crash and should return reasonable number of frames
 	return backtrace.size() < 1000;        // Unlikely to have 1000 stack frames

@@ -49,13 +49,13 @@ class ParticlesApp : public app::IApplication
 	~ParticlesApp() override = default;
 
 	// IApplication interface
-	bool onInit(app::DeviceManager *deviceManager) override;
-	void onUpdate(float deltaTime) override;
-	void onRender() override;
-	void onShutdown() override;
-	void onKey(int key, int action, int mods) override;
-	void onMouseButton(int button, int action, int mods) override;
-	void onMouseMove(double xpos, double ypos) override;
+	bool OnInit(app::DeviceManager *deviceManager) override;
+	void OnUpdate(float deltaTime) override;
+	void OnRender() override;
+	void OnShutdown() override;
+	void OnKey(int key, int action, int mods) override;
+	void OnMouseButton(int button, int action, int mods) override;
+	void OnMouseMove(double xpos, double ypos) override;
 
   private:
 	// Particle structure (matches shader layout)

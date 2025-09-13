@@ -84,7 +84,7 @@ class Sphere
 	// Contains tests
 	bool contains(const vec3 &point) const
 	{
-		return distance2(center, point) <= radius * radius;
+		return Distance2(center, point) <= radius * radius;
 	}
 
 	bool contains(const Sphere &other) const
@@ -161,7 +161,7 @@ class Sphere
 		float maxDistSq = 0.0f;
 		for (size_t i = 0; i < count; ++i)
 		{
-			maxDistSq = std::max(maxDistSq, distance2(center, points[i]));
+			maxDistSq = std::max(maxDistSq, Distance2(center, points[i]));
 		}
 
 		return Sphere(center, std::sqrt(maxDistSq));

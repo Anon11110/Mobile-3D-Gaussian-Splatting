@@ -11,14 +11,14 @@
 
 using namespace msplat;
 
-bool TriangleApp::onInit(app::DeviceManager *deviceManager)
+bool TriangleApp::OnInit(app::DeviceManager *deviceManager)
 {
 	m_deviceManager = deviceManager;
 
 	LOG_INFO("Initializing Triangle application");
 
-	auto *device    = m_deviceManager->getDevice();
-	auto *swapchain = m_deviceManager->getSwapchain();
+	auto *device    = m_deviceManager->GetDevice();
+	auto *swapchain = m_deviceManager->GetSwapchain();
 
 	// Create vertex buffer
 	Vertex vertices[] = {
@@ -132,14 +132,14 @@ bool TriangleApp::onInit(app::DeviceManager *deviceManager)
 	return true;
 }
 
-void TriangleApp::onUpdate(float deltaTime)
+void TriangleApp::OnUpdate(float deltaTime)
 {
 	// Update uniform buffer with animation
 	float time = static_cast<float>(m_applicationTimer.elapsedSeconds());
 
 	UniformBufferObject ubo{};
 	// Simple identity matrix for MVP (no transformation)
-	ubo.mvp  = math::identity();
+	ubo.mvp  = math::Identity();
 	ubo.time = time;
 
 	// Update uniform buffer
@@ -155,10 +155,10 @@ void TriangleApp::onUpdate(float deltaTime)
 	}
 }
 
-void TriangleApp::onRender()
+void TriangleApp::OnRender()
 {
-	auto *device    = m_deviceManager->getDevice();
-	auto *swapchain = m_deviceManager->getSwapchain();
+	auto *device    = m_deviceManager->GetDevice();
+	auto *swapchain = m_deviceManager->GetSwapchain();
 
 	// Wait for previous frame
 	m_inFlightFence->Wait();
@@ -173,10 +173,10 @@ void TriangleApp::onRender()
 		// Swapchain is out of date, need to recreate it
 		LOG_WARNING("Swapchain out of date, recreating");
 		int width, height;
-		glfwGetFramebufferSize(m_deviceManager->getWindow(), &width, &height);
+		glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 		while (width == 0 || height == 0)
 		{
-			glfwGetFramebufferSize(m_deviceManager->getWindow(), &width, &height);
+			glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 			glfwWaitEvents();
 		}
 		swapchain->Resize(width, height);
@@ -315,10 +315,10 @@ void TriangleApp::onRender()
 		// Swapchain needs recreation on next frame
 		LOG_WARNING("Swapchain needs recreation (out of date or suboptimal)");
 		int width, height;
-		glfwGetFramebufferSize(m_deviceManager->getWindow(), &width, &height);
+		glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 		while (width == 0 || height == 0)
 		{
-			glfwGetFramebufferSize(m_deviceManager->getWindow(), &width, &height);
+			glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 			glfwWaitEvents();
 		}
 		swapchain->Resize(width, height);
@@ -333,14 +333,14 @@ void TriangleApp::onRender()
 	}
 }
 
-void TriangleApp::onShutdown()
+void TriangleApp::OnShutdown()
 {
 	LOG_INFO("Shutting down Triangle application");
 
 	// Wait for GPU to finish
-	if (m_deviceManager && m_deviceManager->getDevice())
+	if (m_deviceManager && m_deviceManager->GetDevice())
 	{
-		m_deviceManager->getDevice()->WaitIdle();
+		m_deviceManager->GetDevice()->WaitIdle();
 	}
 
 	// Unmap uniform buffer
@@ -365,22 +365,22 @@ void TriangleApp::onShutdown()
 	m_vertexBuffer.reset();
 }
 
-void TriangleApp::onKey(int key, int action, int mods)
+void TriangleApp::OnKey(int key, int action, int mods)
 {
 	// Handle keyboard input if needed
 	// For now, ESC key can close the application
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
 	{
-		glfwSetWindowShouldClose(m_deviceManager->getWindow(), GLFW_TRUE);
+		glfwSetWindowShouldClose(m_deviceManager->GetWindow(), GLFW_TRUE);
 	}
 }
 
-void TriangleApp::onMouseButton(int button, int action, int mods)
+void TriangleApp::OnMouseButton(int button, int action, int mods)
 {
 	// Handle mouse button input if needed
 }
 
-void TriangleApp::onMouseMove(double xpos, double ypos)
+void TriangleApp::OnMouseMove(double xpos, double ypos)
 {
 	// Handle mouse movement if needed
 }

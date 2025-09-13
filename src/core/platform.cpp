@@ -70,7 +70,7 @@ msplat::container::string demangle(const char *name) noexcept
 #endif
 }        // anonymous namespace
 
-void *aligned_malloc(size_t size, size_t alignment)
+void *AlignedMalloc(size_t size, size_t alignment)
 {
 	if (size == 0 || (alignment & (alignment - 1)) != 0)
 	{
@@ -99,7 +99,7 @@ void *aligned_malloc(size_t size, size_t alignment)
 #endif
 }
 
-void aligned_free(void *ptr)
+void AlignedFree(void *ptr)
 {
 	if (ptr == nullptr)
 	{
@@ -113,7 +113,7 @@ void aligned_free(void *ptr)
 #endif
 }
 
-size_t get_page_size()
+size_t GetPageSize()
 {
 #ifdef MSPLAT_PLATFORM_WINDOWS
 	SYSTEM_INFO system_info;
@@ -126,7 +126,7 @@ size_t get_page_size()
 #endif
 }
 
-size_t get_cache_line_size()
+size_t GetCacheLineSize()
 {
 #ifdef MSPLAT_PLATFORM_WINDOWS
 	// Try to get from system info, fallback to typical x64 size
@@ -196,7 +196,7 @@ size_t get_cache_line_size()
 #endif
 }
 
-std::string to_string(const TraceItem &item) noexcept
+std::string ToString(const TraceItem &item) noexcept
 {
 	std::ostringstream oss;
 	oss << item.module << "(" << item.symbol;
@@ -208,7 +208,7 @@ std::string to_string(const TraceItem &item) noexcept
 	return oss.str();
 }
 
-msplat::container::vector<TraceItem> get_backtrace(int max_frames)
+msplat::container::vector<TraceItem> GetBacktrace(int max_frames)
 {
 	msplat::container::vector<TraceItem> result;
 

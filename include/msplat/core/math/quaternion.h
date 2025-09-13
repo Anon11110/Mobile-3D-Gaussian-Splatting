@@ -12,130 +12,130 @@ namespace msplat::math
 using quat = glm::quat;
 
 // Quaternion construction
-inline quat quatIdentity()
+inline quat QuatIdentity()
 {
 	return quat(1.0f, 0.0f, 0.0f, 0.0f);
 }
 
-inline quat quatFromAxisAngle(const vec3 &axis, float angle)
+inline quat QuatFromAxisAngle(const vec3 &axis, float angle)
 {
 	return glm::angleAxis(angle, axis);
 }
 
-inline quat quatFromEuler(float pitch, float yaw, float roll)
+inline quat QuatFromEuler(float pitch, float yaw, float roll)
 {
 	return quat(vec3(pitch, yaw, roll));
 }
 
-inline quat quatFromEuler(const vec3 &eulerAngles)
+inline quat QuatFromEuler(const vec3 &eulerAngles)
 {
 	return quat(eulerAngles);
 }
 
 // Convert to matrix
-inline mat3 quatToMat3(const quat &q)
+inline mat3 QuatToMat3(const quat &q)
 {
 	return glm::mat3_cast(q);
 }
 
-inline mat4 quatToMat4(const quat &q)
+inline mat4 QuatToMat4(const quat &q)
 {
 	return glm::mat4_cast(q);
 }
 
 // Convert from matrix
-inline quat matToQuat(const mat3 &m)
+inline quat MatToQuat(const mat3 &m)
 {
 	return glm::quat_cast(m);
 }
 
-inline quat matToQuat(const mat4 &m)
+inline quat MatToQuat(const mat4 &m)
 {
 	return glm::quat_cast(m);
 }
 
 // Quaternion operations
-inline quat quatNormalize(const quat &q)
+inline quat QuatNormalize(const quat &q)
 {
 	return glm::normalize(q);
 }
 
-inline quat quatConjugate(const quat &q)
+inline quat QuatConjugate(const quat &q)
 {
 	return glm::conjugate(q);
 }
 
-inline quat quatInverse(const quat &q)
+inline quat QuatInverse(const quat &q)
 {
 	return glm::inverse(q);
 }
 
-inline float quatLength(const quat &q)
+inline float QuatLength(const quat &q)
 {
 	return glm::length(q);
 }
 
-inline float quatLength2(const quat &q)
+inline float QuatLength2(const quat &q)
 {
 	return glm::length2(q);
 }
 
-inline float quatDot(const quat &a, const quat &b)
+inline float QuatDot(const quat &a, const quat &b)
 {
 	return glm::dot(a, b);
 }
 
 // Interpolation
-inline quat quatSlerp(const quat &a, const quat &b, float t)
+inline quat QuatSlerp(const quat &a, const quat &b, float t)
 {
 	return glm::slerp(a, b, t);
 }
 
-inline quat quatLerp(const quat &a, const quat &b, float t)
+inline quat QuatLerp(const quat &a, const quat &b, float t)
 {
 	return glm::lerp(a, b, t);
 }
 
 // Rotation
-inline vec3 quatRotate(const quat &q, const vec3 &v)
+inline vec3 QuatRotate(const quat &q, const vec3 &v)
 {
 	return glm::rotate(q, v);
 }
 
 // Euler angles
-inline vec3 quatToEuler(const quat &q)
+inline vec3 QuatToEuler(const quat &q)
 {
 	return glm::eulerAngles(q);
 }
 
-inline float quatPitch(const quat &q)
+inline float QuatPitch(const quat &q)
 {
 	return glm::pitch(q);
 }
 
-inline float quatYaw(const quat &q)
+inline float QuatYaw(const quat &q)
 {
 	return glm::yaw(q);
 }
 
-inline float quatRoll(const quat &q)
+inline float QuatRoll(const quat &q)
 {
 	return glm::roll(q);
 }
 
 // Look at rotation
-inline quat quatLookAt(const vec3 &direction, const vec3 &up)
+inline quat QuatLookAt(const vec3 &direction, const vec3 &up)
 {
 	return glm::quatLookAt(direction, up);
 }
 
 // Comparison
-inline bool quatEqual(const quat &a, const quat &b, float epsilon = glm::epsilon<float>())
+inline bool QuatEqual(const quat &a, const quat &b, float epsilon = glm::epsilon<float>())
 {
 	return glm::all(glm::epsilonEqual(a, b, epsilon));
 }
 
-inline bool quatNotEqual(const quat &a, const quat &b, float epsilon = glm::epsilon<float>())
+inline bool QuatNotEqual(const quat &a, const quat &b, float epsilon = glm::epsilon<float>())
 {
 	return glm::any(glm::epsilonNotEqual(a, b, epsilon));
 }

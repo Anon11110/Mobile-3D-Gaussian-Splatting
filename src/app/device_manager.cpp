@@ -17,10 +17,10 @@ DeviceManager::DeviceManager(IApplication* app)
 	: m_app(app) {}
 
 DeviceManager::~DeviceManager() {
-	shutdown();
+	Shutdown();
 }
 
-void DeviceManager::initWindow(int width, int height, const char* title) {
+void DeviceManager::InitWindow(int width, int height, const char* title) {
 	if (!glfwInit()) {
 		LOG_FATAL("Failed to initialize GLFW");
 		throw std::runtime_error("Failed to initialize GLFW");
@@ -41,7 +41,7 @@ void DeviceManager::initWindow(int width, int height, const char* title) {
 	glfwSetFramebufferSizeCallback(m_window, framebuffer_size_callback);
 }
 
-void DeviceManager::initRHI() {
+void DeviceManager::InitRHI() {
 	LOG_INFO("Initializing RHI device");
 	m_device = rhi::CreateRHIDevice();
 	LOG_ASSERT(m_device != nullptr, "Failed to create RHI device");
@@ -56,24 +56,24 @@ void DeviceManager::initRHI() {
 	m_swapchain = m_device->CreateSwapchain(swapchainDesc);
 }
 
-void DeviceManager::mainLoop() {
+void DeviceManager::MainLoop() {
 	timer::Timer frameTimer;
 	float deltaTime = 0.016f; // Start with a reasonable delta
 
 	while (!glfwWindowShouldClose(m_window)) {
 		frameTimer.start();
 		glfwPollEvents();
-		m_app->onUpdate(deltaTime);
-		m_app->onRender();
+		m_app->OnUpdate(deltaTime);
+		m_app->OnRender();
 		frameTimer.stop();
 		deltaTime = static_cast<float>(frameTimer.elapsedSeconds());
 	}
 }
 
-void DeviceManager::shutdown() {
+void DeviceManager::Shutdown() {
 	if (m_app && m_device) {
 		m_device->WaitIdle();
-		m_app->onShutdown();
+		m_app->OnShutdown();
 	}
 
 	m_swapchain.reset();
@@ -86,21 +86,21 @@ void DeviceManager::shutdown() {
 	glfwTerminate();
 }
 
-int DeviceManager::run(int width, int height, const char* title) {
+int DeviceManager::Run(int width, int height, const char* title) {
 	try {
-		initWindow(width, height, title);
-		initRHI();
+		InitWindow(width, height, title);
+		InitRHI();
 
-		if (!m_app->onInit(this)) {
+		if (!m_app->OnInit(this)) {
 			LOG_ERROR("Application initialization failed.");
-			shutdown();
+			Shutdown();
 			return -1;
 		}
 
-		mainLoop();
+		MainLoop();
 	} catch (const std::exception& e) {
 		LOG_FATAL("An exception occurred: {}", e.what());
-		shutdown();
+		Shutdown();
 		return -1;
 	}
 	return 0;
@@ -110,30 +110,30 @@ int DeviceManager::run(int width, int height, const char* title) {
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
 	auto* manager = static_cast<DeviceManager*>(glfwGetWindowUserPointer(window));
 	if (manager && manager->m_app) {
-		manager->m_app->onKey(key, action, mods);
+		manager->m_app->OnKey(key, action, mods);
 	}
 }
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
 	auto* manager = static_cast<DeviceManager*>(glfwGetWindowUserPointer(window));
 	if (manager && manager->m_app) {
-		manager->m_app->onMouseButton(button, action, mods);
+		manager->m_app->OnMouseButton(button, action, mods);
 	}
 }
 
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
 	auto* manager = static_cast<DeviceManager*>(glfwGetWindowUserPointer(window));
 	if (manager && manager->m_app) {
-		manager->m_app->onMouseMove(xpos, ypos);
+		manager->m_app->OnMouseMove(xpos, ypos);
 	}
 }
 
 static void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 	auto* manager = static_cast<DeviceManager*>(glfwGetWindowUserPointer(window));
-	if (manager && manager->getSwapchain()) {
+	if (manager && manager->GetSwapchain()) {
 		if (width > 0 && height > 0) {
-			manager->getDevice()->WaitIdle();
-			manager->getSwapchain()->Resize(width, height);
+			manager->GetDevice()->WaitIdle();
+			manager->GetSwapchain()->Resize(width, height);
 		}
 	}
 }

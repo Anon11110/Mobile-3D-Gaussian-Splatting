@@ -113,7 +113,7 @@ class Logger
 
 // Template logging functions
 template <typename... Args>
-inline void log_verbose(const std::string &fmt, Args &&...args) noexcept
+inline void LogVerbose(const std::string &fmt, Args &&...args) noexcept
 {
 	try
 	{
@@ -133,7 +133,7 @@ inline void log_verbose(const std::string &fmt, Args &&...args) noexcept
 }
 
 template <typename... Args>
-inline void log_debug(const std::string &fmt, Args &&...args) noexcept
+inline void LogDebug(const std::string &fmt, Args &&...args) noexcept
 {
 	try
 	{
@@ -153,7 +153,7 @@ inline void log_debug(const std::string &fmt, Args &&...args) noexcept
 }
 
 template <typename... Args>
-inline void log_info(const std::string &fmt, Args &&...args) noexcept
+inline void LogInfo(const std::string &fmt, Args &&...args) noexcept
 {
 	try
 	{
@@ -173,7 +173,7 @@ inline void log_info(const std::string &fmt, Args &&...args) noexcept
 }
 
 template <typename... Args>
-inline void log_warning(const std::string &fmt, Args &&...args) noexcept
+inline void LogWarning(const std::string &fmt, Args &&...args) noexcept
 {
 	try
 	{
@@ -193,7 +193,7 @@ inline void log_warning(const std::string &fmt, Args &&...args) noexcept
 }
 
 template <typename... Args>
-inline void log_error(const std::string &fmt, Args &&...args) noexcept
+inline void LogError(const std::string &fmt, Args &&...args) noexcept
 {
 	try
 	{
@@ -218,7 +218,7 @@ inline void log_error(const std::string &fmt, Args &&...args) noexcept
 }
 
 template <typename... Args>
-inline void log_critical(const std::string &fmt, Args &&...args) noexcept
+inline void LogCritical(const std::string &fmt, Args &&...args) noexcept
 {
 	try
 	{
@@ -244,7 +244,7 @@ inline void log_critical(const std::string &fmt, Args &&...args) noexcept
 
 // Progress logging - uses direct stdout for progress indicators without newlines
 template <typename... Args>
-inline void log_progress(const std::string &fmt, Args &&...args) noexcept
+inline void LogProgress(const std::string &fmt, Args &&...args) noexcept
 {
 	try
 	{
@@ -267,39 +267,39 @@ inline void log_progress(const std::string &fmt, Args &&...args) noexcept
 }
 
 // Level control functions
-inline void log_level_verbose()
+inline void LogLevelVerbose()
 {
 	Logger::getInstance().get()->set_level(spdlog::level::trace);
 }
-inline void log_level_debug()
+inline void LogLevelDebug()
 {
 	Logger::getInstance().get()->set_level(spdlog::level::debug);
 }
-inline void log_level_info()
+inline void LogLevelInfo()
 {
 	Logger::getInstance().get()->set_level(spdlog::level::info);
 }
-inline void log_level_warning()
+inline void LogLevelWarning()
 {
 	Logger::getInstance().get()->set_level(spdlog::level::warn);
 }
-inline void log_level_error()
+inline void LogLevelError()
 {
 	Logger::getInstance().get()->set_level(spdlog::level::err);
 }
 
 // Sink management functions
-inline void default_logger_set_sink(spdlog::sink_ptr sink)
+inline void DefaultLoggerSetSink(spdlog::sink_ptr sink)
 {
 	Logger::getInstance().setSink(sink);
 }
 
-inline void default_logger_add_sink(spdlog::sink_ptr sink)
+inline void DefaultLoggerAddSink(spdlog::sink_ptr sink)
 {
 	Logger::getInstance().addSink(sink);
 }
 
-inline spdlog::sink_ptr create_sink_with_callback(std::function<void(const spdlog::details::log_msg &)> callback)
+inline spdlog::sink_ptr CreateSinkWithCallback(std::function<void(const spdlog::details::log_msg &)> callback)
 {
 	return std::make_shared<spdlog::sinks::callback_sink_mt>(callback);
 }
@@ -307,61 +307,61 @@ inline spdlog::sink_ptr create_sink_with_callback(std::function<void(const spdlo
 
 // Basic logging macros
 #define LOG_VERBOSE(fmt, ...) \
-	msplat::log::log_verbose(fmt, ##__VA_ARGS__)
+	msplat::log::LogVerbose(fmt, ##__VA_ARGS__)
 
 #define LOG_DEBUG(fmt, ...) \
-	msplat::log::log_debug(fmt, ##__VA_ARGS__)
+	msplat::log::LogDebug(fmt, ##__VA_ARGS__)
 
 #define LOG_INFO(fmt, ...) \
-	msplat::log::log_info(fmt, ##__VA_ARGS__)
+	msplat::log::LogInfo(fmt, ##__VA_ARGS__)
 
 #define LOG_WARNING(fmt, ...) \
-	msplat::log::log_warning(fmt, ##__VA_ARGS__)
+	msplat::log::LogWarning(fmt, ##__VA_ARGS__)
 
 #define LOG_ERROR(fmt, ...) \
-	msplat::log::log_error(fmt, ##__VA_ARGS__)
+	msplat::log::LogError(fmt, ##__VA_ARGS__)
 
 #define LOG_CRITICAL(fmt, ...) \
-	msplat::log::log_critical(fmt, ##__VA_ARGS__)
+	msplat::log::LogCritical(fmt, ##__VA_ARGS__)
 
 #define LOG_FATAL(fmt, ...) \
-	msplat::log::log_critical(fmt, ##__VA_ARGS__)
+	msplat::log::LogCritical(fmt, ##__VA_ARGS__)
 
 #define LOG_PROGRESS(fmt, ...) \
-	msplat::log::log_progress(fmt, ##__VA_ARGS__)
+	msplat::log::LogProgress(fmt, ##__VA_ARGS__)
 
 // Location-aware variants
 #define LOG_VERBOSE_WITH_LOCATION(fmt, ...) \
-	msplat::log::log_verbose(fmt " [{}:{}]", ##__VA_ARGS__, __FILE__, __LINE__)
+	msplat::log::LogVerbose(fmt " [{}:{}]", ##__VA_ARGS__, __FILE__, __LINE__)
 
 #define LOG_DEBUG_WITH_LOCATION(fmt, ...) \
-	msplat::log::log_debug(fmt " [{}:{}]", ##__VA_ARGS__, __FILE__, __LINE__)
+	msplat::log::LogDebug(fmt " [{}:{}]", ##__VA_ARGS__, __FILE__, __LINE__)
 
 #define LOG_INFO_WITH_LOCATION(fmt, ...) \
-	msplat::log::log_info(fmt " [{}:{}]", ##__VA_ARGS__, __FILE__, __LINE__)
+	msplat::log::LogInfo(fmt " [{}:{}]", ##__VA_ARGS__, __FILE__, __LINE__)
 
 #define LOG_WARNING_WITH_LOCATION(fmt, ...) \
-	msplat::log::log_warning(fmt " [{}:{}]", ##__VA_ARGS__, __FILE__, __LINE__)
+	msplat::log::LogWarning(fmt " [{}:{}]", ##__VA_ARGS__, __FILE__, __LINE__)
 
 #define LOG_ERROR_WITH_LOCATION(fmt, ...) \
-	msplat::log::log_error(fmt " [{}:{}]", ##__VA_ARGS__, __FILE__, __LINE__)
+	msplat::log::LogError(fmt " [{}:{}]", ##__VA_ARGS__, __FILE__, __LINE__)
 
 // Assert macros
-#define LOG_ASSERT(condition, ...)                                                              \
-	do                                                                                          \
-	{                                                                                           \
-		if (!(condition))                                                                       \
-		{                                                                                       \
-			constexpr bool has_message = sizeof(#__VA_ARGS__) > 1;                              \
-			if constexpr (has_message)                                                          \
-			{                                                                                   \
-				msplat::log::log_error("Assertion failed: {} - {}", #condition, ##__VA_ARGS__); \
-			}                                                                                   \
-			else                                                                                \
-			{                                                                                   \
-				msplat::log::log_error("Assertion failed: {}", #condition);                     \
-			}                                                                                   \
-		}                                                                                       \
+#define LOG_ASSERT(condition, ...)                                                             \
+	do                                                                                         \
+	{                                                                                          \
+		if (!(condition))                                                                      \
+		{                                                                                      \
+			constexpr bool has_message = sizeof(#__VA_ARGS__) > 1;                             \
+			if constexpr (has_message)                                                         \
+			{                                                                                  \
+				msplat::log::LogError("Assertion failed: {} - {}", #condition, ##__VA_ARGS__); \
+			}                                                                                  \
+			else                                                                               \
+			{                                                                                  \
+				msplat::log::LogError("Assertion failed: {}", #condition);                     \
+			}                                                                                  \
+		}                                                                                      \
 	} while (0)
 
 #ifdef DEBUG

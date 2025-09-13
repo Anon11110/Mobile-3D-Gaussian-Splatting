@@ -15,7 +15,7 @@ int main()
 	app::DeviceManager deviceManager(&app);
 
 	// Run the application (this starts the main loop)
-	int result = deviceManager.run(1200, 800, "Particle Simulation");
+	int result = deviceManager.Run(1200, 800, "Particle Simulation");
 
 	if (result != 0)
 	{

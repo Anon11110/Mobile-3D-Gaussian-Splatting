@@ -15,7 +15,7 @@ int main()
 	app::DeviceManager deviceManager(&app);
 
 	// Run the application (this starts the main loop)
-	int result = deviceManager.run(800, 600, "Triangle Example");
+	int result = deviceManager.Run(800, 600, "Triangle Example");
 
 	if (result != 0)
 	{
