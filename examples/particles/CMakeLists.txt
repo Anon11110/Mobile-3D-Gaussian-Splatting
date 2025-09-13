@@ -8,6 +8,9 @@ target_link_libraries(particles PRIVATE RHI core engine app)
 
 target_compile_features(particles PRIVATE cxx_std_20)
 
+# Apply Windows macro fix to this target
+apply_windows_macro_fix(particles)
+
 if(WIN32)
     set_target_properties(particles PROPERTIES
         WIN32_EXECUTABLE FALSE  # Console application

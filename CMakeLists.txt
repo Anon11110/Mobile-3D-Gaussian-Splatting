@@ -13,6 +13,20 @@ endif()
 # Core library options
 option(MSPLAT_USE_SYSTEM_STL "Use system STL containers instead of custom implementations" OFF)
 
+# Windows-specific: Function to apply Windows macro fixes to a target
+function(apply_windows_macro_fix target)
+    if(WIN32)
+        set(WINDOWS_SANITIZED_HEADER "${CMAKE_SOURCE_DIR}/include/msplat/core/windows_sanitized.h")
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /FI"${WINDOWS_SANITIZED_HEADER}")
+        elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            target_compile_options(${target} PRIVATE -include "${WINDOWS_SANITIZED_HEADER}")
+        elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            target_compile_options(${target} PRIVATE -include "${WINDOWS_SANITIZED_HEADER}")
+        endif()
+    endif()
+endfunction()
+
 # Include core library configuration
 include(cmake/core.cmake)
 

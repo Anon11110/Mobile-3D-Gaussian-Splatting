@@ -16,6 +16,12 @@ VulkanBuffer::VulkanBuffer(VmaAllocator allocator, const BufferDesc &desc) :
 	bufferInfo.usage       = BufferUsageToVulkan(desc.usage);
 	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
+	// Static buffers need TRANSFER_DST for initial data upload via staging
+	if (desc.resourceUsage == ResourceUsage::Static && desc.initialData != nullptr)
+	{
+		bufferInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	}
+
 	VmaAllocationCreateInfo allocInfo{};
 	switch (desc.resourceUsage)
 	{

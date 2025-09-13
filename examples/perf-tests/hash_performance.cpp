@@ -382,10 +382,7 @@ int hash_performance_main()
 	}
 
 	// Set benchmarks
-#	ifdef MSPLAT_USE_SYSTEM_STL
-	LOG_INFO("  ⊘ Custom unordered_set implementation disabled (MSPLAT_USE_SYSTEM_STL defined)");
-	LOG_INFO("  ⊘ Skipping performance comparison benchmarks");
-#	else
+	LOG_INFO("\n  Set Benchmarks:");
 	LOG_INFO("  Comparing: Custom (ankerl::unordered_dense + RapidHash) vs STL");
 
 	// Integer set benchmark
@@ -420,7 +417,7 @@ int hash_performance_main()
 	}
 
 	perf::log_test_summary("Hash Performance", true);
-#	endif
+#endif
 
 	return 0;
 }

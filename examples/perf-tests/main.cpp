@@ -5,6 +5,12 @@
 #include <msplat/core/timer.h>
 #include <string>
 
+#ifdef _WIN32
+#	include <fcntl.h>
+#	include <io.h>
+#	include <windows.h>
+#endif
+
 using namespace msplat::timer;
 
 // Forward declarations of test functions
@@ -85,6 +91,12 @@ int run_all_tests()
 
 int main(int argc, char *argv[])
 {
+#ifdef _WIN32
+	// Set Windows console to UTF-8 to properly display box-drawing characters
+	SetConsoleOutputCP(CP_UTF8);
+	SetConsoleCP(CP_UTF8);
+#endif
+
 	perf::log_main_header();
 
 	if (argc == 1)

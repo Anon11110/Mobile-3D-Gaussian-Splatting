@@ -464,12 +464,12 @@ void ParticlesApp::onRender()
 		releaseToCompute.before = rhi::ResourceState::VertexBuffer;        // last frame's draw state
 		releaseToCompute.after  = rhi::ResourceState::VertexBuffer;        // ownership-only transfer
 
-		gfxPre->ReleaseToQueue(rhi::QueueType::COMPUTE, container::array{releaseToCompute}, {});
+		gfxPre->ReleaseToQueue(rhi::QueueType::COMPUTE, container::array<rhi::BufferTransition, 1>{releaseToCompute}, {});
 		gfxPre->End();
 
 		rhi::SubmitInfo preSubmit{};
-		preSubmit.signalSemaphores = container::array{m_graphicsReleasedSemaphores[m_currentFrame].get()};
-		auto gfxPreSpan            = container::array{gfxPre.get()};
+		preSubmit.signalSemaphores = container::array<rhi::IRHISemaphore *, 1>{m_graphicsReleasedSemaphores[m_currentFrame].get()};
+		auto gfxPreSpan            = container::array<rhi::IRHICommandList *, 1>{gfxPre.get()};
 		device->SubmitCommandLists(gfxPreSpan, rhi::QueueType::GRAPHICS, preSubmit);
 
 		didPreRelease = true;
@@ -492,7 +492,7 @@ void ParticlesApp::onRender()
 
 			computeCmdList->AcquireFromQueue(
 			    rhi::QueueType::GRAPHICS,
-			    container::array{acquireFromGraphics},
+			    container::array<rhi::BufferTransition, 1>{acquireFromGraphics},
 			    {});
 		}
 		else
@@ -511,7 +511,7 @@ void ParticlesApp::onRender()
 			computeCmdList->Barrier(
 			    rhi::PipelineScope::Compute,
 			    rhi::PipelineScope::Compute,
-			    container::array{initInput, initOutput},
+			    container::array<rhi::BufferTransition, 2>{initInput, initOutput},
 			    {},
 			    {});
 		}
@@ -530,7 +530,7 @@ void ParticlesApp::onRender()
 
 		computeCmdList->ReleaseToQueue(
 		    rhi::QueueType::GRAPHICS,
-		    container::array{releaseOutput},
+		    container::array<rhi::BufferTransition, 1>{releaseOutput},
 		    {});
 
 		computeCmdList->End();
@@ -544,9 +544,9 @@ void ParticlesApp::onRender()
 
 		rhi::SubmitInfo computeSubmit{};
 		computeSubmit.waitSemaphores   = computeWaits;
-		computeSubmit.signalSemaphores = container::array{m_computeFinishedSemaphores[m_currentFrame].get()};
+		computeSubmit.signalSemaphores = container::array<rhi::IRHISemaphore *, 1>{m_computeFinishedSemaphores[m_currentFrame].get()};
 
-		auto computeCmdListSpan = container::array{computeCmdList.get()};
+		auto computeCmdListSpan = container::array<rhi::IRHICommandList *, 1>{computeCmdList.get()};
 		device->SubmitCommandLists(computeCmdListSpan, rhi::QueueType::COMPUTE, computeSubmit);
 
 		m_useBufferA = !m_useBufferA;
@@ -571,7 +571,7 @@ void ParticlesApp::onRender()
 
 		graphicsCmdList->AcquireFromQueue(
 		    rhi::QueueType::COMPUTE,
-		    container::array{acquireBuffer},
+		    container::array<rhi::BufferTransition, 1>{acquireBuffer},
 		    {});
 	}
 
@@ -585,7 +585,7 @@ void ParticlesApp::onRender()
 	    rhi::PipelineScope::Graphics,
 	    rhi::PipelineScope::Graphics,
 	    {},
-	    container::array{swapchainTransition},
+	    container::array<rhi::TextureTransition, 1>{swapchainTransition},
 	    {});
 
 	m_imageFirstUse[imageIndex] = false;
@@ -655,7 +655,7 @@ void ParticlesApp::onRender()
 	    rhi::PipelineScope::Graphics,
 	    rhi::PipelineScope::Graphics,
 	    {},
-	    container::array{swapchainTransition},
+	    container::array<rhi::TextureTransition, 1>{swapchainTransition},
 	    {});
 
 	graphicsCmdList->End();
@@ -678,7 +678,7 @@ void ParticlesApp::onRender()
 	submitInfo.signalSemaphores = signalSemaphores;
 	submitInfo.signalFence      = m_inFlightFences[m_currentFrame].get();
 
-	auto graphicsCmdListSpan = container::array{graphicsCmdList.get()};
+	auto graphicsCmdListSpan = container::array<rhi::IRHICommandList *, 1>{graphicsCmdList.get()};
 	device->SubmitCommandLists(graphicsCmdListSpan, rhi::QueueType::GRAPHICS, submitInfo);
 
 	// Present - wait on the render finished semaphore for the IMAGE

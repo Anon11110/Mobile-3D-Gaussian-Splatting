@@ -11,6 +11,9 @@ target_link_libraries(triangle PRIVATE RHI core engine app)
 # Set C++ standard
 target_compile_features(triangle PRIVATE cxx_std_20)
 
+# Apply Windows macro fix to this target
+apply_windows_macro_fix(triangle)
+
 # Platform-specific settings
 if(WIN32)
     set_target_properties(triangle PROPERTIES
