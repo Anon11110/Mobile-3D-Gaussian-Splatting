@@ -5,12 +5,16 @@ set(ENGINE_HEADERS
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/splat_loader.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/shader_factory.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/mesh_generator.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/engine/splat_mesh.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/engine/scene.h
 )
 
 set(ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/engine/splat_loader.cpp
     ${CMAKE_SOURCE_DIR}/src/engine/shader_factory.cpp
     ${CMAKE_SOURCE_DIR}/src/engine/mesh_generator.cpp
+    ${CMAKE_SOURCE_DIR}/src/engine/splat_mesh.cpp
+    ${CMAKE_SOURCE_DIR}/src/engine/scene.cpp
     ${CMAKE_SOURCE_DIR}/third-party/miniply/miniply.cpp
 )
 

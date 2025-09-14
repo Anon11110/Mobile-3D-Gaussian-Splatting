@@ -1,5 +1,6 @@
 #pragma once
 
+#include "vector.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/epsilon.hpp>
 #include <glm/gtc/matrix_inverse.hpp>

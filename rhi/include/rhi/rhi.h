@@ -185,6 +185,53 @@ class IRHIFence
 	virtual bool IsSignaled() const                  = 0;
 };
 
+// Composite fence that waits for multiple fences
+class IRHICompositeFence : public IRHIFence
+{
+  public:
+	explicit IRHICompositeFence(std::vector<std::shared_ptr<IRHIFence>> fences) :
+	    fences(std::move(fences))
+	{
+	}
+
+	void Wait(uint64_t timeout = UINT64_MAX) override
+	{
+		for (const auto &fence : fences)
+		{
+			if (fence)
+			{
+				fence->Wait(timeout);
+			}
+		}
+	}
+
+	void Reset() override
+	{
+		for (const auto &fence : fences)
+		{
+			if (fence)
+			{
+				fence->Reset();
+			}
+		}
+	}
+
+	bool IsSignaled() const override
+	{
+		for (const auto &fence : fences)
+		{
+			if (fence && !fence->IsSignaled())
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+  private:
+	std::vector<std::shared_ptr<IRHIFence>> fences;
+};
+
 // Descriptor set layout interface
 class IRHIDescriptorSetLayout
 {

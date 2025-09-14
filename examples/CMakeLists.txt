@@ -9,6 +9,9 @@ add_subdirectory(particles)
 # Add splat loader example
 add_subdirectory(splat-loader)
 
+# Add scene test example
+add_subdirectory(scene-test)
+
 # Add unit tests
 add_subdirectory(unit-tests)
 
