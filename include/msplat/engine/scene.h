@@ -19,14 +19,14 @@ class Scene
 	struct GpuData
 	{
 		// Attribute Buffers
-		std::unique_ptr<rhi::IRHIBuffer> positions;
-		std::unique_ptr<rhi::IRHIBuffer> scales;
-		std::unique_ptr<rhi::IRHIBuffer> rotations;        // quaternions
-		std::unique_ptr<rhi::IRHIBuffer> colors;
-		std::unique_ptr<rhi::IRHIBuffer> shRest;
+		container::unique_ptr<rhi::IRHIBuffer> positions;
+		container::unique_ptr<rhi::IRHIBuffer> scales;
+		container::unique_ptr<rhi::IRHIBuffer> rotations;        // quaternions
+		container::unique_ptr<rhi::IRHIBuffer> colors;
+		container::unique_ptr<rhi::IRHIBuffer> shRest;
 
 		// Global Index Buffer (optional)
-		std::unique_ptr<rhi::IRHIBuffer> indices;
+		container::unique_ptr<rhi::IRHIBuffer> indices;
 	};
 
 	explicit Scene(rhi::IRHIDevice *device);
@@ -45,12 +45,12 @@ class Scene
 
 	// Uploads static attribute data (positions, scales, rotations, colors, SH) to GPU.
 	// This should be called once after all meshes are loaded for GPU-sort pipeline.
-	std::shared_ptr<rhi::IRHIFence> UploadAttributeData();
+	container::shared_ptr<rhi::IRHIFence> UploadAttributeData();
 
 	// Updates the index buffer with sorted indices.
 	// Can be called every frame with new sorted indices.
 	// Requires AllocateGpuBuffers() or UploadAttributeData() to be called first.
-	std::shared_ptr<rhi::IRHIFence> UpdateIndexBuffer(const uint32_t *indices, size_t count);
+	container::shared_ptr<rhi::IRHIFence> UpdateIndexBuffer(const uint32_t *indices, size_t count);
 
 	const GpuData &GetGpuData() const;
 	uint32_t       GetTotalSplatCount() const;

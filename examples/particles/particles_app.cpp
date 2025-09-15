@@ -304,12 +304,31 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 	m_applicationTimer.start();
 	m_fpsCounter = timer::FPSCounter(1.0);
 
+	// Initialize camera
+	int width, height;
+	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+	float aspect = static_cast<float>(width) / static_cast<float>(height);
+	m_camera.SetPerspectiveProjection(45.0f, aspect, 0.1f, 100.0f);
+	m_camera.SetPosition(math::vec3(0.0f, 0.0f, 6.0f));
+	m_camera.SetTarget(math::vec3(0.0f, 0.0f, 0.0f));
+
 	LOG_INFO("Particles application initialized successfully");
 	return true;
 }
 
 void ParticlesApp::OnUpdate(float deltaTime)
 {
+	// Update camera
+	m_camera.Update(deltaTime, m_deviceManager->GetWindow());
+
+	// Update aspect ratio if window resized
+	int width, height;
+	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+	if (width > 0 && height > 0)
+	{
+		float aspect = static_cast<float>(width) / static_cast<float>(height);
+		m_camera.SetPerspectiveProjection(45.0f, aspect, 0.1f, 100.0f);
+	}
 	float currentTime = static_cast<float>(m_applicationTimer.elapsedSeconds());
 	float frameDelta  = currentTime - m_lastTime;
 	m_lastTime        = currentTime;
@@ -396,15 +415,8 @@ void ParticlesApp::OnRender()
 	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &fbw, &fbh);
 	float aspect = static_cast<float>(fbw) / static_cast<float>(fbh);
 
-	// Simple camera setup
-	math::mat4 view = math::LookAt(
-	    math::vec3(0.0f, 0.0f, 6.0f),         // eye
-	    math::vec3(0.0f, 0.0f, 0.0f),         // center
-	    math::vec3(0.0f, 1.0f, 0.0f));        // up
-
-	math::mat4 proj = math::Perspective(math::Radians(45.0f), aspect, 0.1f, 100.0f);
-	proj[1][1] *= -1;
-	math::mat4 mvp = proj * view;
+	// Get camera matrices
+	math::mat4 mvp = m_camera.GetViewProjectionMatrix();
 
 	// Direct write to persistently mapped buffer
 	memcpy(m_mvpDataPtr, &mvp, sizeof(math::mat4));
@@ -808,7 +820,10 @@ void ParticlesApp::OnShutdown()
 
 void ParticlesApp::OnKey(int key, int action, int mods)
 {
-	// Handle keyboard input
+	// Forward to camera
+	m_camera.OnKey(key, action, mods);
+
+	// Handle application-specific keys
 	if (action == GLFW_PRESS)
 	{
 		// ESC key closes the application
@@ -826,10 +841,12 @@ void ParticlesApp::OnKey(int key, int action, int mods)
 
 void ParticlesApp::OnMouseButton(int button, int action, int mods)
 {
-	// Handle mouse button input if needed
+	// Forward to camera
+	m_camera.OnMouseButton(button, action, mods);
 }
 
 void ParticlesApp::OnMouseMove(double xpos, double ypos)
 {
-	// Handle mouse movement if needed
+	// Forward to camera
+	m_camera.OnMouseMove(xpos, ypos);
 }

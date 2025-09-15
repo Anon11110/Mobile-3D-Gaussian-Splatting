@@ -128,18 +128,38 @@ bool TriangleApp::OnInit(app::DeviceManager *deviceManager)
 	m_applicationTimer.start();
 	m_fpsCounter = timer::FPSCounter(1.0);
 
+	// Initialize camera
+	int width, height;
+	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+	float aspect = static_cast<float>(width) / static_cast<float>(height);
+	m_camera.SetPerspectiveProjection(45.0f, aspect, 0.1f, 100.0f);
+	m_camera.SetPosition(math::vec3(0.0f, 0.0f, 3.0f));
+	m_camera.SetTarget(math::vec3(0.0f, 0.0f, 0.0f));
+
 	LOG_INFO("Triangle application initialized successfully");
 	return true;
 }
 
 void TriangleApp::OnUpdate(float deltaTime)
 {
+	// Update camera
+	m_camera.Update(deltaTime, m_deviceManager->GetWindow());
+
 	// Update uniform buffer with animation
 	float time = static_cast<float>(m_applicationTimer.elapsedSeconds());
 
+	// Update aspect ratio
+	int width, height;
+	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+	if (width > 0 && height > 0)
+	{
+		float aspect = static_cast<float>(width) / static_cast<float>(height);
+		m_camera.SetPerspectiveProjection(45.0f, aspect, 0.1f, 100.0f);
+	}
+
 	UniformBufferObject ubo{};
-	// Simple identity matrix for MVP (no transformation)
-	ubo.mvp  = math::Identity();
+	// Use camera's view-projection matrix
+	ubo.mvp  = m_camera.GetViewProjectionMatrix();
 	ubo.time = time;
 
 	// Update uniform buffer
@@ -367,8 +387,10 @@ void TriangleApp::OnShutdown()
 
 void TriangleApp::OnKey(int key, int action, int mods)
 {
-	// Handle keyboard input if needed
-	// For now, ESC key can close the application
+	// Forward to camera
+	m_camera.OnKey(key, action, mods);
+
+	// Handle application-specific keys
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
 	{
 		glfwSetWindowShouldClose(m_deviceManager->GetWindow(), GLFW_TRUE);
@@ -377,10 +399,12 @@ void TriangleApp::OnKey(int key, int action, int mods)
 
 void TriangleApp::OnMouseButton(int button, int action, int mods)
 {
-	// Handle mouse button input if needed
+	// Forward to camera
+	m_camera.OnMouseButton(button, action, mods);
 }
 
 void TriangleApp::OnMouseMove(double xpos, double ypos)
 {
-	// Handle mouse movement if needed
+	// Forward to camera
+	m_camera.OnMouseMove(xpos, ypos);
 }

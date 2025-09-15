@@ -1,5 +1,6 @@
 #pragma once
 
+#include <glm/ext/scalar_constants.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/epsilon.hpp>
 

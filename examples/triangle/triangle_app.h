@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/application.h"
+#include "app/camera.h"
 #include "core/containers/memory.h"
 #include "core/containers/vector.h"
 #include "core/math/math.h"
@@ -69,6 +70,9 @@ class TriangleApp : public app::IApplication
 
 	// Device manager reference
 	app::DeviceManager *m_deviceManager = nullptr;
+
+	// Camera
+	app::Camera m_camera;
 
 	// Resources
 	container::unique_ptr<rhi::IRHIBuffer>              m_vertexBuffer;

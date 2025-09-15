@@ -3,10 +3,12 @@
 # App library headers
 set(APP_HEADERS
     ${CMAKE_SOURCE_DIR}/include/msplat/app/application.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/app/camera.h
     ${CMAKE_SOURCE_DIR}/include/msplat/app/device_manager.h
 )
 
 set(APP_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/app/camera.cpp
     ${CMAKE_SOURCE_DIR}/src/app/device_manager.cpp
 )
 
