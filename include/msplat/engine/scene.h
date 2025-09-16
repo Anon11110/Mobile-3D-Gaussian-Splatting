@@ -19,14 +19,11 @@ class Scene
 	struct GpuData
 	{
 		// Attribute Buffers
-		container::unique_ptr<rhi::IRHIBuffer> positions;
-		container::unique_ptr<rhi::IRHIBuffer> scales;
-		container::unique_ptr<rhi::IRHIBuffer> rotations;        // quaternions
-		container::unique_ptr<rhi::IRHIBuffer> colors;
-		container::unique_ptr<rhi::IRHIBuffer> shRest;
-
-		// Global Index Buffer (optional)
-		container::unique_ptr<rhi::IRHIBuffer> indices;
+		std::unique_ptr<rhi::IRHIBuffer> positions;
+		std::unique_ptr<rhi::IRHIBuffer> scales;
+		std::unique_ptr<rhi::IRHIBuffer> rotations;        // quaternions
+		std::unique_ptr<rhi::IRHIBuffer> colors;
+		std::unique_ptr<rhi::IRHIBuffer> shRest;
 	};
 
 	explicit Scene(rhi::IRHIDevice *device);
@@ -36,21 +33,14 @@ class Scene
 	SplatMesh::ID AddMesh(container::shared_ptr<SplatSoA> splatData,
 	                      const math::mat4               &initialTransform = math::Identity());
 
-	// Removes a mesh by ID. Returns true if the mesh was found and removed.
+	// Removes a mesh by ID. Returns true if the mesh was found and removed
 	bool RemoveMesh(SplatMesh::ID id);
 
-	// Uploads all static attribute data for loaded meshes to GPU.
-	// Call this once after all meshes are loaded if plan to update indices every frame.
+	// Allocates GPU buffers for attribute data
 	void AllocateGpuBuffers();
 
-	// Uploads static attribute data (positions, scales, rotations, colors, SH) to GPU.
-	// This should be called once after all meshes are loaded for GPU-sort pipeline.
-	container::shared_ptr<rhi::IRHIFence> UploadAttributeData();
-
-	// Updates the index buffer with sorted indices.
-	// Can be called every frame with new sorted indices.
-	// Requires AllocateGpuBuffers() or UploadAttributeData() to be called first.
-	container::shared_ptr<rhi::IRHIFence> UpdateIndexBuffer(const uint32_t *indices, size_t count);
+	// Uploads static attribute data (positions, scales, rotations, colors, SH) to GPU
+	std::shared_ptr<rhi::IRHIFence> UploadAttributeData();
 
 	const GpuData &GetGpuData() const;
 	uint32_t       GetTotalSplatCount() const;
@@ -73,7 +63,6 @@ class Scene
 	bool                         attributeDataUploaded{false};        // Track if attribute data has been uploaded
 	bool                         gpuBuffersAllocated{false};          // Track if GPU buffers are allocated
 
-	void     AllocateGpuBuffersInternal(uint32_t totalSplats, uint32_t maxShCoeffsPerSplat);
 	uint32_t CalculateMaxShCoeffsPerSplat() const;
 };
 

@@ -110,6 +110,9 @@ void TestGpuUpload(rhi::IRHIDevice* device, const std::filesystem::path& plyPath
 	scene.AddMesh(splatData, msplat::math::Identity());
 	LOG_INFO("Added {} splats to scene", splatData->numSplats);
 
+	LOG_INFO("Allocating GPU buffers...");
+	scene.AllocateGpuBuffers();
+
 	LOG_INFO("Uploading attribute data to GPU...");
 
 	msplat::timer::Timer uploadTimer;
@@ -150,7 +153,6 @@ void TestGpuUpload(rhi::IRHIDevice* device, const std::filesystem::path& plyPath
 		{
 			LOG_INFO("  - SH Rest: {} bytes", gpuData.shRest->GetSize());
 		}
-		LOG_INFO("  - Indices: {} bytes", gpuData.indices->GetSize());
 	}
 	else
 	{
@@ -160,109 +162,9 @@ void TestGpuUpload(rhi::IRHIDevice* device, const std::filesystem::path& plyPath
 	LOG_INFO("");
 }
 
-void TestCpuSortPipeline(rhi::IRHIDevice* device, const std::filesystem::path& plyPath)
-{
-	LOG_INFO("Test 4: CPU-Sort Pipeline (Index Buffer Updates)");
-	LOG_INFO("-------------------------------------------------");
-
-	msplat::engine::Scene scene(device);
-	msplat::engine::SplatLoader loader;
-
-	auto future = loader.Load(plyPath);
-	auto splatData = future.get();
-
-	if (!splatData || splatData->empty())
-	{
-		LOG_ERROR("Failed to load splat data");
-		return;
-	}
-
-	scene.AddMesh(splatData, msplat::math::Identity());
-	uint32_t totalSplats = scene.GetTotalSplatCount();
-	LOG_INFO("Added {} splats to scene", totalSplats);
-
-	// For CPU-sort pipeline: allocate buffers without uploading attribute data
-	LOG_INFO("Allocating GPU buffers for CPU-sort pipeline...");
-	scene.AllocateGpuBuffers();
-
-	// Simulate sorting and uploading indices multiple times
-	const int numFrames = 3;
-	LOG_INFO("Simulating {} frame updates with different sort orders...", numFrames);
-
-	for (int frame = 0; frame < numFrames; ++frame)
-	{
-		std::vector<uint32_t> sortedIndices(totalSplats);
-
-		if (frame == 0)
-		{
-			// Frame 0: Forward order
-			for (uint32_t i = 0; i < totalSplats; ++i)
-			{
-				sortedIndices[i] = i;
-			}
-			LOG_INFO("  Frame {}: Forward order (0, 1, 2, ...)", frame);
-		}
-		else if (frame == 1)
-		{
-			// Frame 1: Reverse order
-			for (uint32_t i = 0; i < totalSplats; ++i)
-			{
-				sortedIndices[i] = totalSplats - 1 - i;
-			}
-			LOG_INFO("  Frame {}: Reverse order ({}, {}, {}, ...)", frame, totalSplats-1, totalSplats-2, totalSplats-3);
-		}
-		else
-		{
-			// Frame 2: Random shuffle
-			for (uint32_t i = 0; i < totalSplats; ++i)
-			{
-				sortedIndices[i] = i;
-			}
-			uint32_t swapCount = std::min(100u, totalSplats / 2);
-			for (uint32_t i = 0; i < swapCount; ++i)
-			{
-				std::swap(sortedIndices[i], sortedIndices[totalSplats - 1 - i]);
-			}
-			LOG_INFO("  Frame {}: Shuffled order (first {} swapped with last {})", frame, swapCount, swapCount);
-		}
-
-		msplat::timer::Timer uploadTimer;
-		uploadTimer.start();
-
-		auto fence = scene.UpdateIndexBuffer(sortedIndices.data(), sortedIndices.size());
-		if (fence)
-		{
-			fence->Wait();
-			uploadTimer.stop();
-			LOG_INFO("    Index buffer updated in {:.2f} ms", uploadTimer.elapsedMilliseconds());
-		}
-		else
-		{
-			LOG_ERROR("    Failed to update index buffer");
-		}
-	}
-
-	// Verify we can still access GPU buffers
-	const auto& gpuData = scene.GetGpuData();
-	LOG_INFO("GPU buffers remain allocated:");
-	LOG_INFO("  - Indices buffer: {} bytes", gpuData.indices->GetSize());
-
-	// Verify attribute data was NOT uploaded
-	if (!scene.IsAttributeDataUploaded())
-	{
-		LOG_INFO("SUCCESS: Attribute data not uploaded (CPU-sort pipeline mode)");
-	}
-	else
-	{
-		LOG_ERROR("FAILED: Attribute data was uploaded unexpectedly");
-	}
-
-	LOG_INFO("");
-}
-
 void TestMemoryRelease(rhi::IRHIDevice* device, const std::filesystem::path& plyPath)
 {
-	LOG_INFO("Test 5: CPU Memory Release");
+	LOG_INFO("Test 4: CPU Memory Release");
 	LOG_INFO("-----------------------------------------------");
 
 	msplat::engine::Scene scene(device);
@@ -283,6 +185,9 @@ void TestMemoryRelease(rhi::IRHIDevice* device, const std::filesystem::path& ply
 	size_t cpuMemoryBytes = splatCount * sizeof(float) *
 	                       (3 + 3 + 4 + 1 + 3 + splatData->shCoeffsPerSplat);
 	LOG_INFO("Initial CPU memory usage: {:.2f} MB", cpuMemoryBytes / (1024.0 * 1024.0));
+
+	// Allocate GPU buffers first
+	scene.AllocateGpuBuffers();
 
 	// Upload to GPU
 	auto uploadFence = scene.UploadAttributeData();
@@ -368,7 +273,6 @@ int main(int argc, char* argv[])
 		TestSceneLoading(device.get(), plyPath);
 		TestMultipleMeshes(device.get(), plyPath);
 		TestGpuUpload(device.get(), plyPath);
-		TestCpuSortPipeline(device.get(), plyPath);
 		TestMemoryRelease(device.get(), plyPath);
 
 		LOG_INFO("========================================");

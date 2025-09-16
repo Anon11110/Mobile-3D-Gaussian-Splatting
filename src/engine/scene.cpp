@@ -88,22 +88,23 @@ std::shared_ptr<rhi::IRHIFence> Scene::UploadAttributeData()
 		return nullptr;
 	}
 
-	uint32_t maxShCoeffsPerSplat = 0;
+	uint32_t maxShCoeffsPerSplat = CalculateMaxShCoeffsPerSplat();
 	uint32_t totalShCoeffs       = 0;
 
 	for (const auto &mesh : meshes)
 	{
 		if (mesh.HasCpuData())
 		{
-			auto splatData      = mesh.GetSplatData();
-			maxShCoeffsPerSplat = std::max(maxShCoeffsPerSplat, splatData->shCoeffsPerSplat);
+			auto splatData = mesh.GetSplatData();
 			totalShCoeffs += splatData->numSplats * splatData->shCoeffsPerSplat;
 		}
 	}
 
-	AllocateGpuBuffersInternal(totalSplatCount, maxShCoeffsPerSplat);
-	LOG_INFO("Allocated GPU buffers for {} splats with max {} SH coeffs per splat",
-	         totalSplatCount, maxShCoeffsPerSplat);
+	if (!gpuBuffersAllocated)
+	{
+		LOG_ERROR("GPU buffers not allocated. Call AllocateGpuBuffers() before UploadAttributeData()");
+		return nullptr;
+	}
 
 	container::vector<float> positions;
 	container::vector<float> scales;
@@ -254,33 +255,57 @@ void Scene::AllocateGpuBuffers()
 	}
 
 	uint32_t maxShCoeffsPerSplat = CalculateMaxShCoeffsPerSplat();
-	AllocateGpuBuffersInternal(totalSplatCount, maxShCoeffsPerSplat);
+
+	using namespace rhi;
+
+	// Position buffer (x, y, z)
+	{
+		BufferDesc desc{};
+		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage = ResourceUsage::Static;
+		desc.size          = totalSplatCount * 3 * sizeof(float);
+		gpuData.positions  = device->CreateBuffer(desc);
+	}
+
+	// Scale buffer (sx, sy, sz)
+	{
+		BufferDesc desc{};
+		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage = ResourceUsage::Static;
+		desc.size          = totalSplatCount * 3 * sizeof(float);
+		gpuData.scales     = device->CreateBuffer(desc);
+	}
+
+	// Rotation buffer (quaternion: x, y, z, w)
+	{
+		BufferDesc desc{};
+		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage = ResourceUsage::Static;
+		desc.size          = totalSplatCount * 4 * sizeof(float);
+		gpuData.rotations  = device->CreateBuffer(desc);
+	}
+
+	// Color buffer (r, g, b)
+	{
+		BufferDesc desc{};
+		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage = ResourceUsage::Static;
+		desc.size          = totalSplatCount * 3 * sizeof(float);
+		gpuData.colors     = device->CreateBuffer(desc);
+	}
+
+	// Spherical harmonics coefficients buffer
+	if (maxShCoeffsPerSplat > 0)
+	{
+		BufferDesc desc{};
+		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage = ResourceUsage::Static;
+		desc.size          = totalSplatCount * maxShCoeffsPerSplat * sizeof(float);
+		gpuData.shRest     = device->CreateBuffer(desc);
+	}
+
 	gpuBuffersAllocated = true;
-
 	LOG_INFO("Allocated GPU buffers for {} splats (CPU-sort pipeline mode)", totalSplatCount);
-}
-
-std::shared_ptr<rhi::IRHIFence> Scene::UpdateIndexBuffer(const uint32_t *indices, size_t count)
-{
-	std::lock_guard<std::mutex> lock(meshesMutex);
-
-	if (!gpuBuffersAllocated)
-	{
-		LOG_ERROR("GPU buffers not allocated. Call AllocateGpuBuffers() or UploadAttributeData() first");
-		return nullptr;
-	}
-
-	if (count != totalSplatCount)
-	{
-		LOG_ERROR("Index count {} doesn't match total splat count {}", count, totalSplatCount);
-		return nullptr;
-	}
-
-	// Upload index buffer
-	return device->UploadBufferAsync(
-	    gpuData.indices.get(),
-	    indices,
-	    count * sizeof(uint32_t));
 }
 
 bool Scene::IsAttributeDataUploaded() const
@@ -301,61 +326,6 @@ uint32_t Scene::CalculateMaxShCoeffsPerSplat() const
 		}
 	}
 	return maxShCoeffsPerSplat;
-}
-
-void Scene::AllocateGpuBuffersInternal(uint32_t totalSplats, uint32_t maxShCoeffsPerSplat)
-{
-	using namespace rhi;
-
-	{
-		BufferDesc desc{};
-		desc.usage         = BufferUsage::VERTEX | BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplats * 3 * sizeof(float);
-		gpuData.positions  = device->CreateBuffer(desc);
-	}
-
-	{
-		BufferDesc desc{};
-		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplats * 3 * sizeof(float);
-		gpuData.scales     = device->CreateBuffer(desc);
-	}
-
-	// Allocate quaternions rotation buffer
-	{
-		BufferDesc desc{};
-		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplats * 4 * sizeof(float);
-		gpuData.rotations  = device->CreateBuffer(desc);
-	}
-
-	{
-		BufferDesc desc{};
-		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplats * 3 * sizeof(float);
-		gpuData.colors     = device->CreateBuffer(desc);
-	}
-
-	if (maxShCoeffsPerSplat > 0)
-	{
-		BufferDesc desc{};
-		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplats * maxShCoeffsPerSplat * sizeof(float);
-		gpuData.shRest     = device->CreateBuffer(desc);
-	}
-
-	{
-		BufferDesc desc{};
-		desc.usage         = BufferUsage::INDEX | BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplats * sizeof(uint32_t);
-		gpuData.indices    = device->CreateBuffer(desc);
-	}
 }
 
 }        // namespace msplat::engine
