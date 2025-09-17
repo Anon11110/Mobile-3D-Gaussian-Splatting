@@ -3,9 +3,23 @@
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/epsilon.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <type_traits>
 
 namespace msplat::math
 {
+
+// Helper trait to detect GLM vector types
+template <typename T>
+struct is_glm_vec : std::false_type
+{};
+
+template <glm::length_t L, typename T, glm::qualifier Q>
+struct is_glm_vec<glm::vec<L, T, Q>> : std::true_type
+{};
+
+template <typename T>
+inline constexpr bool is_glm_vec_v = is_glm_vec<T>::value;
 
 // 2D vector types
 using vec2  = glm::vec2;
@@ -77,13 +91,13 @@ constexpr T Refract(const T &I, const T &N, float eta)
 }
 
 // Component-wise operations
-template <typename T>
+template <typename T, typename = std::enable_if_t<is_glm_vec_v<T>>>
 constexpr T Min(const T &a, const T &b)
 {
 	return glm::min(a, b);
 }
 
-template <typename T>
+template <typename T, typename = std::enable_if_t<is_glm_vec_v<T>>>
 constexpr T Max(const T &a, const T &b)
 {
 	return glm::max(a, b);

@@ -1,5 +1,5 @@
-#include <algorithm>
 #include <msplat/core/log.h>
+#include <msplat/core/math/math.h>
 #include <msplat/engine/scene.h>
 
 namespace msplat::engine
@@ -322,7 +322,7 @@ uint32_t Scene::CalculateMaxShCoeffsPerSplat() const
 		if (mesh.HasCpuData())
 		{
 			auto splatData      = mesh.GetSplatData();
-			maxShCoeffsPerSplat = std::max(maxShCoeffsPerSplat, splatData->shCoeffsPerSplat);
+			maxShCoeffsPerSplat = math::Max(maxShCoeffsPerSplat, splatData->shCoeffsPerSplat);
 		}
 	}
 	return maxShCoeffsPerSplat;

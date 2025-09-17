@@ -3,6 +3,7 @@
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
+#include <type_traits>
 
 namespace msplat::math
 {
@@ -57,13 +58,13 @@ constexpr T Sqrt(T x)
 	return glm::sqrt(x);
 }
 
-template <typename T>
+template <typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
 constexpr T Min(T a, T b)
 {
 	return glm::min(a, b);
 }
 
-template <typename T>
+template <typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
 constexpr T Max(T a, T b)
 {
 	return glm::max(a, b);
