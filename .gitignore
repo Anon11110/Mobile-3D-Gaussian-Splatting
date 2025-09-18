@@ -49,6 +49,7 @@ build/
 # AI/IDE generated directories/files
 .claude/
 CLAUDE.md
+GEMINI.md
 AGENTS.md
 .cursor/
 .vscode/
