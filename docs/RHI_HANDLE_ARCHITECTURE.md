@@ -111,15 +111,45 @@ The reference counting architecture follows the proven philosophy from [NVRHI (N
 
 1. **Self-Containment**: RHI has zero STL dependencies
 2. **Uniformity**: All resources use the same reference counting mechanism
-3. **GPU Safety**: Deferred destruction prevents GPU cras˚¬hes from premature deletion
+3. **GPU Safety**: Deferred destruction prevents GPU crashes from premature deletion
 4. **Simplicity**: Clean API without exposed smart pointer complexity
 5. **Industry Standard**: Follows patterns from D3D, Metal, and NVRHI
 
 ## Implementation Details
 
-### 1. IRefCounted Base Interface
+### 1. Core Reference Counting Components
 
-All RHI interfaces inherit from this base class:
+All reference counting classes are located in `rhi/include/common/ref_count.h`. This header file contains three key components: `IRefCounted`, `RefCounter<T>`, and `RefCntPtr<T>`.
+
+**Required Headers:**
+```cpp
+// rhi/include/common/ref_count.h
+#pragma once
+#include <atomic>       // For std::atomic in RefCounter
+#include <cassert>      // For assert in Attach method
+#include <cstddef>      // For std::nullptr_t
+#include <type_traits>  // For std::enable_if, std::is_convertible
+```
+
+#### The Inheritance Pattern
+
+The reference counting system uses a carefully designed inheritance hierarchy:
+
+```cpp
+// Step 1: Base interface with pure virtual methods
+IRefCounted (defines AddRef/Release/GetRefCount as pure virtual)
+    ↓
+// Step 2: RHI interfaces inherit from IRefCounted
+IRHIBuffer : public IRefCounted (still abstract, inherits pure virtuals)
+    ↓
+// Step 3: RefCounter<T> implements the reference counting
+RefCounter<IRHIBuffer> : public IRHIBuffer (implements AddRef/Release/GetRefCount)
+    ↓
+// Step 4: Concrete backend class only implements domain logic
+VulkanBuffer : public RefCounter<IRHIBuffer> (implements buffer operations)
+```
+
+#### IRefCounted Base Interface
 
 ```cpp
 namespace rhi {
@@ -143,33 +173,76 @@ public:
     IRefCounted& operator=(const IRefCounted&) = delete;
     IRefCounted& operator=(IRefCounted&&) = delete;
 };
+```
 
-// Example thread-safe implementation requirement:
-// class ConcreteResource : public IRefCounted {
-// private:
-//     std::atomic<unsigned long> refCount{1};
-// public:
-//     unsigned long AddRef() override {
-//         return refCount.fetch_add(1, std::memory_order_relaxed) + 1;
-//     }
-//     unsigned long Release() override {
-//         auto count = refCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
-//         if (count == 0) {
-//             delete this;
-//         }
-//         return count;
-//     }
-//     unsigned long GetRefCount() override {
-//         return refCount.load(std::memory_order_relaxed);
-//     }
-// };
+#### RefCounter<T> Template Helper
+
+```cpp
+//////////////////////////////////////////////////////////////////////////
+// RefCounter<T>
+// A CRTP (Curiously Recurring Template Pattern) mixin that implements
+// reference counting for any IRefCounted-derived interface.
+// Usage: class VulkanBuffer : public RefCounter<IRHIBuffer> { ... }
+//////////////////////////////////////////////////////////////////////////
+template<class T>
+class RefCounter : public T
+{
+private:
+    std::atomic<unsigned long> m_refCount = 1;  // Start with 1 (creation reference)
+
+public:
+    virtual unsigned long AddRef() override {
+        return ++m_refCount;  // memory_order_relaxed is sufficient for increment
+    }
+
+    virtual unsigned long Release() override {
+        unsigned long result = --m_refCount;  // memory_order_acq_rel for decrement
+        if (result == 0) {
+            delete this;  // Virtual destructor from IRefCounted ensures proper cleanup
+        }
+        return result;
+    }
+
+    virtual unsigned long GetRefCount() override {
+        return m_refCount.load();  // memory_order_relaxed for simple read
+    }
+};
 
 } // namespace rhi
 ```
 
-### 2. RefCntPtr Implementation
+**Key Benefits of RefCounter Template:**
+- **Eliminates boilerplate**: Concrete classes (VulkanBuffer, MetalTexture) don't implement AddRef/Release
+- **CRTP Pattern**: RefCounter<T> inherits FROM T, becoming a proper T instance
+- **Thread-safe by default**: Atomic operations ensure correctness
+- **Single allocation**: Reference count is embedded in the object, not a separate control block
 
-Add to `rhi/include/rhi/rhi_types.h`:
+### 2. RefCntPtr Smart Pointer Implementation
+
+The `RefCntPtr<T>` smart pointer manages reference counting automatically. It's designed to work with the intrusive reference counting pattern where objects start with refCount = 1.
+
+#### Reference Count Initialization Pattern
+
+```cpp
+// IMPORTANT: Objects are created with refCount = 1 (the "creation reference")
+// Two patterns for initial ownership:
+
+// Pattern 1: Using Create() - for newly created objects
+VulkanBuffer* raw = new VulkanBuffer();  // refCount = 1
+BufferHandle handle = RefCntPtr<IRHIBuffer>::Create(raw);  // Attach without AddRef
+
+// Pattern 2: Using constructor - for existing references
+IRHIBuffer* existing = GetBufferFromSomewhere();  // Already has references
+BufferHandle handle(existing);  // Constructor calls AddRef
+
+// Factory methods should use Pattern 1:
+BufferHandle CreateBuffer(const BufferDesc& desc) {
+    VulkanBuffer* buffer = new VulkanBuffer(desc);  // refCount = 1
+    return RefCntPtr<IRHIBuffer>::Create(buffer);   // No extra AddRef
+}
+```
+
+#### RefCntPtr Implementation
 
 ```cpp
 namespace rhi {
@@ -206,9 +279,10 @@ public:
     RefCntPtr() noexcept : ptr_(nullptr) {}
     RefCntPtr(std::nullptr_t) noexcept : ptr_(nullptr) {}
 
+    // Constructor for existing references - DOES call AddRef
     template<class U>
     RefCntPtr(U* other) noexcept : ptr_(other) {
-        InternalAddRef();
+        InternalAddRef();  // Increments reference count
     }
 
     RefCntPtr(const RefCntPtr& other) noexcept : ptr_(other.ptr_) {
@@ -225,7 +299,7 @@ public:
 
     // Move constructors
     RefCntPtr(RefCntPtr&& other) noexcept : ptr_(nullptr) {
-        if (this != reinterpret_cast<RefCntPtr*>(&reinterpret_cast<unsigned char&>(other))) {
+        if (this != &other) {  // Simple self-assignment check
             Swap(other);
         }
     }
@@ -309,6 +383,9 @@ public:
         return ptr_;
     }
 
+    // COM-style out parameter support
+    // WARNING: This bypasses reference counting - use with caution!
+    // Primarily for COM-style APIs: void CreateBuffer(IRHIBuffer** ppBuffer)
     T** operator&() {
         return &ptr_;
     }
@@ -359,12 +436,12 @@ public:
 
 ### 3. Handle Type Definitions
 
-In `rhi/include/rhi/rhi.h`, immediately after each interface declaration:
+In `rhi/include/rhi/rhi.h`, immediately after each interface declaration (all interfaces inherit from IRefCounted):
 
 ```cpp
 namespace rhi {
 
-// Base interface for all RHI resources
+// Base interface for all RHI resources (inherits from IRefCounted)
 class IRHIDevice : public IRefCounted { /* ... */ };
 typedef RefCntPtr<IRHIDevice> DeviceHandle;
 
@@ -696,21 +773,20 @@ Therefore, weak references (`WeakHandle`) are unnecessary in RHI because the arc
 Composite fences follow the same factory pattern as all other RHI resources:
 
 ```cpp
-// Internal implementation - not exposed to users
-class IRHICompositeFence : public IRHIFence {
+// Internal implementation in backend (e.g., vulkan_backend.cpp)
+class VulkanCompositeFence : public RefCounter<IRHIFence> {
 private:
+    std::vector<FenceHandle> m_fences;
+
     // Private constructor - only device can create
-    explicit IRHICompositeFence(std::vector<FenceHandle> fences) :
+    explicit VulkanCompositeFence(std::vector<FenceHandle> fences) :
         m_fences(std::move(fences)) {}
 
-    // Allow device implementations to create composite fences
+    // Device is a friend to allow creation
     friend class VulkanDevice;
-    friend class MetalDevice;  // Future backend
 
 public:
-    unsigned long AddRef() override { /* implementation */ }
-    unsigned long Release() override { /* implementation */ }
-    unsigned long GetRefCount() override { /* implementation */ }
+    // RefCounter<IRHIFence> handles AddRef/Release/GetRefCount automatically
 
     void Wait(uint64_t timeout = UINT64_MAX) override {
         for (const auto& fence : m_fences) {
@@ -720,8 +796,22 @@ public:
         }
     }
 
-private:
-    std::vector<FenceHandle> m_fences;
+    void Reset() override {
+        for (const auto& fence : m_fences) {
+            if (fence) {
+                fence->Reset();
+            }
+        }
+    }
+
+    bool IsSignaled() const override {
+        for (const auto& fence : m_fences) {
+            if (fence && !fence->IsSignaled()) {
+                return false;
+            }
+        }
+        return true;
+    }
 };
 
 // VulkanDevice implementation
@@ -729,10 +819,9 @@ FenceHandle VulkanDevice::CreateCompositeFence(const std::vector<FenceHandle>& f
     if (fences.empty()) {
         return nullptr;
     }
-    // Device creates the composite fence - users cannot instantiate directly
-    // Properly wrap in RefCntPtr to return as FenceHandle
-    IRHICompositeFence* compositeFence = new IRHICompositeFence(fences);
-    return FenceHandle(compositeFence);  // RefCntPtr constructor handles initial AddRef
+    // Create with refCount = 1, use RefCntPtr::Create to avoid extra AddRef
+    VulkanCompositeFence* compositeFence = new VulkanCompositeFence(fences);
+    return RefCntPtr<IRHIFence>::Create(compositeFence);
 }
 ```
 
@@ -868,20 +957,30 @@ All handles use RefCntPtr uniformly - no distinction between unique and shared o
 
 ## Migration Strategy
 
+### Current State
+The reference counting system is currently in the design phase. The existing codebase uses `std::unique_ptr` and `std::shared_ptr` for resource management. This migration strategy outlines the path to implement the custom reference counting system.
+
 ### Pre-Migration Checklist
-Before starting the migration, ensure:
-- [ ] All existing tests are passing
-- [x] Create a dedicated feature branch for the migration
+Before starting the migration:
+- [x] All existing tests are passing
+- [x] Create a dedicated feature branch `feature/rhi-handles`
+- [x] Review this design document with the team
+- [x] Ensure all developers understand the new patterns
 
 ### Phase 1: Add Core Components
-1. Add `IRefCounted` base class to `rhi_types.h`
-2. Implement `RefCntPtr` template in `rhi_types.h`
-3. No functional changes yet - preparation only
+1. Create `rhi/include/common/` directory
+2. Add `IRefCounted`, `RefCounter<T>`, and `RefCntPtr` to `rhi/include/common/ref_count.h`
+3. Include necessary headers (`<atomic>`, `<type_traits>`, etc.)
+4. Write comprehensive unit tests for RefCntPtr behavior
+5. No changes to existing RHI interfaces yet
 
-**Verification**: Compile project to ensure no regressions
+**Verification**:
+- Compile the new header in isolation
+- Run unit tests for RefCntPtr
+- Ensure no impact on existing code
 
-### Phase 2: Update RHI Interfaces ⚠️ **POINT OF NO RETURN**
-> **WARNING**: Completing this phase will break compilation across the entire project until Phases 3, 4, and 5 are complete. Do not start this phase unless you can complete through Phase 5 in one continuous effort.
+### Phase 2: Update RHI Interfaces
+> **Note**: This phase will require updating all RHI interfaces and implementations together. Plan for a focused effort to minimize disruption.
 
 1. Make all RHI interfaces inherit from `IRefCounted`
 2. Add typedef handle declarations after each interface
@@ -891,7 +990,7 @@ Before starting the migration, ensure:
 **Expected State**: Project will NOT compile after this phase
 
 ### Phase 3: Implement Reference Counting
-1. Implement AddRef/Release/GetRefCount in Vulkan backend classes
+1. Update Vulkan backend classes to inherit from `RefCounter<IInterface>` instead of implementing AddRef/Release/GetRefCount manually
 2. Add deferred destruction queue to VulkanDevice
 3. Implement garbage collection with fence tracking
 4. Update VulkanCommandList to keep internal references
@@ -978,6 +1077,75 @@ container::shared_ptr<SplatSoA> splatData;                 // Engine resource
 - RHI memory management completely independent of Engine/Core
 - Easy to extend without breaking changes
 - Can optimize reference counting implementation without API changes
+
+## Implementation Examples
+
+### Concrete Implementation Example
+```cpp
+// Interface definition (in rhi/include/rhi/rhi.h)
+class IRHIBuffer : public IRefCounted {
+public:
+    virtual ~IRHIBuffer() = default;
+    virtual void* Map() = 0;
+    virtual void Unmap() = 0;
+    virtual size_t GetSize() const = 0;
+};
+typedef RefCntPtr<IRHIBuffer> BufferHandle;
+
+// Concrete implementation (in rhi/src/backends/vulkan/vulkan_buffer.cpp)
+class VulkanBuffer final : public RefCounter<IRHIBuffer> {
+private:
+    VkBuffer m_buffer;
+    VkDeviceMemory m_memory;
+    size_t m_size;
+    void* m_mappedPtr;
+
+public:
+    explicit VulkanBuffer(const BufferDesc& desc) :
+        m_size(desc.size),
+        m_mappedPtr(nullptr) {
+        // Create Vulkan buffer
+        CreateVulkanBuffer(desc);
+    }
+
+    ~VulkanBuffer() {
+        // Clean up Vulkan resources
+        if (m_mappedPtr) {
+            vkUnmapMemory(device, m_memory);
+        }
+        vkDestroyBuffer(device, m_buffer, nullptr);
+        vkFreeMemory(device, m_memory, nullptr);
+    }
+
+    // IRHIBuffer interface implementation
+    void* Map() override {
+        if (!m_mappedPtr) {
+            vkMapMemory(device, m_memory, 0, m_size, 0, &m_mappedPtr);
+        }
+        return m_mappedPtr;
+    }
+
+    void Unmap() override {
+        if (m_mappedPtr) {
+            vkUnmapMemory(device, m_memory);
+            m_mappedPtr = nullptr;
+        }
+    }
+
+    size_t GetSize() const override {
+        return m_size;
+    }
+
+    // Note: NO AddRef/Release/GetRefCount implementation needed!
+    // RefCounter<IRHIBuffer> handles all reference counting
+};
+
+// Factory method in VulkanDevice
+BufferHandle VulkanDevice::CreateBuffer(const BufferDesc& desc) {
+    VulkanBuffer* buffer = new VulkanBuffer(desc);  // refCount = 1
+    return RefCntPtr<IRHIBuffer>::Create(buffer);   // No extra AddRef
+}
+```
 
 ## Code Examples
 
@@ -1104,6 +1272,68 @@ struct SharedPtrOverhead {
 ## Conclusion
 
 The custom reference-counting handle architecture provides a production-quality, GPU-safe solution that completely eliminates namespace mixing and STL dependencies. By following industry-standard patterns from D3D and NVRHI, this design ensures correct GPU resource management while maintaining clean architectural boundaries and excellent API usability.
+
+## Implementation Status
+
+### Phase 1: Core Components ✅ COMPLETED (2025-09-19)
+
+#### Files Created
+1. **`rhi/include/common/ref_count.h`** - Core reference counting implementation
+   - `IRefCounted` base interface with COM-style AddRef/Release/GetRefCount
+   - `RefCounter<T>` CRTP template using std::atomic for thread-safe counting
+   - `RefCntPtr<T>` smart pointer with full functionality
+
+2. **`rhi/tests/`** - RHI-specific test infrastructure
+   - `test_framework.h` - Minimal test framework with RHI_TEST macro
+   - `main.cpp` - Test runner executable
+   - `test_ref_count.cpp` - 19 comprehensive tests for RefCntPtr
+
+3. **Build System Updates**
+   - Modified `rhi/CMakeLists.txt` to add RHI_BUILD_TESTS option
+   - Created `rhi/tests/CMakeLists.txt` for test executable
+
+#### Test Results
+All 19 tests pass successfully:
+- Basic construction/destruction
+- Reference counting correctness
+- Copy/move semantics
+- Derived-to-base conversions
+- Thread safety verification
+- Memory leak detection
+- Edge cases (null, self-assignment)
+
+#### Build Instructions
+```bash
+# Configure with RHI tests enabled
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DRHI_BUILD_TESTS=ON
+
+# Build RHI tests
+cmake --build build --target rhi-tests --config Debug
+
+# Run tests
+./build/bin/Debug/rhi-tests
+```
+
+#### Key Implementation Details
+
+1. **Intrusive Reference Counting**: Count stored directly in object via RefCounter<T>
+2. **Initial RefCount = 1**: Objects created with count of 1 (creation reference)
+3. **Thread Safety**: std::atomic<unsigned long> for all reference count operations
+4. **CRTP Pattern**: RefCounter<T> inherits from T to provide counting implementation
+5. **Create vs Constructor**:
+   - `RefCntPtr::Create()` attaches without AddRef (for new objects with refCount=1)
+   - `RefCntPtr(T*)` constructor calls AddRef (for existing references)
+
+#### Migration Checklist Update
+- [x] Phase 1: Core components implemented and tested
+- [ ] Phase 2: Update RHI interfaces to inherit from IRefCounted
+- [ ] Phase 3: Implement reference counting in Vulkan backend
+- [ ] Phase 4: Update Engine layer to use handles
+- [ ] Phase 5: Update App layer and examples
+
+### Next Steps
+
+Phase 2 will modify all RHI interfaces to inherit from IRefCounted and update all Create methods to return handle types instead of std::unique_ptr. This will be a breaking change requiring updates across the entire RHI surface.
 
 ## References
 
