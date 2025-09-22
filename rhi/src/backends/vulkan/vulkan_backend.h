@@ -3,7 +3,6 @@
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
 
-#include <memory>
 #include <vector>
 
 #include "../../../include/rhi/rhi.h"
@@ -27,7 +26,7 @@ class VulkanDescriptorSet;
 class VulkanSampler;
 
 // Vulkan Buffer implementation
-class VulkanBuffer final : public IRHIBuffer
+class VulkanBuffer final : public RefCounter<IRHIBuffer>
 {
   private:
 	VmaAllocator  allocator;
@@ -69,7 +68,7 @@ class VulkanBuffer final : public IRHIBuffer
 };
 
 // Vulkan Texture implementation
-class VulkanTexture final : public IRHITexture
+class VulkanTexture final : public RefCounter<IRHITexture>
 {
   private:
 	VkDevice      device;
@@ -132,7 +131,7 @@ class VulkanTexture final : public IRHITexture
 };
 
 // Vulkan Texture View implementation
-class VulkanTextureView final : public IRHITextureView
+class VulkanTextureView final : public RefCounter<IRHITextureView>
 {
   private:
 	VkDevice       device;
@@ -187,7 +186,7 @@ class VulkanTextureView final : public IRHITextureView
 };
 
 // Vulkan Shader implementation
-class VulkanShader final : public IRHIShader
+class VulkanShader final : public RefCounter<IRHIShader>
 {
   private:
 	VkDevice       device;
@@ -214,7 +213,7 @@ class VulkanShader final : public IRHIShader
 };
 
 // Vulkan Pipeline implementation
-class VulkanPipeline final : public IRHIPipeline
+class VulkanPipeline final : public RefCounter<IRHIPipeline>
 {
   private:
 	VkDevice              device;
@@ -256,7 +255,7 @@ class VulkanPipeline final : public IRHIPipeline
 };
 
 // Vulkan Command List implementation
-class VulkanCommandList final : public IRHICommandList
+class VulkanCommandList final : public RefCounter<IRHICommandList>
 {
   private:
 	VkDevice        device;
@@ -274,6 +273,9 @@ class VulkanCommandList final : public IRHICommandList
 	// Cached function pointers
 	PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
 	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
+
+	// Resource tracking for GPU lifetime management
+	std::vector<RefCntPtr<IRefCounted>> m_referencedResources;
 
   public:
 	VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType, uint32_t queueFamily,
@@ -338,26 +340,26 @@ class VulkanCommandList final : public IRHICommandList
 };
 
 // Vulkan Swapchain implementation
-class VulkanSwapchain final : public IRHISwapchain
+class VulkanSwapchain final : public RefCounter<IRHISwapchain>
 {
   private:
-	VkInstance                                      instance;
-	VkDevice                                        device;
-	VkPhysicalDevice                                physicalDevice;
-	VmaAllocator                                    allocator;
-	VkSurfaceKHR                                    surface;
-	VkQueue                                         graphicsQueue;
-	VkSwapchainKHR                                  swapchain;
-	std::vector<VkImage>                            swapchainImages;
-	std::vector<std::unique_ptr<VulkanTexture>>     backBuffers;
-	std::vector<std::unique_ptr<VulkanTextureView>> backBufferViews;
-	std::vector<VkFramebuffer>                      framebuffers;
-	VkRenderPass                                    renderPass;
-	VkFormat                                        swapchainFormat;
-	VkExtent2D                                      swapchainExtent;
-	VkSurfaceFormatKHR                              chosenSurfaceFormat;
-	VkPresentModeKHR                                chosenPresentMode;
-	uint32_t                                        requestedBufferCount;
+	VkInstance                     instance;
+	VkDevice                       device;
+	VkPhysicalDevice               physicalDevice;
+	VmaAllocator                   allocator;
+	VkSurfaceKHR                   surface;
+	VkQueue                        graphicsQueue;
+	VkSwapchainKHR                 swapchain;
+	std::vector<VkImage>           swapchainImages;
+	std::vector<TextureHandle>     backBuffers;
+	std::vector<TextureViewHandle> backBufferViews;
+	std::vector<VkFramebuffer>     framebuffers;
+	VkRenderPass                   renderPass;
+	VkFormat                       swapchainFormat;
+	VkExtent2D                     swapchainExtent;
+	VkSurfaceFormatKHR             chosenSurfaceFormat;
+	VkPresentModeKHR               chosenPresentMode;
+	uint32_t                       requestedBufferCount;
 
   public:
 	VulkanSwapchain(VkInstance instance, VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator, VkSurfaceKHR surface,
@@ -380,7 +382,7 @@ class VulkanSwapchain final : public IRHISwapchain
 };
 
 // Vulkan Semaphore implementation
-class VulkanSemaphore final : public IRHISemaphore
+class VulkanSemaphore final : public RefCounter<IRHISemaphore>
 {
   private:
 	VkDevice    device;
@@ -402,7 +404,7 @@ class VulkanSemaphore final : public IRHISemaphore
 };
 
 // Vulkan Fence implementation
-class VulkanFence final : public IRHIFence
+class VulkanFence final : public RefCounter<IRHIFence>
 {
   private:
 	VkDevice device;
@@ -428,7 +430,7 @@ class VulkanFence final : public IRHIFence
 };
 
 // Vulkan DescriptorSetLayout implementation
-class VulkanDescriptorSetLayout final : public IRHIDescriptorSetLayout
+class VulkanDescriptorSetLayout final : public RefCounter<IRHIDescriptorSetLayout>
 {
   private:
 	VkDevice                          device;
@@ -455,7 +457,7 @@ class VulkanDescriptorSetLayout final : public IRHIDescriptorSetLayout
 };
 
 // Vulkan DescriptorSet implementation
-class VulkanDescriptorSet final : public IRHIDescriptorSet
+class VulkanDescriptorSet final : public RefCounter<IRHIDescriptorSet>
 {
   private:
 	VkDevice                   device;
@@ -482,7 +484,7 @@ class VulkanDescriptorSet final : public IRHIDescriptorSet
 };
 
 // Vulkan Sampler implementation
-class VulkanSampler final : public IRHISampler
+class VulkanSampler final : public RefCounter<IRHISampler>
 {
   private:
 	VkDevice  device;
@@ -501,6 +503,26 @@ class VulkanSampler final : public IRHISampler
 	{
 		return sampler;
 	}
+};
+
+// Vulkan Composite Fence implementation
+class VulkanCompositeFence final : public RefCounter<IRHIFence>
+{
+  private:
+	std::vector<FenceHandle> m_fences;
+
+  public:
+	explicit VulkanCompositeFence(std::vector<FenceHandle> fences);
+	~VulkanCompositeFence() override = default;
+
+	VulkanCompositeFence(const VulkanCompositeFence &)            = delete;
+	VulkanCompositeFence &operator=(const VulkanCompositeFence &) = delete;
+	VulkanCompositeFence(VulkanCompositeFence &&)                 = delete;
+	VulkanCompositeFence &operator=(VulkanCompositeFence &&)      = delete;
+
+	void Wait(uint64_t timeout = UINT64_MAX) override;
+	void Reset() override;
+	bool IsSignaled() const override;
 };
 
 // Utility functions

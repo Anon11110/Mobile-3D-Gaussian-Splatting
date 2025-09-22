@@ -153,6 +153,9 @@ void TestGpuUpload(rhi::IRHIDevice* device, const std::filesystem::path& plyPath
 		{
 			LOG_INFO("  - SH Rest: {} bytes", gpuData.shRest->GetSize());
 		}
+
+		// Retire completed GPU operations (optional in test, but good practice)
+		device->RetireCompletedFrame();
 	}
 	else
 	{
@@ -196,6 +199,9 @@ void TestMemoryRelease(rhi::IRHIDevice* device, const std::filesystem::path& ply
 		uploadFence->Wait();
 		LOG_INFO("Data uploaded to GPU");
 
+		// Retire completed GPU operations
+		device->RetireCompletedFrame();
+
 		// Release CPU memory after upload
 		scene.ForEachMesh([](msplat::engine::SplatMesh& mesh) {
 			if (mesh.HasCpuData())
@@ -235,7 +241,7 @@ int main(int argc, char* argv[])
 	LOG_INFO("========================================");
 	LOG_INFO("");
 
-	auto device = rhi::CreateRHIDevice();
+	rhi::DeviceHandle device = rhi::CreateRHIDevice();
 	if (!device)
 	{
 		LOG_ERROR("Failed to create RHI device");
@@ -270,10 +276,10 @@ int main(int argc, char* argv[])
 
 	try
 	{
-		TestSceneLoading(device.get(), plyPath);
-		TestMultipleMeshes(device.get(), plyPath);
-		TestGpuUpload(device.get(), plyPath);
-		TestMemoryRelease(device.get(), plyPath);
+		TestSceneLoading(device.Get(), plyPath);
+		TestMultipleMeshes(device.Get(), plyPath);
+		TestGpuUpload(device.Get(), plyPath);
+		TestMemoryRelease(device.Get(), plyPath);
 
 		LOG_INFO("========================================");
 		LOG_INFO("    All tests completed successfully!");

@@ -76,33 +76,33 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 
 	// Create compute pipeline
 	rhi::ComputePipelineDesc computePipelineDesc{};
-	computePipelineDesc.computeShader        = m_computeShader.get();
-	computePipelineDesc.descriptorSetLayouts = {m_computeDescriptorSetLayout.get()};
+	computePipelineDesc.computeShader        = m_computeShader.Get();
+	computePipelineDesc.descriptorSetLayouts = {m_computeDescriptorSetLayout.Get()};
 	m_computePipeline                        = device->CreateComputePipeline(computePipelineDesc);
 
 	// Create compute descriptor sets (double buffered)
-	m_computeDescriptorSetA = device->CreateDescriptorSet(m_computeDescriptorSetLayout.get(), rhi::QueueType::COMPUTE);
-	m_computeDescriptorSetB = device->CreateDescriptorSet(m_computeDescriptorSetLayout.get(), rhi::QueueType::COMPUTE);
+	m_computeDescriptorSetA = device->CreateDescriptorSet(m_computeDescriptorSetLayout.Get(), rhi::QueueType::COMPUTE);
+	m_computeDescriptorSetB = device->CreateDescriptorSet(m_computeDescriptorSetLayout.Get(), rhi::QueueType::COMPUTE);
 
 	// Bind compute descriptor sets
 	rhi::BufferBinding paramsBindingCompute{};
-	paramsBindingCompute.buffer = m_paramsBuffer.get();
+	paramsBindingCompute.buffer = m_paramsBuffer.Get();
 	paramsBindingCompute.type   = rhi::DescriptorType::UNIFORM_BUFFER;
 
 	rhi::BufferBinding inputBindingA{};
-	inputBindingA.buffer = m_particleBufferA.get();
+	inputBindingA.buffer = m_particleBufferA.Get();
 	inputBindingA.type   = rhi::DescriptorType::STORAGE_BUFFER;
 
 	rhi::BufferBinding outputBindingA{};
-	outputBindingA.buffer = m_particleBufferB.get();
+	outputBindingA.buffer = m_particleBufferB.Get();
 	outputBindingA.type   = rhi::DescriptorType::STORAGE_BUFFER;
 
 	rhi::BufferBinding inputBindingB{};
-	inputBindingB.buffer = m_particleBufferB.get();
+	inputBindingB.buffer = m_particleBufferB.Get();
 	inputBindingB.type   = rhi::DescriptorType::STORAGE_BUFFER;
 
 	rhi::BufferBinding outputBindingB{};
-	outputBindingB.buffer = m_particleBufferA.get();
+	outputBindingB.buffer = m_particleBufferA.Get();
 	outputBindingB.type   = rhi::DescriptorType::STORAGE_BUFFER;
 
 	// Set A: reads from A, writes to B
@@ -141,23 +141,23 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 	m_graphicsDescriptorSetLayout = device->CreateDescriptorSetLayout(graphicsLayoutDesc);
 
 	// Create graphics descriptor set
-	m_graphicsDescriptorSet = device->CreateDescriptorSet(m_graphicsDescriptorSetLayout.get(), rhi::QueueType::GRAPHICS);
+	m_graphicsDescriptorSet = device->CreateDescriptorSet(m_graphicsDescriptorSetLayout.Get(), rhi::QueueType::GRAPHICS);
 
 	rhi::BufferBinding mvpBinding{};
-	mvpBinding.buffer = m_mvpBuffer.get();
+	mvpBinding.buffer = m_mvpBuffer.Get();
 	mvpBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
 	m_graphicsDescriptorSet->BindBuffer(0, mvpBinding);
 
 	// Also bind the simulation parameters buffer for the fragment shader
 	rhi::BufferBinding paramsBindingGfx{};
-	paramsBindingGfx.buffer = m_paramsBuffer.get();
+	paramsBindingGfx.buffer = m_paramsBuffer.Get();
 	paramsBindingGfx.type   = rhi::DescriptorType::UNIFORM_BUFFER;
 	m_graphicsDescriptorSet->BindBuffer(1, paramsBindingGfx);
 
 	// Create graphics pipeline
 	rhi::GraphicsPipelineDesc pipelineDesc{};
-	pipelineDesc.vertexShader   = m_vertexShader.get();
-	pipelineDesc.fragmentShader = m_fragmentShader.get();
+	pipelineDesc.vertexShader   = m_vertexShader.Get();
+	pipelineDesc.fragmentShader = m_fragmentShader.Get();
 
 	pipelineDesc.vertexLayout.attributes = {
 	    {0, 0, rhi::VertexFormat::R32G32B32_SFLOAT, offsetof(Particle, position)}        // position
@@ -184,7 +184,7 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 	pipelineDesc.targetSignature.depthFormat  = rhi::TextureFormat::UNDEFINED;
 	pipelineDesc.targetSignature.sampleCount  = rhi::SampleCount::COUNT_1;
 
-	pipelineDesc.descriptorSetLayouts = {m_graphicsDescriptorSetLayout.get()};
+	pipelineDesc.descriptorSetLayouts = {m_graphicsDescriptorSetLayout.Get()};
 
 	m_graphicsPipeline = device->CreateGraphicsPipeline(pipelineDesc);
 
@@ -224,8 +224,8 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 	m_debugDescriptorSetLayout = device->CreateDescriptorSetLayout(debugLayoutDesc);
 
 	// Create two separate descriptor sets and uniform buffers for each sphere
-	m_debugDescriptorSet1 = device->CreateDescriptorSet(m_debugDescriptorSetLayout.get(), rhi::QueueType::GRAPHICS);
-	m_debugDescriptorSet2 = device->CreateDescriptorSet(m_debugDescriptorSetLayout.get(), rhi::QueueType::GRAPHICS);
+	m_debugDescriptorSet1 = device->CreateDescriptorSet(m_debugDescriptorSetLayout.Get(), rhi::QueueType::GRAPHICS);
+	m_debugDescriptorSet2 = device->CreateDescriptorSet(m_debugDescriptorSetLayout.Get(), rhi::QueueType::GRAPHICS);
 
 	rhi::BufferDesc debugUboDesc{};
 	debugUboDesc.size                      = sizeof(DebugUBO);
@@ -242,19 +242,19 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 
 	// Bind buffers to their respective descriptor sets
 	rhi::BufferBinding debugUboBinding1{};
-	debugUboBinding1.buffer = m_debugUboBuffer1.get();
+	debugUboBinding1.buffer = m_debugUboBuffer1.Get();
 	debugUboBinding1.type   = rhi::DescriptorType::UNIFORM_BUFFER;
 	m_debugDescriptorSet1->BindBuffer(0, debugUboBinding1);
 
 	rhi::BufferBinding debugUboBinding2{};
-	debugUboBinding2.buffer = m_debugUboBuffer2.get();
+	debugUboBinding2.buffer = m_debugUboBuffer2.Get();
 	debugUboBinding2.type   = rhi::DescriptorType::UNIFORM_BUFFER;
 	m_debugDescriptorSet2->BindBuffer(0, debugUboBinding2);
 
 	// Pipeline for the debug sphere (wireframe)
 	rhi::GraphicsPipelineDesc debugPipelineDesc{};
-	debugPipelineDesc.vertexShader                   = m_debugVertexShader.get();
-	debugPipelineDesc.fragmentShader                 = m_debugFragmentShader.get();
+	debugPipelineDesc.vertexShader                   = m_debugVertexShader.Get();
+	debugPipelineDesc.fragmentShader                 = m_debugFragmentShader.Get();
 	debugPipelineDesc.vertexLayout.attributes        = {{0, 0, rhi::VertexFormat::R32G32B32_SFLOAT, 0}};
 	debugPipelineDesc.vertexLayout.bindings          = {{0, sizeof(math::vec3), false}};
 	debugPipelineDesc.topology                       = rhi::PrimitiveTopology::LINE_LIST;
@@ -263,7 +263,7 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 	debugPipelineDesc.colorBlendAttachments.resize(1);
 	debugPipelineDesc.colorBlendAttachments[0].colorWriteMask = 0xF;
 	debugPipelineDesc.targetSignature.colorFormats            = {swapchain->GetBackBuffer(0)->GetFormat()};
-	debugPipelineDesc.descriptorSetLayouts                    = {m_debugDescriptorSetLayout.get()};
+	debugPipelineDesc.descriptorSetLayouts                    = {m_debugDescriptorSetLayout.Get()};
 	m_debugPipeline                                           = device->CreateGraphicsPipeline(debugPipelineDesc);
 
 	// Create synchronization objects for frames in flight
@@ -421,8 +421,8 @@ void ParticlesApp::OnRender()
 	// Direct write to persistently mapped buffer
 	memcpy(m_mvpDataPtr, &mvp, sizeof(math::mat4));
 
-	auto *inputBuffer  = m_useBufferA ? m_particleBufferA.get() : m_particleBufferB.get();
-	auto *outputBuffer = m_useBufferA ? m_particleBufferB.get() : m_particleBufferA.get();
+	auto *inputBuffer  = m_useBufferA ? m_particleBufferA.Get() : m_particleBufferB.Get();
+	auto *outputBuffer = m_useBufferA ? m_particleBufferB.Get() : m_particleBufferA.Get();
 
 	// JIT GRAPHICS PRE-SUBMIT: Release input buffer from graphics to compute (only if physics will run)
 	bool didPreRelease = false;
@@ -441,8 +441,8 @@ void ParticlesApp::OnRender()
 		gfxPre->End();
 
 		rhi::SubmitInfo preSubmit{};
-		preSubmit.signalSemaphores = container::array<rhi::IRHISemaphore *, 1>{m_graphicsReleasedSemaphores[m_currentFrame].get()};
-		auto gfxPreSpan            = container::array<rhi::IRHICommandList *, 1>{gfxPre.get()};
+		preSubmit.signalSemaphores = container::array<rhi::IRHISemaphore *, 1>{m_graphicsReleasedSemaphores[m_currentFrame].Get()};
+		auto gfxPreSpan            = container::array<rhi::IRHICommandList *, 1>{gfxPre.Get()};
 		device->SubmitCommandLists(gfxPreSpan, rhi::QueueType::GRAPHICS, preSubmit);
 
 		didPreRelease = true;
@@ -489,8 +489,8 @@ void ParticlesApp::OnRender()
 			    {});
 		}
 
-		computeCmdList->SetPipeline(m_computePipeline.get());
-		computeCmdList->BindDescriptorSet(0, m_useBufferA ? m_computeDescriptorSetA.get() : m_computeDescriptorSetB.get());
+		computeCmdList->SetPipeline(m_computePipeline.Get());
+		computeCmdList->BindDescriptorSet(0, m_useBufferA ? m_computeDescriptorSetA.Get() : m_computeDescriptorSetB.Get());
 
 		uint32_t workgroupCount = (PARTICLE_COUNT + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
 		computeCmdList->Dispatch(workgroupCount);
@@ -512,14 +512,14 @@ void ParticlesApp::OnRender()
 		container::vector<rhi::SemaphoreWaitInfo> computeWaits;
 		if (didPreRelease)
 		{
-			computeWaits.push_back({m_graphicsReleasedSemaphores[m_currentFrame].get(), rhi::StageMask::ComputeShader});
+			computeWaits.push_back({m_graphicsReleasedSemaphores[m_currentFrame].Get(), rhi::StageMask::ComputeShader});
 		}
 
 		rhi::SubmitInfo computeSubmit{};
 		computeSubmit.waitSemaphores   = computeWaits;
-		computeSubmit.signalSemaphores = container::array<rhi::IRHISemaphore *, 1>{m_computeFinishedSemaphores[m_currentFrame].get()};
+		computeSubmit.signalSemaphores = container::array<rhi::IRHISemaphore *, 1>{m_computeFinishedSemaphores[m_currentFrame].Get()};
 
-		auto computeCmdListSpan = container::array<rhi::IRHICommandList *, 1>{computeCmdList.get()};
+		auto computeCmdListSpan = container::array<rhi::IRHICommandList *, 1>{computeCmdList.Get()};
 		device->SubmitCommandLists(computeCmdListSpan, rhi::QueueType::COMPUTE, computeSubmit);
 
 		m_useBufferA = !m_useBufferA;
@@ -527,7 +527,7 @@ void ParticlesApp::OnRender()
 
 	uint32_t imageIndex;
 	// Use the semaphore for the CURRENT frame to acquire the image
-	rhi::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, m_imageAvailableSemaphores[m_currentFrame].get());
+	rhi::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, m_imageAvailableSemaphores[m_currentFrame].Get());
 
 	if (acquireStatus == rhi::SwapchainStatus::OUT_OF_DATE)
 	{
@@ -623,27 +623,27 @@ void ParticlesApp::OnRender()
 	graphicsCmdList->SetScissor(0, 0, backBufferWidth, backBufferHeight);
 
 	// --- Draw Particles ---
-	graphicsCmdList->SetPipeline(m_graphicsPipeline.get());
-	graphicsCmdList->BindDescriptorSet(0, m_graphicsDescriptorSet.get());
+	graphicsCmdList->SetPipeline(m_graphicsPipeline.Get());
+	graphicsCmdList->BindDescriptorSet(0, m_graphicsDescriptorSet.Get());
 
 	// Use the buffer that was just written by compute (or the last valid buffer if physics didn't run)
-	auto *renderBuffer = shouldRunPhysics ? outputBuffer : (m_useBufferA ? m_particleBufferA.get() : m_particleBufferB.get());
+	auto *renderBuffer = shouldRunPhysics ? outputBuffer : (m_useBufferA ? m_particleBufferA.Get() : m_particleBufferB.Get());
 	graphicsCmdList->SetVertexBuffer(0, renderBuffer);
 	graphicsCmdList->Draw(PARTICLE_COUNT);
 
 	// --- Draw Debug Spheres ---
 	if (m_enableDebugSpheres)
 	{
-		graphicsCmdList->SetPipeline(m_debugPipeline.get());
-		graphicsCmdList->SetVertexBuffer(0, m_sphereVertexBuffer.get());
-		graphicsCmdList->BindIndexBuffer(m_sphereIndexBuffer.get(), 0);
+		graphicsCmdList->SetPipeline(m_debugPipeline.Get());
+		graphicsCmdList->SetVertexBuffer(0, m_sphereVertexBuffer.Get());
+		graphicsCmdList->BindIndexBuffer(m_sphereIndexBuffer.Get(), 0);
 
 		// Prepare and draw sphere 1
 		DebugUBO debugUbo1;
 		debugUbo1.mvp = mvp * math::Translate(math::mat4(1.0f), m_sphere1Pos) * math::Scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
 		memcpy(m_debugUboDataPtr1, &debugUbo1, sizeof(DebugUBO));
 
-		graphicsCmdList->BindDescriptorSet(0, m_debugDescriptorSet1.get());
+		graphicsCmdList->BindDescriptorSet(0, m_debugDescriptorSet1.Get());
 
 		graphicsCmdList->DrawIndexed((uint32_t) m_sphereIndices.size());
 
@@ -652,7 +652,7 @@ void ParticlesApp::OnRender()
 		debugUbo2.mvp = mvp * math::Translate(math::mat4(1.0f), m_sphere2Pos) * math::Scale(math::mat4(1.0f), math::vec3(m_sphereRadius));
 		memcpy(m_debugUboDataPtr2, &debugUbo2, sizeof(DebugUBO));
 
-		graphicsCmdList->BindDescriptorSet(0, m_debugDescriptorSet2.get());
+		graphicsCmdList->BindDescriptorSet(0, m_debugDescriptorSet2.Get());
 
 		graphicsCmdList->DrawIndexed((uint32_t) m_sphereIndices.size());
 	}
@@ -674,27 +674,27 @@ void ParticlesApp::OnRender()
 
 	// Submit graphics work - conditionally wait on compute semaphore only if physics ran
 	container::vector<rhi::SemaphoreWaitInfo> waitSemaphores;
-	waitSemaphores.push_back({m_imageAvailableSemaphores[m_currentFrame].get(), rhi::StageMask::RenderTarget});
+	waitSemaphores.push_back({m_imageAvailableSemaphores[m_currentFrame].Get(), rhi::StageMask::RenderTarget});
 
 	if (shouldRunPhysics)
 	{
-		waitSemaphores.push_back({m_computeFinishedSemaphores[m_currentFrame].get(), rhi::StageMask::VertexInput});
+		waitSemaphores.push_back({m_computeFinishedSemaphores[m_currentFrame].Get(), rhi::StageMask::VertexInput});
 	}
 
 	// Build signal semaphores - only signal presentation
 	container::vector<rhi::IRHISemaphore *> signalSemaphores;
-	signalSemaphores.push_back(m_renderFinishedSemaphores[imageIndex].get());
+	signalSemaphores.push_back(m_renderFinishedSemaphores[imageIndex].Get());
 
 	rhi::SubmitInfo submitInfo{};
 	submitInfo.waitSemaphores   = container::span<const rhi::SemaphoreWaitInfo>(waitSemaphores.data(), waitSemaphores.size());
 	submitInfo.signalSemaphores = signalSemaphores;
-	submitInfo.signalFence      = m_inFlightFences[m_currentFrame].get();
+	submitInfo.signalFence      = m_inFlightFences[m_currentFrame].Get();
 
-	auto graphicsCmdListSpan = container::array<rhi::IRHICommandList *, 1>{graphicsCmdList.get()};
+	auto graphicsCmdListSpan = container::array<rhi::IRHICommandList *, 1>{graphicsCmdList.Get()};
 	device->SubmitCommandLists(graphicsCmdListSpan, rhi::QueueType::GRAPHICS, submitInfo);
 
 	// Present - wait on the render finished semaphore for the IMAGE
-	rhi::SwapchainStatus presentStatus = swapchain->Present(imageIndex, m_renderFinishedSemaphores[imageIndex].get());
+	rhi::SwapchainStatus presentStatus = swapchain->Present(imageIndex, m_renderFinishedSemaphores[imageIndex].Get());
 
 	if (presentStatus == rhi::SwapchainStatus::OUT_OF_DATE || presentStatus == rhi::SwapchainStatus::SUBOPTIMAL)
 	{
@@ -787,35 +787,35 @@ void ParticlesApp::OnShutdown()
 	m_imageAvailableSemaphores.clear();
 
 	// Clear debug sphere resources (always initialized)
-	m_debugPipeline.reset();
-	m_debugDescriptorSet2.reset();
-	m_debugDescriptorSet1.reset();
-	m_debugDescriptorSetLayout.reset();
-	m_debugFragmentShader.reset();
-	m_debugVertexShader.reset();
-	m_debugUboBuffer2.reset();
-	m_debugUboBuffer1.reset();
-	m_sphereIndexBuffer.reset();
-	m_sphereVertexBuffer.reset();
+	m_debugPipeline            = nullptr;
+	m_debugDescriptorSet2      = nullptr;
+	m_debugDescriptorSet1      = nullptr;
+	m_debugDescriptorSetLayout = nullptr;
+	m_debugFragmentShader      = nullptr;
+	m_debugVertexShader        = nullptr;
+	m_debugUboBuffer2          = nullptr;
+	m_debugUboBuffer1          = nullptr;
+	m_sphereIndexBuffer        = nullptr;
+	m_sphereVertexBuffer       = nullptr;
 
-	m_graphicsPipeline.reset();
-	m_graphicsDescriptorSet.reset();
-	m_graphicsDescriptorSetLayout.reset();
+	m_graphicsPipeline            = nullptr;
+	m_graphicsDescriptorSet       = nullptr;
+	m_graphicsDescriptorSetLayout = nullptr;
 
-	m_computePipeline.reset();
-	m_computeDescriptorSetB.reset();
-	m_computeDescriptorSetA.reset();
-	m_computeDescriptorSetLayout.reset();
+	m_computePipeline            = nullptr;
+	m_computeDescriptorSetB      = nullptr;
+	m_computeDescriptorSetA      = nullptr;
+	m_computeDescriptorSetLayout = nullptr;
 
-	m_fragmentShader.reset();
-	m_vertexShader.reset();
-	m_computeShader.reset();
+	m_fragmentShader = nullptr;
+	m_vertexShader   = nullptr;
+	m_computeShader  = nullptr;
 
 	m_shaderFactory.reset();
-	m_mvpBuffer.reset();
-	m_paramsBuffer.reset();
-	m_particleBufferB.reset();
-	m_particleBufferA.reset();
+	m_mvpBuffer       = nullptr;
+	m_paramsBuffer    = nullptr;
+	m_particleBufferB = nullptr;
+	m_particleBufferA = nullptr;
 }
 
 void ParticlesApp::OnKey(int key, int action, int mods)
@@ -831,8 +831,8 @@ void ParticlesApp::OnKey(int key, int action, int mods)
 		{
 			glfwSetWindowShouldClose(m_deviceManager->GetWindow(), GLFW_TRUE);
 		}
-		// D key toggles debug sphere rendering
-		else if (key == GLFW_KEY_D)
+		// 1 key toggles debug sphere rendering
+		else if (key == GLFW_KEY_1)
 		{
 			m_enableDebugSpheres = !m_enableDebugSpheres;
 		}

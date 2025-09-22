@@ -82,4 +82,44 @@ bool VulkanFence::IsSignaled() const
 	return result == VK_SUCCESS;
 }
 
+// VulkanCompositeFence implementation
+VulkanCompositeFence::VulkanCompositeFence(std::vector<FenceHandle> fences) :
+    m_fences(std::move(fences))
+{
+}
+
+void VulkanCompositeFence::Wait(uint64_t timeout)
+{
+	for (const auto &fence : m_fences)
+	{
+		if (fence)
+		{
+			fence->Wait(timeout);
+		}
+	}
+}
+
+void VulkanCompositeFence::Reset()
+{
+	for (const auto &fence : m_fences)
+	{
+		if (fence)
+		{
+			fence->Reset();
+		}
+	}
+}
+
+bool VulkanCompositeFence::IsSignaled() const
+{
+	for (const auto &fence : m_fences)
+	{
+		if (fence && !fence->IsSignaled())
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 }        // namespace rhi::vulkan

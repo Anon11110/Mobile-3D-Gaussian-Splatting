@@ -65,6 +65,10 @@ void DeviceManager::MainLoop() {
 		glfwPollEvents();
 		m_app->OnUpdate(deltaTime);
 		m_app->OnRender();
+		// Retire completed GPU operations for resource management
+		if (m_device) {
+			m_device->RetireCompletedFrame();
+		}
 		frameTimer.stop();
 		deltaTime = static_cast<float>(frameTimer.elapsedSeconds());
 	}
@@ -76,8 +80,9 @@ void DeviceManager::Shutdown() {
 		m_app->OnShutdown();
 	}
 
-	m_swapchain.reset();
-	m_device.reset();
+	// Handles automatically release when they go out of scope
+	m_swapchain = nullptr;
+	m_device = nullptr;
 
 	if (m_window) {
 		glfwDestroyWindow(m_window);

@@ -283,8 +283,41 @@ def discover_cmake_targets(source_dir: Path, build_dir: Path) -> List[str]:
     """Discover available CMake targets by scanning CMakeLists.txt files and querying CMake."""
     targets = []
 
-    # First try to get actual targets from CMake if available
+    # First try to get actual targets from the build system
     if build_dir.exists():
+        # Check for Xcode project first (macOS)
+        xcode_project = build_dir / "Mobile-3D-Gaussian-Splatting.xcodeproj"
+        if xcode_project.exists():
+            try:
+                result = subprocess.run(
+                    ["xcodebuild", "-list", "-project", str(xcode_project)],
+                    capture_output=True,
+                    text=True,
+                    cwd=build_dir,
+                )
+                if result.returncode == 0:
+                    # Parse xcodebuild output for targets
+                    in_targets = False
+                    for line in result.stdout.splitlines():
+                        line = line.strip()
+                        if line == "Targets:":
+                            in_targets = True
+                            continue
+                        elif in_targets:
+                            if line and not line.startswith("Build Configurations:"):
+                                # Skip cmake internal targets and unwanted library/shader targets
+                                if line not in ["ALL_BUILD", "ZERO_CHECK", "install", "uninstall", "update_mappings"]:
+                                    # Filter out static libraries and shader compilation targets
+                                    if not line.endswith("_shaders") and line not in ["core", "app", "engine", "glfw"]:
+                                        targets.append(line)
+                            else:
+                                break
+                    if targets:
+                        return targets
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
+        
+        # Try standard cmake --build approach for other generators
         try:
             result = subprocess.run(
                 [
@@ -303,7 +336,9 @@ def discover_cmake_targets(source_dir: Path, build_dir: Path) -> List[str]:
                 for line in result.stdout.splitlines():
                     line = line.strip()
                     if line and not line.startswith("..."):
-                        targets.append(line)
+                        # Filter out static libraries and shader compilation targets
+                        if not line.endswith("_shaders") and line not in ["core", "app", "engine", "glfw"]:
+                            targets.append(line)
                 if targets:
                     return targets
         except (subprocess.CalledProcessError, FileNotFoundError):
@@ -323,15 +358,19 @@ def discover_cmake_targets(source_dir: Path, build_dir: Path) -> List[str]:
                 # Find add_executable and add_library calls
                 for line in content.splitlines():
                     line = line.strip()
-                    if line.startswith(("add_executable(", "add_library(")):
+                    if line.startswith("add_executable("):
                         # Extract target name (first argument after opening parenthesis)
                         match = re.search(
-                            r"add_(?:executable|library)\s*\(\s*([^\s)]+)", line
+                            r"add_executable\s*\(\s*([^\s)]+)", line
                         )
                         if match:
                             target_name = match.group(1)
                             if target_name not in discovered_targets:
                                 discovered_targets.append(target_name)
+                    # Special case: always include RHI even though it's a library
+                    elif line.startswith("add_library(RHI"):
+                        if "RHI" not in discovered_targets:
+                            discovered_targets.append("RHI")
             except Exception:
                 # Skip files that can't be read or parsed
                 continue

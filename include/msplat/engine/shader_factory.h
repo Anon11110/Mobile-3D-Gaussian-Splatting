@@ -58,7 +58,7 @@ class ShaderFactory
 	 * @param filepath Path to the compiled shader file (e.g., "shaders/compiled/basic.vert.spv")
 	 * @param stage The shader stage (VERTEX, FRAGMENT, or COMPUTE)
 	 * @param macros Optional array of macros for shader permutations (currently reserved for future use)
-	 * @return A unique_ptr to the shader object, or nullptr on failure
+	 * @return A ShaderHandle to the shader object, or nullptr on failure
 	 *
 	 * This method will:
 	 * 1. Check if the shader is already cached (based on filepath + stage + macros)
@@ -66,7 +66,7 @@ class ShaderFactory
 	 * 3. Create the shader object via RHI
 	 * 4. Cache and return the result
 	 */
-	container::unique_ptr<rhi::IRHIShader> getOrCreateShader(
+	rhi::ShaderHandle getOrCreateShader(
 	    const container::string           &filepath,
 	    rhi::ShaderStage                   stage,
 	    container::span<const ShaderMacro> macros = {});
@@ -78,7 +78,7 @@ class ShaderFactory
 	 * - Clear the bytecode cache (raw file data)
 	 * - Clear the shader cache (compiled shader objects)
 	 *
-	 * Note: Existing returned shader pointers remain valid as they are unique_ptrs.
+	 * Note: Existing returned shader handles remain valid as they are reference counted.
 	 *       This only affects future cache lookups.
 	 */
 	void clearCache();

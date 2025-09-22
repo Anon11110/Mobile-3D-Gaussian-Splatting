@@ -72,7 +72,7 @@ bool Scene::RemoveMesh(SplatMesh::ID id)
 	return false;
 }
 
-std::shared_ptr<rhi::IRHIFence> Scene::UploadAttributeData()
+rhi::FenceHandle Scene::UploadAttributeData()
 {
 	std::lock_guard<std::mutex> lock(meshesMutex);
 
@@ -162,11 +162,11 @@ std::shared_ptr<rhi::IRHIFence> Scene::UploadAttributeData()
 		}
 	}
 
-	std::vector<std::shared_ptr<rhi::IRHIFence>> uploadFences;
+	std::vector<rhi::FenceHandle> uploadFences;
 
 	// Upload all attribute buffers asynchronously
-	auto positionsFence = device->UploadBufferAsync(
-	    gpuData.positions.get(),
+	rhi::FenceHandle positionsFence = device->UploadBufferAsync(
+	    gpuData.positions.Get(),
 	    positions.data(),
 	    positions.size() * sizeof(float));
 	if (positionsFence)
@@ -174,8 +174,8 @@ std::shared_ptr<rhi::IRHIFence> Scene::UploadAttributeData()
 		uploadFences.push_back(positionsFence);
 	}
 
-	auto scalesFence = device->UploadBufferAsync(
-	    gpuData.scales.get(),
+	rhi::FenceHandle scalesFence = device->UploadBufferAsync(
+	    gpuData.scales.Get(),
 	    scales.data(),
 	    scales.size() * sizeof(float));
 	if (scalesFence)
@@ -183,8 +183,8 @@ std::shared_ptr<rhi::IRHIFence> Scene::UploadAttributeData()
 		uploadFences.push_back(scalesFence);
 	}
 
-	auto rotationsFence = device->UploadBufferAsync(
-	    gpuData.rotations.get(),
+	rhi::FenceHandle rotationsFence = device->UploadBufferAsync(
+	    gpuData.rotations.Get(),
 	    rotations.data(),
 	    rotations.size() * sizeof(float));
 	if (rotationsFence)
@@ -192,8 +192,8 @@ std::shared_ptr<rhi::IRHIFence> Scene::UploadAttributeData()
 		uploadFences.push_back(rotationsFence);
 	}
 
-	auto colorsFence = device->UploadBufferAsync(
-	    gpuData.colors.get(),
+	rhi::FenceHandle colorsFence = device->UploadBufferAsync(
+	    gpuData.colors.Get(),
 	    colors.data(),
 	    colors.size() * sizeof(float));
 	if (colorsFence)
@@ -203,8 +203,8 @@ std::shared_ptr<rhi::IRHIFence> Scene::UploadAttributeData()
 
 	if (!shRest.empty())
 	{
-		auto shFence = device->UploadBufferAsync(
-		    gpuData.shRest.get(),
+		rhi::FenceHandle shFence = device->UploadBufferAsync(
+		    gpuData.shRest.Get(),
 		    shRest.data(),
 		    shRest.size() * sizeof(float));
 		if (shFence)
@@ -221,7 +221,7 @@ std::shared_ptr<rhi::IRHIFence> Scene::UploadAttributeData()
 	// Create and return a composite fence that waits for all uploads
 	if (!uploadFences.empty())
 	{
-		return std::make_shared<rhi::IRHICompositeFence>(std::move(uploadFences));
+		return device->CreateCompositeFence(uploadFences);
 	}
 
 	return nullptr;

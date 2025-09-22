@@ -75,22 +75,23 @@ class TriangleApp : public app::IApplication
 	app::Camera m_camera;
 
 	// Resources
-	container::unique_ptr<rhi::IRHIBuffer>              m_vertexBuffer;
-	container::unique_ptr<rhi::IRHIBuffer>              m_uniformBuffer;
-	container::unique_ptr<engine::ShaderFactory>        m_shaderFactory;
-	container::shared_ptr<rhi::IRHIShader>              m_vertexShader;
-	container::shared_ptr<rhi::IRHIShader>              m_fragmentShader;
-	container::unique_ptr<rhi::IRHIDescriptorSetLayout> m_descriptorSetLayout;
-	container::unique_ptr<rhi::IRHIDescriptorSet>       m_descriptorSet;
-	container::unique_ptr<rhi::IRHIPipeline>            m_pipeline;
+	rhi::BufferHandle              m_vertexBuffer;
+	rhi::BufferHandle              m_uniformBuffer;
+	rhi::ShaderHandle              m_vertexShader;
+	rhi::ShaderHandle              m_fragmentShader;
+	rhi::DescriptorSetLayoutHandle m_descriptorSetLayout;
+	rhi::DescriptorSetHandle       m_descriptorSet;
+	rhi::PipelineHandle            m_pipeline;
+
+	container::unique_ptr<engine::ShaderFactory> m_shaderFactory;
 
 	// Synchronization objects (per swapchain image)
-	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_imageAvailableSemaphores;
-	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_renderFinishedSemaphores;
-	container::unique_ptr<rhi::IRHIFence>                        m_inFlightFence;
+	container::vector<rhi::SemaphoreHandle> m_imageAvailableSemaphores;
+	container::vector<rhi::SemaphoreHandle> m_renderFinishedSemaphores;
+	rhi::FenceHandle                        m_inFlightFence;
 
 	// Command lists (per swapchain image)
-	container::vector<container::unique_ptr<rhi::IRHICommandList>> m_commandLists;
+	container::vector<rhi::CommandListHandle> m_commandLists;
 
 	// Swapchain state tracking
 	container::vector<bool> m_imageFirstUse;

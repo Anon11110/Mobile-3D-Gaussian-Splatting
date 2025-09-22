@@ -26,6 +26,8 @@ VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool,
 
 VulkanCommandList::~VulkanCommandList()
 {
+	// Clear tracked resources
+	m_referencedResources.clear();
 	// Command buffers are automatically freed when command pool is destroyed
 }
 
@@ -62,6 +64,8 @@ void VulkanCommandList::Reset()
 	}
 	inRendering     = false;
 	currentPipeline = nullptr;
+	// Clear tracked resources when resetting command list
+	m_referencedResources.clear();
 }
 
 void VulkanCommandList::BeginRendering(const RenderingInfo &info)
@@ -229,6 +233,11 @@ void VulkanCommandList::SetPipeline(IRHIPipeline *pipeline)
 {
 	currentPipeline = static_cast<VulkanPipeline *>(pipeline);
 	vkCmdBindPipeline(commandBuffer, currentPipeline->GetBindPoint(), currentPipeline->GetHandle());
+	// Track pipeline resource
+	if (pipeline)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(pipeline));
+	}
 }
 
 void VulkanCommandList::SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, size_t offset)
@@ -237,6 +246,11 @@ void VulkanCommandList::SetVertexBuffer(uint32_t binding, IRHIBuffer *buffer, si
 	VkBuffer     buffers[] = {vkBuffer->GetHandle()};
 	VkDeviceSize offsets[] = {offset};
 	vkCmdBindVertexBuffers(commandBuffer, binding, 1, buffers, offsets);
+	// Track buffer resource
+	if (buffer)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(buffer));
+	}
 }
 
 void VulkanCommandList::BindIndexBuffer(IRHIBuffer *buffer, size_t offset)
@@ -259,6 +273,11 @@ void VulkanCommandList::BindIndexBuffer(IRHIBuffer *buffer, size_t offset)
 	}
 
 	vkCmdBindIndexBuffer(commandBuffer, vkBuffer->GetHandle(), offset, vkIndexType);
+	// Track buffer resource
+	if (buffer)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(buffer));
+	}
 }
 
 void VulkanCommandList::BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *descriptorSet,
@@ -274,6 +293,11 @@ void VulkanCommandList::BindDescriptorSet(uint32_t setIndex, IRHIDescriptorSet *
 
 	vkCmdBindDescriptorSets(commandBuffer, currentPipeline->GetBindPoint(), currentPipeline->GetLayout(), setIndex, 1,
 	                        sets, static_cast<uint32_t>(dynamicOffsets.size()), dynamicOffsets.data());
+	// Track descriptor set resource
+	if (descriptorSet)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(descriptorSet));
+	}
 }
 
 void VulkanCommandList::PushConstants(ShaderStageFlags stageFlags, uint32_t offset, std::span<const std::byte> data)
@@ -322,6 +346,11 @@ void VulkanCommandList::DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, u
 {
 	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
 	vkCmdDrawIndexedIndirect(commandBuffer, vkBuffer->GetHandle(), offset, drawCount, stride);
+	// Track buffer resource
+	if (buffer)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(buffer));
+	}
 }
 
 void VulkanCommandList::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
@@ -333,6 +362,11 @@ void VulkanCommandList::DispatchIndirect(IRHIBuffer *buffer, size_t offset)
 {
 	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
 	vkCmdDispatchIndirect(commandBuffer, vkBuffer->GetHandle(), offset);
+	// Track buffer resource
+	if (buffer)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(buffer));
+	}
 }
 
 void VulkanCommandList::CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer, std::span<const BufferCopy> regions)
@@ -351,6 +385,15 @@ void VulkanCommandList::CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer,
 	vkCmdCopyBuffer(commandBuffer, vkSrcBuffer->GetHandle(), vkDstBuffer->GetHandle(),
 	                static_cast<uint32_t>(regions.size()),
 	                reinterpret_cast<const VkBufferCopy *>(regions.data()));
+	// Track buffer resources
+	if (srcBuffer)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(srcBuffer));
+	}
+	if (dstBuffer)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(dstBuffer));
+	}
 }
 
 void VulkanCommandList::CopyTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureCopy> regions)
@@ -402,6 +445,15 @@ void VulkanCommandList::CopyTexture(IRHITexture *srcTexture, IRHITexture *dstTex
 	               vkSrcTexture->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 	               vkDstTexture->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	               static_cast<uint32_t>(vkRegions.size()), vkRegions.data());
+	// Track texture resources
+	if (srcTexture)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(srcTexture));
+	}
+	if (dstTexture)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(dstTexture));
+	}
 }
 
 void VulkanCommandList::BlitTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureBlit> regions, FilterMode filter)
@@ -455,6 +507,15 @@ void VulkanCommandList::BlitTexture(IRHITexture *srcTexture, IRHITexture *dstTex
 	               vkDstTexture->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	               static_cast<uint32_t>(vkRegions.size()), vkRegions.data(),
 	               FilterModeToVulkan(filter));
+	// Track texture resources
+	if (srcTexture)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(srcTexture));
+	}
+	if (dstTexture)
+	{
+		m_referencedResources.push_back(RefCntPtr<IRefCounted>(dstTexture));
+	}
 }
 
 void VulkanCommandList::Barrier(

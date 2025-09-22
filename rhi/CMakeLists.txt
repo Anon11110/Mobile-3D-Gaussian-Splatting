@@ -65,3 +65,11 @@ target_link_libraries(RHI PUBLIC glfw)
 if(MSVC)
     target_compile_options(RHI PUBLIC /utf-8)
 endif()
+
+# Option to build RHI tests
+option(RHI_BUILD_TESTS "Build RHI tests" OFF)
+
+# Add tests subdirectory if enabled
+if(RHI_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

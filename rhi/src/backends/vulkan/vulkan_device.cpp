@@ -11,7 +11,7 @@
 namespace rhi::vulkan
 {
 
-class VulkanDevice final : public IRHIDevice
+class VulkanDevice final : public RefCounter<IRHIDevice>
 {
   private:
 	VkInstance       instance;
@@ -45,10 +45,10 @@ class VulkanDevice final : public IRHIDevice
 	// Deferred deletion for async uploads
 	struct DeferredDeletion
 	{
-		VkBuffer                   stagingBuffer;
-		VmaAllocation              stagingAllocation;
-		VkCommandBuffer            commandBuffer;
-		std::shared_ptr<IRHIFence> fence;
+		VkBuffer        stagingBuffer;
+		VmaAllocation   stagingAllocation;
+		VkCommandBuffer commandBuffer;
+		FenceHandle     fence;
 	};
 	std::vector<DeferredDeletion> deferredDeletions;
 	std::mutex                    deferredDeletionsMutex;
@@ -140,14 +140,14 @@ class VulkanDevice final : public IRHIDevice
 	}
 
 	// IRHIDevice implementation
-	std::unique_ptr<IRHIBuffer> CreateBuffer(const BufferDesc &desc) override
+	BufferHandle CreateBuffer(const BufferDesc &desc) override
 	{
-		auto buffer = std::make_unique<VulkanBuffer>(allocator, desc);
+		VulkanBuffer *buffer = new VulkanBuffer(allocator, desc);
 
 		if (desc.initialData != nullptr && desc.resourceUsage == ResourceUsage::Static)
 		{
 			// Handle initial data upload for static buffers using staging
-			UploadToBuffer(buffer.get(), desc.initialData, desc.size);
+			UploadToBuffer(buffer, desc.initialData, desc.size);
 		}
 		else if (desc.initialData != nullptr && desc.resourceUsage != ResourceUsage::Static)
 		{
@@ -157,17 +157,17 @@ class VulkanDevice final : public IRHIDevice
 			buffer->Unmap();
 		}
 
-		return buffer;
+		return RefCntPtr<IRHIBuffer>::Create(buffer);
 	}
 
-	std::unique_ptr<IRHITexture> CreateTexture(const TextureDesc &desc) override
+	TextureHandle CreateTexture(const TextureDesc &desc) override
 	{
-		auto texture = std::make_unique<VulkanTexture>(device, allocator, desc);
+		VulkanTexture *texture = new VulkanTexture(device, allocator, desc);
 
 		if (desc.initialData != nullptr && desc.resourceUsage == ResourceUsage::Static)
 		{
 			// Handle initial data upload for static textures using staging
-			UploadToStaticTexture(texture.get(), desc);
+			UploadToStaticTexture(texture, desc);
 		}
 		else if (desc.initialData != nullptr && desc.resourceUsage != ResourceUsage::Static)
 		{
@@ -176,41 +176,47 @@ class VulkanDevice final : public IRHIDevice
 			throw std::runtime_error("Initial data upload for non-static textures not yet implemented");
 		}
 
-		return texture;
+		return RefCntPtr<IRHITexture>::Create(texture);
 	}
 
-	std::unique_ptr<IRHITextureView> CreateTextureView(const TextureViewDesc &desc) override
+	TextureViewHandle CreateTextureView(const TextureViewDesc &desc) override
 	{
-		return std::make_unique<VulkanTextureView>(device, desc);
+		VulkanTextureView *view = new VulkanTextureView(device, desc);
+		return RefCntPtr<IRHITextureView>::Create(view);
 	}
 
-	std::unique_ptr<IRHISampler> CreateSampler(const SamplerDesc &desc) override
+	SamplerHandle CreateSampler(const SamplerDesc &desc) override
 	{
-		return std::make_unique<VulkanSampler>(device, desc);
+		VulkanSampler *sampler = new VulkanSampler(device, desc);
+		return RefCntPtr<IRHISampler>::Create(sampler);
 	}
 
-	std::unique_ptr<IRHIShader> CreateShader(const ShaderDesc &desc) override
+	ShaderHandle CreateShader(const ShaderDesc &desc) override
 	{
-		return std::make_unique<VulkanShader>(device, desc);
+		VulkanShader *shader = new VulkanShader(device, desc);
+		return RefCntPtr<IRHIShader>::Create(shader);
 	}
 
-	std::unique_ptr<IRHIPipeline> CreateGraphicsPipeline(const GraphicsPipelineDesc &desc) override
+	PipelineHandle CreateGraphicsPipeline(const GraphicsPipelineDesc &desc) override
 	{
-		return std::make_unique<VulkanPipeline>(device, desc);
+		VulkanPipeline *pipeline = new VulkanPipeline(device, desc);
+		return RefCntPtr<IRHIPipeline>::Create(pipeline);
 	}
 
-	std::unique_ptr<IRHIPipeline> CreateComputePipeline(const ComputePipelineDesc &desc) override
+	PipelineHandle CreateComputePipeline(const ComputePipelineDesc &desc) override
 	{
-		return std::make_unique<VulkanPipeline>(device, desc);
+		VulkanPipeline *pipeline = new VulkanPipeline(device, desc);
+		return RefCntPtr<IRHIPipeline>::Create(pipeline);
 	}
 
-	std::unique_ptr<IRHICommandList> CreateCommandList(QueueType queueType = QueueType::GRAPHICS) override
+	CommandListHandle CreateCommandList(QueueType queueType = QueueType::GRAPHICS) override
 	{
-		VkCommandPool commandPool = GetCommandPool(queueType);
-		uint32_t      queueFamily = GetQueueFamily(queueType);
-		return std::make_unique<VulkanCommandList>(device, commandPool, queueType, queueFamily,
-		                                           graphicsQueueFamily, computeQueueFamily, transferQueueFamily,
-		                                           vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR);
+		VkCommandPool      commandPool = GetCommandPool(queueType);
+		uint32_t           queueFamily = GetQueueFamily(queueType);
+		VulkanCommandList *cmdList     = new VulkanCommandList(device, commandPool, queueType, queueFamily,
+		                                                       graphicsQueueFamily, computeQueueFamily, transferQueueFamily,
+		                                                       vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR);
+		return RefCntPtr<IRHICommandList>::Create(cmdList);
 	}
 
 	uint32_t GetQueueFamily(QueueType queueType) const
@@ -228,7 +234,7 @@ class VulkanDevice final : public IRHIDevice
 		}
 	}
 
-	std::unique_ptr<IRHISwapchain> CreateSwapchain(const SwapchainDesc &desc) override
+	SwapchainHandle CreateSwapchain(const SwapchainDesc &desc) override
 	{
 		// Create surface from window handle
 		VkSurfaceKHR surface;
@@ -236,26 +242,30 @@ class VulkanDevice final : public IRHIDevice
 		{
 			throw std::runtime_error("Failed to create window surface");
 		}
-		return std::make_unique<VulkanSwapchain>(instance, device, physicalDevice, allocator, surface, graphicsQueue, desc);
+		VulkanSwapchain *swapchain = new VulkanSwapchain(instance, device, physicalDevice, allocator, surface, graphicsQueue, desc);
+		return RefCntPtr<IRHISwapchain>::Create(swapchain);
 	}
 
-	std::unique_ptr<IRHISemaphore> CreateSemaphore() override
+	SemaphoreHandle CreateSemaphore() override
 	{
-		return std::make_unique<VulkanSemaphore>(device);
+		VulkanSemaphore *semaphore = new VulkanSemaphore(device);
+		return RefCntPtr<IRHISemaphore>::Create(semaphore);
 	}
 
-	std::unique_ptr<IRHIFence> CreateFence(bool signaled = false) override
+	FenceHandle CreateFence(bool signaled = false) override
 	{
-		return std::make_unique<VulkanFence>(device, signaled);
+		VulkanFence *fence = new VulkanFence(device, signaled);
+		return RefCntPtr<IRHIFence>::Create(fence);
 	}
 
-	std::unique_ptr<IRHIDescriptorSetLayout> CreateDescriptorSetLayout(const DescriptorSetLayoutDesc &desc) override
+	DescriptorSetLayoutHandle CreateDescriptorSetLayout(const DescriptorSetLayoutDesc &desc) override
 	{
-		return std::make_unique<VulkanDescriptorSetLayout>(device, desc);
+		VulkanDescriptorSetLayout *layout = new VulkanDescriptorSetLayout(device, desc);
+		return RefCntPtr<IRHIDescriptorSetLayout>::Create(layout);
 	}
 
-	std::unique_ptr<IRHIDescriptorSet> CreateDescriptorSet(IRHIDescriptorSetLayout *layout,
-	                                                       QueueType                queueType) override
+	DescriptorSetHandle CreateDescriptorSet(IRHIDescriptorSetLayout *layout,
+	                                        QueueType                queueType) override
 	{
 		auto            *vkLayout = static_cast<VulkanDescriptorSetLayout *>(layout);
 		VkDescriptorPool pool     = GetDescriptorPool(queueType);
@@ -274,7 +284,8 @@ class VulkanDevice final : public IRHIDevice
 			throw std::runtime_error("Failed to allocate descriptor set");
 		}
 
-		return std::make_unique<VulkanDescriptorSet>(device, vkLayout, pool, descriptorSet);
+		VulkanDescriptorSet *descriptorSetObj = new VulkanDescriptorSet(device, vkLayout, pool, descriptorSet);
+		return RefCntPtr<IRHIDescriptorSet>::Create(descriptorSetObj);
 	}
 
 	void UpdateBuffer(IRHIBuffer *buffer, const void *data, size_t size, size_t offset = 0) override
@@ -294,7 +305,7 @@ class VulkanDevice final : public IRHIDevice
 		vkBuffer->Unmap();
 	}
 
-	std::shared_ptr<IRHIFence> UploadBufferAsync(IRHIBuffer *dstBuffer, const void *data, size_t size, size_t offset = 0) override
+	FenceHandle UploadBufferAsync(IRHIBuffer *dstBuffer, const void *data, size_t size, size_t offset = 0) override
 	{
 		// Process any completed deferred deletions first
 		ProcessDeferredDeletions(false);
@@ -351,8 +362,9 @@ class VulkanDevice final : public IRHIDevice
 
 		vkEndCommandBuffer(copyCmd);
 
-		auto    fence       = std::make_shared<VulkanFence>(device, false);
-		VkFence fenceHandle = fence->GetHandle();
+		VulkanFence *fence         = new VulkanFence(device, false);
+		FenceHandle  fenceHandle   = RefCntPtr<IRHIFence>::Create(fence);
+		VkFence      vkFenceHandle = fence->GetHandle();
 
 		// Submit the command buffer, signaling the fence
 		VkSubmitInfo submitInfo{};
@@ -360,21 +372,26 @@ class VulkanDevice final : public IRHIDevice
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers    = &copyCmd;
 
-		if (vkQueueSubmit(transferQueue, 1, &submitInfo, fenceHandle) != VK_SUCCESS)
+		if (vkQueueSubmit(transferQueue, 1, &submitInfo, vkFenceHandle) != VK_SUCCESS)
 		{
 			vkFreeCommandBuffers(device, transferCommandPool, 1, &copyCmd);
 			vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
 			throw std::runtime_error("Failed to submit async buffer upload");
 		}
 
-		// Store a copy of the shared_ptr for the backend's tracking
+		// Store a copy of the handle for the backend's tracking
 		// The reference count is now at least 2 (one for the user, one for the backend)
 		{
 			std::lock_guard<std::mutex> lock(deferredDeletionsMutex);
-			deferredDeletions.push_back({stagingBuffer, stagingAllocation, copyCmd, fence});
+			deferredDeletions.push_back({stagingBuffer, stagingAllocation, copyCmd, fenceHandle});
 		}
 
-		return fence;
+		return fenceHandle;
+	}
+
+	FenceHandle UploadBufferAsync(const BufferHandle &dstBuffer, const void *data, size_t size, size_t offset = 0) override
+	{
+		return UploadBufferAsync(dstBuffer.Get(), data, size, offset);
 	}
 
 	void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
@@ -471,6 +488,22 @@ class VulkanDevice final : public IRHIDevice
 	void WaitIdle() override
 	{
 		vkDeviceWaitIdle(device);
+	}
+
+	FenceHandle CreateCompositeFence(const std::vector<FenceHandle> &fences) override
+	{
+		if (fences.empty())
+		{
+			return nullptr;
+		}
+		VulkanCompositeFence *compositeFence = new VulkanCompositeFence(fences);
+		return RefCntPtr<IRHIFence>::Create(compositeFence);
+	}
+
+	void RetireCompletedFrame() override
+	{
+		// Process any completed deferred deletions
+		ProcessDeferredDeletions(false);
 	}
 
   private:
@@ -1334,9 +1367,10 @@ namespace rhi
 {
 
 // Factory function
-std::unique_ptr<IRHIDevice> CreateRHIDevice()
+DeviceHandle CreateRHIDevice()
 {
-	return std::make_unique<vulkan::VulkanDevice>();
+	vulkan::VulkanDevice *device = new vulkan::VulkanDevice();
+	return RefCntPtr<IRHIDevice>::Create(device);
 }
 
 }        // namespace rhi

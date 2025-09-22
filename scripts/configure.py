@@ -13,13 +13,25 @@ from argparse import Namespace
 
 from utils.terminal import term
 from utils.configure.types import (
-    ConfigureError, ValidationError, BuildError, PlatformError, CMakeError,
-    Result, handle_error, BuildType
+    ConfigureError,
+    ValidationError,
+    BuildError,
+    PlatformError,
+    CMakeError,
+    Result,
+    handle_error,
+    BuildType,
 )
 from utils.configure.cmake_core import (
-    log_environment_info, run_cmake, is_project_configured, auto_configure,
-    discover_cmake_targets, build_targets, run_executable, clean_build_dir,
-    print_success_instructions
+    log_environment_info,
+    run_cmake,
+    is_project_configured,
+    auto_configure,
+    discover_cmake_targets,
+    build_targets,
+    run_executable,
+    clean_build_dir,
+    print_success_instructions,
 )
 from utils.configure.constants import BuildConstants
 from platforms import get_platform_config
@@ -102,7 +114,11 @@ class ConfigureCommand(Command):
                     PlatformError(f"Unsupported platform: {platform.system()}")
                 )
 
-            config.setup_cmake_args(self.args.build_type, self.args.validation)
+            # Enable RHI tests if --tests flag is used
+            enable_rhi_tests = getattr(self.args, "tests", False)
+            config.setup_cmake_args(
+                self.args.build_type, self.args.validation, enable_rhi_tests
+            )
 
             if not config.configure():
                 return Result.fail(PlatformError("Platform configuration failed"))
@@ -124,7 +140,9 @@ class ConfigureCommand(Command):
 
             return Result.ok(0)
         except Exception as e:
-            return Result.fail(ConfigureError(f"Build environment preparation failed: {e}"))
+            return Result.fail(
+                ConfigureError(f"Build environment preparation failed: {e}")
+            )
 
     def _execute_cmake_configuration(self, config) -> ExecutionResult:
         """Execute CMake configuration and display results."""
@@ -137,7 +155,9 @@ class ConfigureCommand(Command):
             print_success_instructions(self.args, self.source_dir, self.build_dir)
             return Result.ok(0)
         except Exception as e:
-            return Result.fail(CMakeError(f"CMake execution failed: {e}", details=str(e)))
+            return Result.fail(
+                CMakeError(f"CMake execution failed: {e}", details=str(e))
+            )
 
     def _display_configuration_info(self) -> None:
         """Display configuration information."""
@@ -157,7 +177,7 @@ class ConfigureCommand(Command):
                 f"Generator '{self.args.generator}' is not supported on {config.platform_name}. "
                 f"Supported generators: {supported}"
             )
-        
+
         # Remove existing generator arguments
         new_args = []
         skip_next = False
@@ -257,7 +277,9 @@ class BuildCommand(Command):
 
             return Result.ok(0)
         except Exception as e:
-            return Result.fail(BuildError(f"Build execution failed: {e}", details=str(e)))
+            return Result.fail(
+                BuildError(f"Build execution failed: {e}", details=str(e))
+            )
 
     def _list_targets(self) -> ExecutionResult:
         """List available build targets."""
@@ -273,26 +295,66 @@ class BuildCommand(Command):
     def _determine_targets(self) -> Result[TargetList]:
         """Determine which targets to build."""
         try:
+            available_targets = discover_cmake_targets(self.source_dir, self.build_dir)
+
             if self.args.tests:
-                return Result.ok(BuildConstants.DEFAULT_TEST_TARGETS)
+                # Filter test targets to only include those that exist
+                test_targets = []
+                for target in BuildConstants.DEFAULT_TEST_TARGETS:
+                    if target in available_targets:
+                        test_targets.append(target)
+                    else:
+                        term.warn(
+                            f"Test target '{target}' not found in current build configuration"
+                        )
+
+                # Also check for rhi-tests if it exists (when RHI_BUILD_TESTS=ON)
+                if "rhi-tests" in available_targets and "rhi-tests" not in test_targets:
+                    test_targets.append("rhi-tests")
+
+                if not test_targets:
+                    return Result.fail(
+                        ValidationError(
+                            "No test targets available. You may need to reconfigure with --tests flag."
+                        )
+                    )
+                return Result.ok(test_targets)
             elif self.args.targets:
                 # Check if 'all' is in the targets list
                 if "all" in self.args.targets:
                     if len(self.args.targets) > 1:
                         term.warn("When using 'all' target, other targets are ignored.")
-                    return Result.ok(discover_cmake_targets(self.source_dir, self.build_dir))
+                    return Result.ok(available_targets)
                 else:
+                    # Validate that requested targets exist
+                    invalid_targets = []
+                    for target in self.args.targets:
+                        if target not in available_targets:
+                            invalid_targets.append(target)
+
+                    if invalid_targets:
+                        target_list = ", ".join(available_targets[:10])
+                        if len(available_targets) > 10:
+                            target_list += "..."
+                        return Result.fail(
+                            ValidationError(
+                                f"Target(s) not found: {', '.join(invalid_targets)}. "
+                                f"Available targets: {target_list}"
+                            )
+                        )
+
                     return Result.ok(self.args.targets)
             else:
                 # Show available targets in error message
-                available_targets = discover_cmake_targets(self.source_dir, self.build_dir)
                 target_list = ", ".join(available_targets[:5])
                 if len(available_targets) > 5:
                     target_list += "..."
-                return Result.fail(ValidationError(
-                    f"No targets specified. Use '--target <name>', '--target all', or '--tests'. "
-                    f"Available targets: {target_list}"
-                ))
+                return Result.fail(
+                    ValidationError(
+                        f"No targets specified. Use '--target <name>', '--target all', or '--tests'. "
+                        f"Available targets: {target_list}"
+                    )
+                )
         except Exception as e:
             return Result.fail(BuildError(f"Failed to determine targets: {e}"))
 
@@ -354,8 +416,17 @@ Examples:
         action="store_true",
         help="Enable Vulkan validation layers (Debug builds)",
     )
+    parser.add_argument(
+        "--tests",
+        action="store_true",
+        help="Enable building of all test targets including RHI tests",
+    )
     parser.add_argument("--generator", help="Override CMake generator")
-    parser.add_argument("--build-dir", default=BuildConstants.DEFAULT_BUILD_DIR, help="Build directory path")
+    parser.add_argument(
+        "--build-dir",
+        default=BuildConstants.DEFAULT_BUILD_DIR,
+        help="Build directory path",
+    )
     parser.add_argument(
         "--debug-mode",
         action="store_true",
@@ -395,7 +466,9 @@ Examples:
         "--parallel", type=int, help="Number of parallel build jobs"
     )
     build_parser.add_argument(
-        "--build-dir", default=BuildConstants.DEFAULT_BUILD_DIR, help="Build directory path"
+        "--build-dir",
+        default=BuildConstants.DEFAULT_BUILD_DIR,
+        help="Build directory path",
     )
     build_parser.add_argument(
         "--verbose",
