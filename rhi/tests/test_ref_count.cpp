@@ -33,21 +33,30 @@ public:
         : TestObject(val), derivedValue(dval) {}
 };
 
-// Test default construction
+/**
+ * Test: Default-constructed RefCntPtr is null
+ * AC: ptr.Get() returns nullptr
+ */
 RHI_TEST(RefCntPtr_DefaultConstruction) {
     RefCntPtr<TestObject> ptr;
     RHI_ASSERT_NULL(ptr.Get());
     return true;
 }
 
-// Test nullptr construction
+/**
+ * Test: RefCntPtr constructed with nullptr
+ * AC: ptr.Get() returns nullptr
+ */
 RHI_TEST(RefCntPtr_NullptrConstruction) {
     RefCntPtr<TestObject> ptr(nullptr);
     RHI_ASSERT_NULL(ptr.Get());
     return true;
 }
 
-// Test raw pointer construction
+/**
+ * Test: Constructor with raw pointer calls AddRef
+ * AC: RefCount increases to 2, object destroyed when ptr out of scope
+ */
 RHI_TEST(RefCntPtr_RawPointerConstruction) {
     TestObject::s_instanceCount = 0;
     {
@@ -68,7 +77,10 @@ RHI_TEST(RefCntPtr_RawPointerConstruction) {
     return true;
 }
 
-// Test Create method (attach without AddRef)
+/**
+ * Test: Create() attaches without AddRef (takes ownership)
+ * AC: RefCount stays at 1, object properly destroyed
+ */
 RHI_TEST(RefCntPtr_CreateMethod) {
     TestObject::s_instanceCount = 0;
     {
@@ -83,7 +95,10 @@ RHI_TEST(RefCntPtr_CreateMethod) {
     return true;
 }
 
-// Test copy construction
+/**
+ * Test: Copy constructor increases refcount
+ * AC: RefCount == 2, both pointers valid and equal
+ */
 RHI_TEST(RefCntPtr_CopyConstruction) {
     TestObject::s_instanceCount = 0;
     {
@@ -100,7 +115,10 @@ RHI_TEST(RefCntPtr_CopyConstruction) {
     return true;
 }
 
-// Test move construction
+/**
+ * Test: Move constructor transfers ownership
+ * AC: Source ptr becomes null, refcount unchanged, target owns object
+ */
 RHI_TEST(RefCntPtr_MoveConstruction) {
     TestObject::s_instanceCount = 0;
     {
@@ -118,7 +136,10 @@ RHI_TEST(RefCntPtr_MoveConstruction) {
     return true;
 }
 
-// Test copy assignment
+/**
+ * Test: Copy assignment manages refcounts correctly
+ * AC: Old object released, new object refcount increased
+ */
 RHI_TEST(RefCntPtr_CopyAssignment) {
     TestObject::s_instanceCount = 0;
     {
@@ -141,7 +162,10 @@ RHI_TEST(RefCntPtr_CopyAssignment) {
     return true;
 }
 
-// Test move assignment
+/**
+ * Test: Move assignment transfers ownership
+ * AC: Source ptr null, old object released, target owns object
+ */
 RHI_TEST(RefCntPtr_MoveAssignment) {
     TestObject::s_instanceCount = 0;
     {
@@ -162,7 +186,10 @@ RHI_TEST(RefCntPtr_MoveAssignment) {
     return true;
 }
 
-// Test self-assignment
+/**
+ * Test: Self-assignment is safe
+ * AC: No crash, refcount unchanged, object still valid
+ */
 RHI_TEST(RefCntPtr_SelfAssignment) {
     TestObject::s_instanceCount = 0;
     {
@@ -178,7 +205,10 @@ RHI_TEST(RefCntPtr_SelfAssignment) {
     return true;
 }
 
-// Test Reset method
+/**
+ * Test: Reset() releases reference and nullifies pointer
+ * AC: ptr becomes null, object destroyed when refcount hits 0
+ */
 RHI_TEST(RefCntPtr_Reset) {
     TestObject::s_instanceCount = 0;
     {
@@ -194,7 +224,10 @@ RHI_TEST(RefCntPtr_Reset) {
     return true;
 }
 
-// Test Detach method
+/**
+ * Test: Detach() returns raw pointer without Release
+ * AC: ptr becomes null, raw pointer valid with unchanged refcount
+ */
 RHI_TEST(RefCntPtr_Detach) {
     TestObject::s_instanceCount = 0;
     {
@@ -215,7 +248,10 @@ RHI_TEST(RefCntPtr_Detach) {
     return true;
 }
 
-// Test Attach method
+/**
+ * Test: Attach() takes ownership without AddRef
+ * AC: Old object released, new object attached with unchanged refcount
+ */
 RHI_TEST(RefCntPtr_Attach) {
     TestObject::s_instanceCount = 0;
     {
@@ -235,7 +271,10 @@ RHI_TEST(RefCntPtr_Attach) {
     return true;
 }
 
-// Test derived to base conversion
+/**
+ * Test: Derived-to-base pointer conversions
+ * AC: Base ptr valid, refcount managed correctly through conversions
+ */
 RHI_TEST(RefCntPtr_DerivedToBase) {
     TestObject::s_instanceCount = 0;
     {
@@ -256,7 +295,10 @@ RHI_TEST(RefCntPtr_DerivedToBase) {
     return true;
 }
 
-// Test operator-> and operator*
+/**
+ * Test: Arrow and implicit conversion operators
+ * AC: operator-> accesses members, implicit T* conversion works
+ */
 RHI_TEST(RefCntPtr_Operators) {
     TestObject::s_instanceCount = 0;
     {
@@ -276,7 +318,10 @@ RHI_TEST(RefCntPtr_Operators) {
     return true;
 }
 
-// Test nullptr assignment
+/**
+ * Test: Assignment from nullptr releases object
+ * AC: ptr becomes null, object destroyed
+ */
 RHI_TEST(RefCntPtr_NullptrAssignment) {
     TestObject::s_instanceCount = 0;
     {
@@ -291,7 +336,10 @@ RHI_TEST(RefCntPtr_NullptrAssignment) {
     return true;
 }
 
-// Test thread safety
+/**
+ * Test: Concurrent AddRef/Release operations are thread-safe
+ * AC: No race conditions with 10 threads × 1000 operations, final refcount == 1
+ */
 RHI_TEST(RefCntPtr_ThreadSafety) {
     TestObject::s_instanceCount = 0;
     {
@@ -325,7 +373,10 @@ RHI_TEST(RefCntPtr_ThreadSafety) {
     return true;
 }
 
-// Test Swap method
+/**
+ * Test: Swap() exchanges pointers between RefCntPtrs
+ * AC: Pointers exchanged, refcounts unchanged
+ */
 RHI_TEST(RefCntPtr_Swap) {
     TestObject::s_instanceCount = 0;
     {
@@ -346,7 +397,10 @@ RHI_TEST(RefCntPtr_Swap) {
     return true;
 }
 
-// Test GetAddressOf methods
+/**
+ * Test: GetAddressOf() and ReleaseAndGetAddressOf() methods
+ * AC: Returns correct pointer addresses, ReleaseAndGetAddressOf nullifies ptr
+ */
 RHI_TEST(RefCntPtr_GetAddressOf) {
     TestObject::s_instanceCount = 0;
     {
@@ -373,7 +427,10 @@ RHI_TEST(RefCntPtr_GetAddressOf) {
     return true;
 }
 
-// Test complex reference counting scenario
+/**
+ * Test: Complex multi-handle scenario with nested scopes
+ * AC: Refcount correctly managed through multiple operations, all objects destroyed
+ */
 RHI_TEST(RefCntPtr_ComplexScenario) {
     TestObject::s_instanceCount = 0;
     {

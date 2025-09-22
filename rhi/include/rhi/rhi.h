@@ -1,39 +1,78 @@
 #pragma once
+#include "common/ref_count.h"
 #include "rhi_types.h"
 
 namespace rhi
 {
 
+// Forward declarations of interfaces
+class IRHIDevice;
+class IRHIBuffer;
+class IRHITexture;
+class IRHITextureView;
+class IRHISampler;
+class IRHIShader;
+class IRHIPipeline;
+class IRHICommandList;
+class IRHISwapchain;
+class IRHISemaphore;
+class IRHIFence;
+class IRHIDescriptorSetLayout;
+class IRHIDescriptorSet;
+
+// Handle typedefs (forward declarations)
+typedef RefCntPtr<IRHIDevice>              DeviceHandle;
+typedef RefCntPtr<IRHIBuffer>              BufferHandle;
+typedef RefCntPtr<IRHITexture>             TextureHandle;
+typedef RefCntPtr<IRHITextureView>         TextureViewHandle;
+typedef RefCntPtr<IRHISampler>             SamplerHandle;
+typedef RefCntPtr<IRHIShader>              ShaderHandle;
+typedef RefCntPtr<IRHIPipeline>            PipelineHandle;
+typedef RefCntPtr<IRHICommandList>         CommandListHandle;
+typedef RefCntPtr<IRHISwapchain>           SwapchainHandle;
+typedef RefCntPtr<IRHISemaphore>           SemaphoreHandle;
+typedef RefCntPtr<IRHIFence>               FenceHandle;
+typedef RefCntPtr<IRHIDescriptorSetLayout> DescriptorSetLayoutHandle;
+typedef RefCntPtr<IRHIDescriptorSet>       DescriptorSetHandle;
+
 // Main device interface
-class IRHIDevice
+class IRHIDevice : public IRefCounted
 {
   public:
 	virtual ~IRHIDevice() = default;
 
 	// Resource creation
-	virtual std::unique_ptr<IRHIBuffer>              CreateBuffer(const BufferDesc &desc)                           = 0;
-	virtual std::unique_ptr<IRHITexture>             CreateTexture(const TextureDesc &desc)                         = 0;
-	virtual std::unique_ptr<IRHITextureView>         CreateTextureView(const TextureViewDesc &desc)                 = 0;
-	virtual std::unique_ptr<IRHISampler>             CreateSampler(const SamplerDesc &desc)                         = 0;
-	virtual std::unique_ptr<IRHIShader>              CreateShader(const ShaderDesc &desc)                           = 0;
-	virtual std::unique_ptr<IRHIPipeline>            CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)       = 0;
-	virtual std::unique_ptr<IRHIPipeline>            CreateComputePipeline(const ComputePipelineDesc &desc)         = 0;
-	virtual std::unique_ptr<IRHICommandList>         CreateCommandList(QueueType queueType = QueueType::GRAPHICS)   = 0;
-	virtual std::unique_ptr<IRHISwapchain>           CreateSwapchain(const SwapchainDesc &desc)                     = 0;
-	virtual std::unique_ptr<IRHISemaphore>           CreateSemaphore()                                              = 0;
-	virtual std::unique_ptr<IRHIFence>               CreateFence(bool signaled = false)                             = 0;
-	virtual std::unique_ptr<IRHIDescriptorSetLayout> CreateDescriptorSetLayout(const DescriptorSetLayoutDesc &desc) = 0;
-	virtual std::unique_ptr<IRHIDescriptorSet>       CreateDescriptorSet(IRHIDescriptorSetLayout *layout,
-	                                                                     QueueType                queueType = QueueType::GRAPHICS) = 0;
+	virtual BufferHandle              CreateBuffer(const BufferDesc &desc)                           = 0;
+	virtual TextureHandle             CreateTexture(const TextureDesc &desc)                         = 0;
+	virtual TextureViewHandle         CreateTextureView(const TextureViewDesc &desc)                 = 0;
+	virtual SamplerHandle             CreateSampler(const SamplerDesc &desc)                         = 0;
+	virtual ShaderHandle              CreateShader(const ShaderDesc &desc)                           = 0;
+	virtual PipelineHandle            CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)       = 0;
+	virtual PipelineHandle            CreateComputePipeline(const ComputePipelineDesc &desc)         = 0;
+	virtual CommandListHandle         CreateCommandList(QueueType queueType = QueueType::GRAPHICS)   = 0;
+	virtual SwapchainHandle           CreateSwapchain(const SwapchainDesc &desc)                     = 0;
+	virtual SemaphoreHandle           CreateSemaphore()                                              = 0;
+	virtual FenceHandle               CreateFence(bool signaled = false)                             = 0;
+	virtual FenceHandle               CreateCompositeFence(const std::vector<FenceHandle> &fences)   = 0;
+	virtual DescriptorSetLayoutHandle CreateDescriptorSetLayout(const DescriptorSetLayoutDesc &desc) = 0;
+	virtual DescriptorSetHandle       CreateDescriptorSet(IRHIDescriptorSetLayout *layout,
+	                                                      QueueType                queueType = QueueType::GRAPHICS) = 0;
 
 	// Buffer operations
 	virtual void UpdateBuffer(IRHIBuffer *buffer, const void *RHI_RESTRICT data, size_t size, size_t offset = 0) = 0;
 
-	virtual std::shared_ptr<IRHIFence> UploadBufferAsync(
+	// Async buffer upload
+	virtual FenceHandle UploadBufferAsync(
 	    IRHIBuffer *dstBuffer,
 	    const void *data,
 	    size_t      size,
 	    size_t      offset = 0) = 0;
+
+	virtual FenceHandle UploadBufferAsync(
+	    const BufferHandle &dstBuffer,
+	    const void         *data,
+	    size_t              size,
+	    size_t              offset = 0) = 0;
 
 	// Queue operations
 	virtual void SubmitCommandLists(std::span<IRHICommandList *const> cmdLists,
@@ -48,10 +87,15 @@ class IRHIDevice
 
 	virtual void WaitQueueIdle(QueueType queueType) = 0;
 	virtual void WaitIdle()                         = 0;
+
+	// Frame retirement for GPU resource lifetime management
+	virtual void RetireCompletedFrame() = 0;
 };
 
+typedef RefCntPtr<IRHIDevice> DeviceHandle;
+
 // Buffer interface
-class IRHIBuffer
+class IRHIBuffer : public IRefCounted
 {
   public:
 	virtual ~IRHIBuffer()                        = default;
@@ -60,8 +104,10 @@ class IRHIBuffer
 	[[nodiscard]] virtual size_t GetSize() const = 0;
 };
 
+typedef RefCntPtr<IRHIBuffer> BufferHandle;
+
 // Texture interface
-class IRHITexture
+class IRHITexture : public IRefCounted
 {
   public:
 	virtual ~IRHITexture()                                     = default;
@@ -73,8 +119,10 @@ class IRHITexture
 	[[nodiscard]] virtual TextureFormat GetFormat() const      = 0;
 };
 
+typedef RefCntPtr<IRHITexture> TextureHandle;
+
 // Texture view interface
-class IRHITextureView
+class IRHITextureView : public IRefCounted
 {
   public:
 	virtual ~IRHITextureView()                       = default;
@@ -88,23 +136,29 @@ class IRHITextureView
 	virtual uint32_t      GetArrayLayerCount() const = 0;
 };
 
+typedef RefCntPtr<IRHITextureView> TextureViewHandle;
+
 // Shader interface
-class IRHIShader
+class IRHIShader : public IRefCounted
 {
   public:
 	virtual ~IRHIShader()                = default;
 	virtual ShaderStage GetStage() const = 0;
 };
 
+typedef RefCntPtr<IRHIShader> ShaderHandle;
+
 // Pipeline interface
-class IRHIPipeline
+class IRHIPipeline : public IRefCounted
 {
   public:
 	virtual ~IRHIPipeline() = default;
 };
 
+typedef RefCntPtr<IRHIPipeline> PipelineHandle;
+
 // Command list interface
-class IRHICommandList
+class IRHICommandList : public IRefCounted
 {
   public:
 	virtual ~IRHICommandList() = default;
@@ -155,8 +209,10 @@ class IRHICommandList
 	    std::span<const TextureTransition> texture_transitions) = 0;
 };
 
+typedef RefCntPtr<IRHICommandList> CommandListHandle;
+
 // Swapchain interface
-class IRHISwapchain
+class IRHISwapchain : public IRefCounted
 {
   public:
 	virtual ~IRHISwapchain() = default;
@@ -169,14 +225,18 @@ class IRHISwapchain
 	virtual void             Resize(uint32_t width, uint32_t height)                                          = 0;
 };
 
+typedef RefCntPtr<IRHISwapchain> SwapchainHandle;
+
 // Synchronization primitives
-class IRHISemaphore
+class IRHISemaphore : public IRefCounted
 {
   public:
 	virtual ~IRHISemaphore() = default;
 };
 
-class IRHIFence
+typedef RefCntPtr<IRHISemaphore> SemaphoreHandle;
+
+class IRHIFence : public IRefCounted
 {
   public:
 	virtual ~IRHIFence()                             = default;
@@ -185,69 +245,28 @@ class IRHIFence
 	virtual bool IsSignaled() const                  = 0;
 };
 
-// Composite fence that waits for multiple fences
-class IRHICompositeFence : public IRHIFence
-{
-  public:
-	explicit IRHICompositeFence(std::vector<std::shared_ptr<IRHIFence>> fences) :
-	    fences(std::move(fences))
-	{
-	}
-
-	void Wait(uint64_t timeout = UINT64_MAX) override
-	{
-		for (const auto &fence : fences)
-		{
-			if (fence)
-			{
-				fence->Wait(timeout);
-			}
-		}
-	}
-
-	void Reset() override
-	{
-		for (const auto &fence : fences)
-		{
-			if (fence)
-			{
-				fence->Reset();
-			}
-		}
-	}
-
-	bool IsSignaled() const override
-	{
-		for (const auto &fence : fences)
-		{
-			if (fence && !fence->IsSignaled())
-			{
-				return false;
-			}
-		}
-		return true;
-	}
-
-  private:
-	std::vector<std::shared_ptr<IRHIFence>> fences;
-};
+typedef RefCntPtr<IRHIFence> FenceHandle;
 
 // Descriptor set layout interface
-class IRHIDescriptorSetLayout
+class IRHIDescriptorSetLayout : public IRefCounted
 {
   public:
 	virtual ~IRHIDescriptorSetLayout() = default;
 };
 
+typedef RefCntPtr<IRHIDescriptorSetLayout> DescriptorSetLayoutHandle;
+
 // Sampler interface
-class IRHISampler
+class IRHISampler : public IRefCounted
 {
   public:
 	virtual ~IRHISampler() = default;
 };
 
+typedef RefCntPtr<IRHISampler> SamplerHandle;
+
 // Descriptor set interface
-class IRHIDescriptorSet
+class IRHIDescriptorSet : public IRefCounted
 {
   public:
 	virtual ~IRHIDescriptorSet()                                                     = default;
@@ -255,7 +274,9 @@ class IRHIDescriptorSet
 	virtual void BindTexture(uint32_t binding, const TextureBinding &textureBinding) = 0;
 };
 
+typedef RefCntPtr<IRHIDescriptorSet> DescriptorSetHandle;
+
 // Device creation function
-std::unique_ptr<IRHIDevice> CreateRHIDevice();
+DeviceHandle CreateRHIDevice();
 
 }        // namespace rhi

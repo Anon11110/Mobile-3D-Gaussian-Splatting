@@ -14,7 +14,7 @@ struct Vertex
 
 TEST(async_mesh_upload)
 {
-	auto device = rhi::CreateRHIDevice();
+	rhi::DeviceHandle device = rhi::CreateRHIDevice();
 
 	std::vector<Vertex> vertices(100000);
 	for (size_t i = 0; i < vertices.size(); ++i)
@@ -29,11 +29,11 @@ TEST(async_mesh_upload)
 	    .usage         = rhi::BufferUsage::VERTEX | rhi::BufferUsage::TRANSFER_DST,
 	    .resourceUsage = rhi::ResourceUsage::Static,
 	    .hints         = {.prefer_device_local = true}};
-	auto vertexBuffer = device->CreateBuffer(vbDesc);
+	rhi::BufferHandle vertexBuffer = device->CreateBuffer(vbDesc);
 
-	auto start       = std::chrono::high_resolution_clock::now();
-	auto uploadFence = device->UploadBufferAsync(
-	    vertexBuffer.get(),
+	auto             start       = std::chrono::high_resolution_clock::now();
+	rhi::FenceHandle uploadFence = device->UploadBufferAsync(
+	    vertexBuffer,
 	    vertices.data(),
 	    vbDesc.size);
 	auto submitTime = std::chrono::high_resolution_clock::now();
@@ -66,7 +66,7 @@ TEST(async_mesh_upload)
 
 TEST(streaming_data_upload)
 {
-	auto device = rhi::CreateRHIDevice();
+	rhi::DeviceHandle device = rhi::CreateRHIDevice();
 
 	const size_t chunkSize = 1024 * 1024;
 	const size_t numChunks = 10;
@@ -75,17 +75,17 @@ TEST(streaming_data_upload)
 	    .size          = chunkSize * numChunks,
 	    .usage         = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST,
 	    .resourceUsage = rhi::ResourceUsage::Static};
-	auto storageBuffer = device->CreateBuffer(bufferDesc);
+	rhi::BufferHandle storageBuffer = device->CreateBuffer(bufferDesc);
 
-	std::vector<std::shared_ptr<rhi::IRHIFence>> uploadFences;
+	std::vector<rhi::RefCntPtr<rhi::IRHIFence>> uploadFences;
 
 	// Stream chunks asynchronously
 	for (size_t i = 0; i < numChunks; ++i)
 	{
 		std::vector<uint8_t> chunkData(chunkSize, static_cast<uint8_t>(i));
 
-		auto fence = device->UploadBufferAsync(
-		    storageBuffer.get(),
+		rhi::FenceHandle fence = device->UploadBufferAsync(
+		    storageBuffer,
 		    chunkData.data(),
 		    chunkSize,
 		    i * chunkSize);
@@ -128,7 +128,7 @@ TEST(streaming_data_upload)
 
 TEST(update_buffer_validation)
 {
-	auto device = rhi::CreateRHIDevice();
+	rhi::DeviceHandle device = rhi::CreateRHIDevice();
 
 	// Test 1: UpdateBuffer should work on mappable buffers
 	rhi::BufferDesc uniformDesc = {
@@ -136,13 +136,13 @@ TEST(update_buffer_validation)
 	    .usage         = rhi::BufferUsage::UNIFORM,
 	    .resourceUsage = rhi::ResourceUsage::DynamicUpload,
 	    .hints         = {.persistently_mapped = true}};
-	auto uniformBuffer = device->CreateBuffer(uniformDesc);
+	rhi::BufferHandle uniformBuffer = device->CreateBuffer(uniformDesc);
 
 	float mvpMatrix[16]   = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 	bool  updateSucceeded = false;
 	try
 	{
-		device->UpdateBuffer(uniformBuffer.get(), mvpMatrix, sizeof(mvpMatrix));
+		device->UpdateBuffer(uniformBuffer.Get(), mvpMatrix, sizeof(mvpMatrix));
 		updateSucceeded = true;
 	}
 	catch (...)
@@ -163,12 +163,12 @@ TEST(update_buffer_validation)
 	       .size          = largeVertexData.size() * sizeof(float),
 	       .usage         = rhi::BufferUsage::VERTEX | rhi::BufferUsage::TRANSFER_DST,
 	       .resourceUsage = rhi::ResourceUsage::Static};
-	auto staticBuffer = device->CreateBuffer(staticDesc);
+	rhi::BufferHandle staticBuffer = device->CreateBuffer(staticDesc);
 
 	bool exceptionThrown = false;
 	try
 	{
-		device->UpdateBuffer(staticBuffer.get(), largeVertexData.data(), 256);
+		device->UpdateBuffer(staticBuffer.Get(), largeVertexData.data(), 256);
 	}
 	catch (const std::logic_error &e)
 	{
@@ -183,8 +183,8 @@ TEST(update_buffer_validation)
 	}
 
 	// Use UploadBufferAsync for device-local buffer (should succeed)
-	auto fence = device->UploadBufferAsync(
-	    staticBuffer.get(),
+	rhi::FenceHandle fence = device->UploadBufferAsync(
+	    staticBuffer,
 	    largeVertexData.data(),
 	    staticDesc.size);
 	fence->Wait(UINT64_MAX);
@@ -201,21 +201,21 @@ TEST(update_buffer_validation)
 
 TEST(shared_fence_ownership)
 {
-	auto device = rhi::CreateRHIDevice();
+	rhi::DeviceHandle device = rhi::CreateRHIDevice();
 
 	std::vector<uint8_t> data(1024 * 1024, 0x42);
 	rhi::BufferDesc      bufferDesc = {
 	         .size          = data.size(),
 	         .usage         = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST,
 	         .resourceUsage = rhi::ResourceUsage::Static};
-	auto buffer = device->CreateBuffer(bufferDesc);
+	rhi::BufferHandle buffer = device->CreateBuffer(bufferDesc);
 
 	// Test that fence remains valid after copies
-	std::shared_ptr<rhi::IRHIFence> fence1, fence2;
+	rhi::RefCntPtr<rhi::IRHIFence> fence1, fence2;
 
 	{
 		auto fence = device->UploadBufferAsync(
-		    buffer.get(),
+		    buffer,
 		    data.data(),
 		    data.size());
 
