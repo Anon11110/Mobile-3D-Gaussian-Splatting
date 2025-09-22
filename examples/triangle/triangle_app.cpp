@@ -58,10 +58,10 @@ bool TriangleApp::OnInit(app::DeviceManager *deviceManager)
 	m_descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 
 	// Create descriptor set and bind uniform buffer
-	m_descriptorSet = device->CreateDescriptorSet(m_descriptorSetLayout.get(), rhi::QueueType::GRAPHICS);
+	m_descriptorSet = device->CreateDescriptorSet(m_descriptorSetLayout.Get(), rhi::QueueType::GRAPHICS);
 
 	rhi::BufferBinding bufferBinding{};
-	bufferBinding.buffer = m_uniformBuffer.get();
+	bufferBinding.buffer = m_uniformBuffer.Get();
 	bufferBinding.offset = 0;
 	bufferBinding.range  = 0;        // Whole buffer
 	bufferBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
@@ -69,8 +69,8 @@ bool TriangleApp::OnInit(app::DeviceManager *deviceManager)
 
 	// Create pipeline
 	rhi::GraphicsPipelineDesc pipelineDesc{};
-	pipelineDesc.vertexShader   = m_vertexShader.get();
-	pipelineDesc.fragmentShader = m_fragmentShader.get();
+	pipelineDesc.vertexShader   = m_vertexShader.Get();
+	pipelineDesc.fragmentShader = m_fragmentShader.Get();
 
 	// Vertex layout
 	pipelineDesc.vertexLayout.attributes = {
@@ -93,7 +93,7 @@ bool TriangleApp::OnInit(app::DeviceManager *deviceManager)
 	pipelineDesc.targetSignature.depthFormat  = rhi::TextureFormat::UNDEFINED;
 	pipelineDesc.targetSignature.sampleCount  = rhi::SampleCount::COUNT_1;
 
-	pipelineDesc.descriptorSetLayouts = {m_descriptorSetLayout.get()};
+	pipelineDesc.descriptorSetLayouts = {m_descriptorSetLayout.Get()};
 
 	rhi::PushConstantRange pushConstantRange{};
 	pushConstantRange.stageFlags    = rhi::ShaderStageFlags::VERTEX;
@@ -186,7 +186,7 @@ void TriangleApp::OnRender()
 
 	// Acquire next image
 	uint32_t             imageIndex;
-	rhi::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, m_imageAvailableSemaphores[0].get());
+	rhi::SwapchainStatus acquireStatus = swapchain->AcquireNextImage(imageIndex, m_imageAvailableSemaphores[0].Get());
 
 	if (acquireStatus == rhi::SwapchainStatus::OUT_OF_DATE)
 	{
@@ -261,10 +261,10 @@ void TriangleApp::OnRender()
 	cmdList->SetViewport(0, 0, float(backBufferWidth), float(backBufferHeight));
 	cmdList->SetScissor(0, 0, backBufferWidth, backBufferHeight);
 
-	cmdList->SetPipeline(m_pipeline.get());
-	cmdList->SetVertexBuffer(0, m_vertexBuffer.get());
+	cmdList->SetPipeline(m_pipeline.Get());
+	cmdList->SetVertexBuffer(0, m_vertexBuffer.Get());
 
-	cmdList->BindDescriptorSet(0, m_descriptorSet.get());
+	cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
 
 	// Calculate projected NDC centroid of the triangle vertices
 	math::vec3 vertices_obj[3] = {
@@ -322,13 +322,13 @@ void TriangleApp::OnRender()
 	cmdList->End();
 
 	// Submit
-	auto cmdListSpan = std::array{cmdList.get()};
+	auto cmdListSpan = std::array{cmdList.Get()};
 	device->SubmitCommandLists(cmdListSpan, rhi::QueueType::GRAPHICS,
-	                           m_imageAvailableSemaphores[0].get(), m_renderFinishedSemaphores[imageIndex].get(),
-	                           m_inFlightFence.get());
+	                           m_imageAvailableSemaphores[0].Get(), m_renderFinishedSemaphores[imageIndex].Get(),
+	                           m_inFlightFence.Get());
 
 	// Present
-	rhi::SwapchainStatus presentStatus = swapchain->Present(imageIndex, m_renderFinishedSemaphores[imageIndex].get());
+	rhi::SwapchainStatus presentStatus = swapchain->Present(imageIndex, m_renderFinishedSemaphores[imageIndex].Get());
 
 	if (presentStatus == rhi::SwapchainStatus::OUT_OF_DATE || presentStatus == rhi::SwapchainStatus::SUBOPTIMAL)
 	{
@@ -372,17 +372,17 @@ void TriangleApp::OnShutdown()
 
 	// Clear resources (unique_ptrs will auto-delete)
 	m_commandLists.clear();
-	m_inFlightFence.reset();
+	m_inFlightFence = nullptr;
 	m_renderFinishedSemaphores.clear();
 	m_imageAvailableSemaphores.clear();
-	m_pipeline.reset();
-	m_descriptorSet.reset();
-	m_descriptorSetLayout.reset();
-	m_fragmentShader.reset();
-	m_vertexShader.reset();
+	m_pipeline            = nullptr;
+	m_descriptorSet       = nullptr;
+	m_descriptorSetLayout = nullptr;
+	m_fragmentShader      = nullptr;
+	m_vertexShader        = nullptr;
 	m_shaderFactory.reset();
-	m_uniformBuffer.reset();
-	m_vertexBuffer.reset();
+	m_uniformBuffer = nullptr;
+	m_vertexBuffer  = nullptr;
 }
 
 void TriangleApp::OnKey(int key, int action, int mods)

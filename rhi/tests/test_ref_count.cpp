@@ -217,7 +217,7 @@ RHI_TEST(RefCntPtr_Reset) {
         RHI_ASSERT_EQ(1u, raw->GetRefCount());
         RHI_ASSERT_EQ(1, TestObject::s_instanceCount);
 
-        ptr.Reset();
+        ptr.Clear();
         RHI_ASSERT_NULL(ptr.Get());
         RHI_ASSERT_EQ(0, TestObject::s_instanceCount);  // Object should be destroyed
     }

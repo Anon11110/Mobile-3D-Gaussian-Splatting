@@ -46,6 +46,7 @@ class PlatformConfig(ABC):
         self,
         build_type: Union[BuildType, str] = BuildType.RELEASE,
         enable_validation: bool = False,
+        enable_rhi_tests: bool = False,
     ):
         """Setup basic CMake arguments."""
         build_type_str = (
@@ -61,6 +62,9 @@ class PlatformConfig(ABC):
 
         if enable_validation:
             self.cmake_args.append("-DENABLE_VULKAN_VALIDATION=ON")
+
+        if enable_rhi_tests:
+            self.cmake_args.append("-DRHI_BUILD_TESTS=ON")
 
     def configure(self):
         """Platform-specific configuration. Override in subclasses."""

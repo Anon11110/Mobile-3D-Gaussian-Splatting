@@ -234,13 +234,21 @@ python3 scripts/configure.py [OPTIONS]
 python3 scripts/configure.py build [OPTIONS]
 ```
 
-- `--target TARGET` - Build specific target (can be repeated). Use `all` to build all targets
-- `--tests` - Build test targets only (unit-tests, perf-tests)
+- `--target TARGET` - Build specific target (can be repeated). Use `all` to build all executable targets and RHI
+- `--tests` - Build test targets (unit-tests, perf-tests, and rhi-tests if available)
 - `--list-targets` - List all available build targets
 - `--run` - Run executable after building (single target only)
 - `--clean` - Clean before building
 - `--parallel N` - Number of parallel build jobs
 - `--verbose` - Show detailed build output (all compiler/linker messages)
+
+### Target Validation
+
+The build system automatically validates that requested targets exist before attempting to build them:
+- Invalid targets will show an error with available targets listed
+- `--target all` filters to only build executable targets and RHI
+- Libraries (core, app, engine) and shader compilation targets are excluded from `--target all`
+- The `rhi-tests` target is only available when project is configured with `--tests` flag
 
 ### Examples
 
@@ -259,7 +267,8 @@ python3 scripts/configure.py build --target splat-loader --run
 python3 scripts/configure.py --clean --build-type Debug --validation
 python3 scripts/configure.py build --target triangle --run
 
-# Build all targets
+# Build all executable targets and RHI library
+# Note: This builds executables from examples/ plus RHI, not static libraries or shader targets
 python3 scripts/configure.py build --target all
 
 # Build and run tests with detailed output

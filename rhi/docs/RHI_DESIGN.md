@@ -12,7 +12,7 @@ The RHI provides a modern, efficient abstraction layer over graphics APIs. The i
 2. **Modern GPU Features**: Built around modern GPU paradigms like command queues, parallel command recording, and explicit synchronization, rather than legacy state-machine concepts
 3. **Zero-Cost Abstractions**: Minimal overhead for Vulkan backend while providing safety and convenience
 4. **Explicit Control**: Expose direct control over the GPU. All synchronization, memory transitions, and state management are performed explicitly by the user
-5. **Resource-Oriented**: All GPU entities (buffers, textures, pipelines) are treated as distinct objects with clear ownership and lifetimes (managed via RAII)
+5. **Resource-Oriented**: All GPU entities (buffers, textures, pipelines) are treated as distinct objects with clear ownership and lifetimes, managed via a custom reference-counted handle system (`RefCntPtr`).
 
 ### Layer Structure
 
@@ -41,9 +41,9 @@ The central factory and management interface for all RHI resources.
 - Device-wide operations
 
 **Design Decisions:**
-- Returns `std::unique_ptr` for clear ownership semantics
-- Separate creation methods for each resource type
-- Explicit queue type specification for command lists
+- Returns `RefCntPtr` handles (e.g., `BufferHandle`) for GPU-safe, reference-counted lifetime management.
+- Separate creation methods for each resource type.
+- Explicit queue type specification for command lists.
 
 ### 2. Resource Management
 
@@ -51,6 +51,7 @@ The central factory and management interface for all RHI resources.
 
 **Features:**
 - Flexible usage flags (Vertex, Index, Uniform, Storage)
+- `IndexType` specification for index buffers (UINT16 or UINT32)
 - Resource usage hints for optimal memory placement
 - Map/Unmap interface for CPU access
 - Size querying
@@ -103,15 +104,19 @@ struct AllocationHints {
 **Monolithic Design:**
 ```cpp
 struct GraphicsPipelineDesc {
-    IRHIShader* vertexShader;
-    IRHIShader* fragmentShader;
-    VertexLayout vertexLayout;
-    RasterizationState rasterizationState;
-    DepthStencilState depthStencilState;
-    MultisampleState multisampleState;
-    std::vector<ColorBlendAttachmentState> colorBlendAttachments;
-    RenderTargetSignature targetSignature;
-    // ... descriptor layouts and push constants
+    IRHIShader*                            vertexShader;
+    IRHIShader*                            fragmentShader;
+    VertexLayout                           vertexLayout;
+    PrimitiveTopology                      topology               = PrimitiveTopology::TRIANGLE_LIST;
+    bool                                   primitiveRestartEnable = false;
+    RasterizationState                     rasterizationState     = {};
+    DepthStencilState                      depthStencilState      = {};
+    MultisampleState                       multisampleState       = {};
+    std::vector<ColorBlendAttachmentState> colorBlendAttachments  = {{}};
+    float                                  blendConstants[4]      = {0, 0, 0, 0};
+    RenderTargetSignature                  targetSignature;
+    std::vector<IRHIDescriptorSetLayout *> descriptorSetLayouts;
+    std::vector<PushConstantRange>         pushConstantRanges;
 };
 ```
 
@@ -136,6 +141,7 @@ Begin() → Record Commands → End() → Submit
 **Key Operations:**
 - Dynamic rendering (BeginRendering/EndRendering)
 - Pipeline and descriptor binding
+- Vertex and index buffer binding (`SetVertexBuffer`, `BindIndexBuffer`)
 - Draw and dispatch calls (including indirect)
 - Resource barriers and transitions
 - Cross-queue synchronization
@@ -148,13 +154,21 @@ Begin() → Record Commands → End() → Submit
 Simplified state model for common cases:
 ```cpp
 enum class ResourceState : uint8_t {
-    Undefined,          // Initial/discardable
-    GeneralRead,        // Generic read access
-    ShaderReadWrite,    // UAV/SSBO access
-    RenderTarget,       // Color attachment
-    DepthStencilWrite,  // Depth buffer write
-    Present,           // Ready for display
-    // ... additional states
+    Undefined,          // Initial state, content can be discarded
+    GeneralRead,        // Generic read-only state (vertex/index/uniform buffer, shader resource)
+    CopySource,
+    CopyDestination,
+    ShaderReadWrite,    // Read/write storage (UAV/SSBO)
+    RenderTarget,
+    DepthStencilRead,
+    DepthStencilWrite,
+    ResolveSource,
+    ResolveDestination,
+    Present,            // Ready for presentation to the screen
+    IndirectArgument,   // Buffer used as indirect argument
+    VertexBuffer,
+    IndexBuffer,
+    UniformBuffer,
 };
 ```
 
@@ -220,6 +234,8 @@ Resource binding model:
 enum class DescriptorType {
     UNIFORM_BUFFER,
     STORAGE_BUFFER,
+    UNIFORM_TEXEL_BUFFER,
+    STORAGE_TEXEL_BUFFER,
     SAMPLED_TEXTURE,
     STORAGE_TEXTURE,
     SAMPLER,
@@ -247,6 +263,25 @@ struct DescriptorBinding {
 - `AcquireNextImage`: Get next available backbuffer
 - `Present`: Queue presentation
 - `Resize`: Handle window size changes
+
+### 8. Resource Management and Lifetime
+
+The RHI employs a custom, intrusive reference-counting system for all resource management, completely eliminating STL smart pointer dependencies from its public API. This design is inspired by industry-standard APIs like DirectX (COM) and follows the proven patterns of NVRHI.
+
+#### Core Concepts
+
+- **`IRefCounted`**: A base interface with `AddRef()` and `Release()` methods that all RHI resource interfaces (like `IRHIBuffer`, `IRHITexture`) inherit from.
+- **`RefCntPtr<T>`**: A custom smart pointer that automatically manages the reference count of RHI objects. It is the primary way clients interact with RHI resources.
+- **Handles**: For API clarity, `RefCntPtr` is exposed through clean typedefs, such as `BufferHandle`, `TextureHandle`, and `PipelineHandle`. All resource creation methods on `IRHIDevice` return these handle types.
+
+#### GPU-Safe Lifetime Management
+
+A key feature of this architecture is ensuring that resources are not destroyed while the GPU is still using them. This is achieved through a deferred destruction mechanism.
+
+- **Internal References**: When a resource is used in a command list (e.g., binding a vertex buffer), the command list creates an internal `RefCntPtr` reference to that resource. This keeps the resource alive at least until the GPU has finished executing that command list.
+- **Frame Retirement**: The `IRHIDevice` interface provides a `RetireCompletedFrame()` method. This method should be called once per frame (typically after `Present()`). Its job is to identify command lists that the GPU has finished executing and release the internal references they hold. Once all references to a resource are released, it is safely destroyed.
+
+This system enables a powerful "fire-and-forget" pattern, where resources can be created in a local scope, used for rendering, and allowed to go out of scope without causing GPU crashes. The RHI guarantees they will be kept alive until execution is complete.
 
 ## Vulkan Backend Implementation
 
@@ -293,14 +328,20 @@ switch (desc.resourceUsage) {
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
         break;
     case ResourceUsage::DynamicUpload:
-        // Host visible for CPU writes
+        // Host visible for CPU writes, can be persistently mapped
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        if (desc.hints.persistently_mapped) {
+            allocInfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        }
         break;
     case ResourceUsage::Readback:
-        // Host visible for CPU reads
+        // Host visible for CPU reads, can be persistently mapped
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+        if (desc.hints.persistently_mapped) {
+            allocInfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        }
         break;
     case ResourceUsage::Transient:
         // Allow aliasing for temporary resources
@@ -353,38 +394,72 @@ vkCmdPipelineBarrier(
 ### Basic Rendering Loop
 
 ```cpp
+// Assume device, swapchain, vbDesc, pipelineDesc, dslDesc, and vertexCount are initialized
+// Assume imageIndex has been acquired from the swapchain
+
+// Create RHI resources. The returned handles manage object lifetimes.
+BufferHandle vertexBuffer = device->CreateBuffer(vbDesc);
+PipelineHandle pipeline = device->CreateGraphicsPipeline(pipelineDesc);
+DescriptorSetLayoutHandle layout = device->CreateDescriptorSetLayout(dslDesc);
+DescriptorSetHandle descriptorSet = device->CreateDescriptorSet(layout.Get());
+TextureViewHandle colorTarget = swapchain->GetBackBufferView(imageIndex);
+
 // Create and begin command list
-auto cmdList = device->CreateCommandList(QueueType::GRAPHICS);
+CommandListHandle cmdList = device->CreateCommandList(QueueType::GRAPHICS);
 cmdList->Begin();
 
 // Setup rendering
 RenderingInfo renderInfo;
 renderInfo.colorAttachments.push_back({
-    .view = colorTarget,
+    .view = colorTarget.Get(),
     .loadOp = LoadOp::CLEAR,
     .storeOp = StoreOp::STORE,
     .clearValue = {{0.0f, 0.0f, 0.0f, 1.0f}}
 });
 
-// Record commands
+// Record commands, passing raw pointers to RHI functions using .Get()
 cmdList->BeginRendering(renderInfo);
-cmdList->SetPipeline(pipeline);
-cmdList->SetVertexBuffer(0, vertexBuffer);
-cmdList->BindDescriptorSet(0, descriptorSet);
+cmdList->SetPipeline(pipeline.Get());
+cmdList->SetVertexBuffer(0, vertexBuffer.Get());
+cmdList->BindDescriptorSet(0, descriptorSet.Get());
 cmdList->Draw(vertexCount);
 cmdList->EndRendering();
 
-// Submit
+// End and submit
 cmdList->End();
-device->SubmitCommandLists({cmdList.get()}, QueueType::GRAPHICS);
+IRHICommandList* cmdLists[] = { cmdList.Get() };
+device->SubmitCommandLists(cmdLists, QueueType::GRAPHICS);
+
+// In the main loop, after presentation, retire resources from completed frames
+device->RetireCompletedFrame();
+```
+
+### Fire-and-Forget Resource Usage
+
+The handle system enables a safe "fire-and-forget" pattern for temporary resources.
+
+```cpp
+void RenderDebugOverlay(DeviceHandle device, CommandListHandle cmd) {
+    // Create temporary resources in local scope
+    BufferHandle debugVertices = device->CreateBuffer(debugVertexDesc);
+
+    // Use resources. The command list internally keeps a reference.
+    cmd->SetVertexBuffer(0, debugVertices.Get());
+    cmd->Draw(debugVertexCount);
+
+    // 'debugVertices' handle goes out of scope here, but the underlying
+    // resource is kept alive by the command list until the GPU finishes.
+    // It will be cleaned up automatically by RetireCompletedFrame().
+}
 ```
 
 ### Resource Synchronization
 
 ```cpp
+// Assume myTexture is a valid TextureHandle
 // Transition texture for shader read
 TextureTransition transition{
-    .texture = myTexture,
+    .texture = myTexture.Get(),
     .before = ResourceState::Undefined,
     .after = ResourceState::GeneralRead
 };
@@ -399,31 +474,46 @@ cmdList->Barrier(
 ### Cross-Queue Compute
 
 ```cpp
+// Assume computeTexture is a valid TextureHandle and computePipeline is a valid PipelineHandle
+// Assume graphicsCmdList and computeCmdList are valid CommandListHandles
+
+TextureTransition textureToCompute{
+    .texture = computeTexture.Get(),
+    .before = ResourceState::GeneralRead,
+    .after = ResourceState::ShaderReadWrite
+};
+
 // Graphics queue: release texture to compute
 graphicsCmdList->ReleaseToQueue(
     QueueType::COMPUTE,
     {},
-    {textureTransition}
+    {textureToCompute}
 );
 
 // Compute queue: acquire, process, and release back
 computeCmdList->AcquireFromQueue(
     QueueType::GRAPHICS,
     {},
-    {textureTransition}
+    {textureToCompute}
 );
-computeCmdList->SetPipeline(computePipeline);
+computeCmdList->SetPipeline(computePipeline.Get());
 computeCmdList->Dispatch(groupX, groupY, groupZ);
+
+TextureTransition textureToGraphics{
+    .texture = computeTexture.Get(),
+    .before = ResourceState::ShaderReadWrite,
+    .after = ResourceState::GeneralRead
+};
 computeCmdList->ReleaseToQueue(
     QueueType::GRAPHICS,
     {},
-    {textureTransition}
+    {textureToGraphics}
 );
 
 // Graphics queue: reacquire texture
 graphicsCmdList->AcquireFromQueue(
     QueueType::COMPUTE,
     {},
-    {textureTransition}
+    {textureToGraphics}
 );
 ```

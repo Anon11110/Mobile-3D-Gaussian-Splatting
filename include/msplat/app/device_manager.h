@@ -30,8 +30,8 @@ public:
 	 */
 	int Run(int width, int height, const char* title);
 
-	rhi::IRHIDevice* GetDevice() const { return m_device.get(); }
-	rhi::IRHISwapchain* GetSwapchain() const { return m_swapchain.get(); }
+	rhi::IRHIDevice* GetDevice() const { return m_device.Get(); }
+	rhi::IRHISwapchain* GetSwapchain() const { return m_swapchain.Get(); }
 	GLFWwindow* GetWindow() const { return m_window; }
 
 	IApplication* m_app; // Made public for callbacks
@@ -43,8 +43,8 @@ private:
 	void Shutdown();
 
 	GLFWwindow* m_window = nullptr;
-	container::unique_ptr<rhi::IRHIDevice> m_device;
-	container::unique_ptr<rhi::IRHISwapchain> m_swapchain;
+	rhi::DeviceHandle m_device;
+	rhi::SwapchainHandle m_swapchain;
 };
 
 } // namespace msplat::app

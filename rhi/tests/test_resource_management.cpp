@@ -565,10 +565,10 @@ RHI_TEST(ReferenceCountingCorrectness) {
         RHI_ASSERT_EQ(3u, buffer1->GetRefCount());
         
         // Reset should decrease ref count
-        buffer2.Reset();
+        buffer2.Clear();
         RHI_ASSERT_EQ(2u, buffer1->GetRefCount());
         
-        buffer3.Reset();
+        buffer3.Clear();
         RHI_ASSERT_EQ(1u, buffer1->GetRefCount());
     }
     
@@ -596,7 +596,7 @@ RHI_TEST(FrameRetirementBehavior) {
     RHI_ASSERT_EQ(2u, buffer->GetRefCount());  // Handle + pending deletion
     
     // Release application handle
-    buffer.Reset();
+    buffer.Clear();
     
     // Resource should still exist due to pending deletion
     RHI_ASSERT_EQ(1u, rawDevice->GetPendingDeletionCount());
@@ -816,7 +816,7 @@ RHI_TEST(ThreadSafetyTest) {
     // Reference count should be back to 1
     RHI_ASSERT_EQ(1u, buffer->GetRefCount());
     
-    buffer.Reset();
+    buffer.Clear();
     RHI_ASSERT_EQ(0, MockBuffer::GetBufferCount());
     
     return true;
@@ -919,7 +919,7 @@ RHI_TEST(NullHandleOperations) {
     // Default construction creates null handle
     BufferHandle nullBuffer;
     RHI_ASSERT_NULL(nullBuffer.Get());
-    RHI_ASSERT_EQ(0u, nullBuffer.Reset());  // Reset on null is safe
+    RHI_ASSERT_EQ(0u, nullBuffer.Clear());  // Reset on null is safe
     
     // Assignment from nullptr
     BufferHandle buffer = nullptr;
@@ -964,10 +964,10 @@ RHI_TEST(CrossTypeHandleConversions) {
     IRHIBuffer* bufferPtr = static_cast<IRHIBuffer*>(baseHandle.Get());
     RHI_ASSERT_EQ(rawBuffer, bufferPtr);
     
-    baseHandle.Reset();
+    baseHandle.Clear();
     RHI_ASSERT_EQ(1u, rawBuffer->GetRefCount());
     
-    bufferHandle.Reset();
+    bufferHandle.Clear();
     RHI_ASSERT_EQ(0, MockBuffer::GetBufferCount());
     
     return true;
@@ -1004,7 +1004,7 @@ RHI_TEST(DeviceLifetimeManagement) {
     RHI_ASSERT_NOT_NULL(persistentBuffer.Get());
     RHI_ASSERT_EQ(1u, persistentBuffer->GetRefCount());
     
-    persistentBuffer.Reset();
+    persistentBuffer.Clear();
     
     // Now all resources should be destroyed
     RHI_ASSERT_EQ(g_totalResourcesCreated.load(), g_totalResourcesDestroyed.load());
@@ -1042,7 +1042,7 @@ RHI_TEST(SwapAndDetachOperations) {
     // Clean up detached pointer manually
     detached->Release();
     
-    buffer2.Reset();
+    buffer2.Clear();
     RHI_ASSERT_EQ(0, MockBuffer::GetBufferCount());
     
     return true;
@@ -1079,10 +1079,10 @@ RHI_TEST(ComplexResourceDependencies) {
     DescriptorSetHandle descriptorSet = device->CreateDescriptorSet(layout.Get());
     
     // All resources properly managed
-    texture.Reset();
-    textureView.Reset();
-    layout.Reset();
-    descriptorSet.Reset();
+    texture.Clear();
+    textureView.Clear();
+    layout.Clear();
+    descriptorSet.Clear();
     
     // All cleaned up
     RHI_ASSERT_EQ(0, MockTexture::GetTextureCount());

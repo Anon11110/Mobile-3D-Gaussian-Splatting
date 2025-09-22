@@ -3,7 +3,6 @@
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
 
-#include <memory>
 #include <vector>
 
 #include "../../../include/rhi/rhi.h"
@@ -344,23 +343,23 @@ class VulkanCommandList final : public RefCounter<IRHICommandList>
 class VulkanSwapchain final : public RefCounter<IRHISwapchain>
 {
   private:
-	VkInstance                                      instance;
-	VkDevice                                        device;
-	VkPhysicalDevice                                physicalDevice;
-	VmaAllocator                                    allocator;
-	VkSurfaceKHR                                    surface;
-	VkQueue                                         graphicsQueue;
-	VkSwapchainKHR                                  swapchain;
-	std::vector<VkImage>                            swapchainImages;
-	std::vector<std::unique_ptr<VulkanTexture>>     backBuffers;
-	std::vector<std::unique_ptr<VulkanTextureView>> backBufferViews;
-	std::vector<VkFramebuffer>                      framebuffers;
-	VkRenderPass                                    renderPass;
-	VkFormat                                        swapchainFormat;
-	VkExtent2D                                      swapchainExtent;
-	VkSurfaceFormatKHR                              chosenSurfaceFormat;
-	VkPresentModeKHR                                chosenPresentMode;
-	uint32_t                                        requestedBufferCount;
+	VkInstance                     instance;
+	VkDevice                       device;
+	VkPhysicalDevice               physicalDevice;
+	VmaAllocator                   allocator;
+	VkSurfaceKHR                   surface;
+	VkQueue                        graphicsQueue;
+	VkSwapchainKHR                 swapchain;
+	std::vector<VkImage>           swapchainImages;
+	std::vector<TextureHandle>     backBuffers;
+	std::vector<TextureViewHandle> backBufferViews;
+	std::vector<VkFramebuffer>     framebuffers;
+	VkRenderPass                   renderPass;
+	VkFormat                       swapchainFormat;
+	VkExtent2D                     swapchainExtent;
+	VkSurfaceFormatKHR             chosenSurfaceFormat;
+	VkPresentModeKHR               chosenPresentMode;
+	uint32_t                       requestedBufferCount;
 
   public:
 	VulkanSwapchain(VkInstance instance, VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator, VkSurfaceKHR surface,

@@ -165,13 +165,16 @@ VulkanSwapchain::VulkanSwapchain(VkInstance instance, VkDevice device, VkPhysica
 	backBufferViews.reserve(actualImageCount);
 	for (uint32_t i = 0; i < actualImageCount; i++)
 	{
-		backBuffers.push_back(std::make_unique<VulkanTexture>(device, allocator, swapchainImages[i], swapchainFormat,
-		                                                      swapchainExtent.width, swapchainExtent.height, true));
+		// Create texture with refCount = 1, use RefCntPtr::Create to avoid extra AddRef
+		VulkanTexture *texture = new VulkanTexture(device, allocator, swapchainImages[i], swapchainFormat,
+		                                           swapchainExtent.width, swapchainExtent.height, true);
+		backBuffers.push_back(RefCntPtr<IRHITexture>::Create(texture));
 
 		TextureViewDesc viewDesc{};
-		viewDesc.texture    = backBuffers[i].get();
-		viewDesc.aspectMask = TextureAspect::COLOR;
-		backBufferViews.push_back(std::make_unique<VulkanTextureView>(device, viewDesc));
+		viewDesc.texture        = backBuffers[i].Get();
+		viewDesc.aspectMask     = TextureAspect::COLOR;
+		VulkanTextureView *view = new VulkanTextureView(device, viewDesc);
+		backBufferViews.push_back(RefCntPtr<IRHITextureView>::Create(view));
 	}
 }
 
@@ -258,12 +261,12 @@ SwapchainStatus VulkanSwapchain::Present(uint32_t imageIndex, IRHISemaphore *wai
 
 IRHITexture *VulkanSwapchain::GetBackBuffer(uint32_t index)
 {
-	return backBuffers[index].get();
+	return backBuffers[index].Get();
 }
 
 IRHITextureView *VulkanSwapchain::GetBackBufferView(uint32_t index)
 {
-	return backBufferViews[index].get();
+	return backBufferViews[index].Get();
 }
 
 uint32_t VulkanSwapchain::GetImageCount() const
@@ -349,14 +352,17 @@ void VulkanSwapchain::Resize(uint32_t width, uint32_t height)
 	backBufferViews.reserve(actualImageCount);
 	for (uint32_t i = 0; i < actualImageCount; i++)
 	{
-		backBuffers.push_back(std::make_unique<VulkanTexture>(device, allocator, swapchainImages[i],
-		                                                      chosenSurfaceFormat.format,
-		                                                      swapchainExtent.width, swapchainExtent.height, true));
+		// Create texture with refCount = 1, use RefCntPtr::Create to avoid extra AddRef
+		VulkanTexture *texture = new VulkanTexture(device, allocator, swapchainImages[i],
+		                                           chosenSurfaceFormat.format,
+		                                           swapchainExtent.width, swapchainExtent.height, true);
+		backBuffers.push_back(RefCntPtr<IRHITexture>::Create(texture));
 
 		TextureViewDesc viewDesc{};
-		viewDesc.texture    = backBuffers[i].get();
-		viewDesc.aspectMask = TextureAspect::COLOR;
-		backBufferViews.push_back(std::make_unique<VulkanTextureView>(device, viewDesc));
+		viewDesc.texture        = backBuffers[i].Get();
+		viewDesc.aspectMask     = TextureAspect::COLOR;
+		VulkanTextureView *view = new VulkanTextureView(device, viewDesc);
+		backBufferViews.push_back(RefCntPtr<IRHITextureView>::Create(view));
 	}
 }
 
@@ -379,7 +385,9 @@ VkFramebuffer VulkanSwapchain::GetFramebuffer(uint32_t index, VkRenderPass rende
 	// Create framebuffer for this image if it doesn't exist
 	if (framebuffers[index] == VK_NULL_HANDLE)
 	{
-		VkImageView attachments[] = {backBuffers[index]->GetImageView()};
+		// Cast to VulkanTexture to access GetImageView method
+		auto       *vkTexture     = static_cast<VulkanTexture *>(backBuffers[index].Get());
+		VkImageView attachments[] = {vkTexture->GetImageView()};
 
 		VkFramebufferCreateInfo framebufferInfo{};
 		framebufferInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;

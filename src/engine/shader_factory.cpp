@@ -26,7 +26,7 @@ ShaderFactory::ShaderFactory(rhi::IRHIDevice *device, container::shared_ptr<vfs:
 	}
 }
 
-container::unique_ptr<rhi::IRHIShader> ShaderFactory::getOrCreateShader(
+rhi::ShaderHandle ShaderFactory::getOrCreateShader(
     const container::string           &filepath,
     rhi::ShaderStage                   stage,
     container::span<const ShaderMacro> macros)
@@ -64,7 +64,7 @@ container::unique_ptr<rhi::IRHIShader> ShaderFactory::getOrCreateShader(
 	shaderDesc.entryPoint = "main";        // SPIR-V shaders typically use "main"
 
 	// Create the shader object
-	container::unique_ptr<rhi::IRHIShader> shader = m_device->CreateShader(shaderDesc);
+	rhi::ShaderHandle shader = m_device->CreateShader(shaderDesc);
 	if (!shader)
 	{
 		LOG_ERROR("Failed to create shader from: {} (stage: {})",
@@ -80,7 +80,7 @@ container::unique_ptr<rhi::IRHIShader> ShaderFactory::getOrCreateShader(
 
 	// Cache the raw pointer for existence checking (we don't own it after returning)
 	// This is mainly useful for tracking what shaders have been created
-	m_shaderCache[cacheKey] = shader.get();
+	m_shaderCache[cacheKey] = shader.Get();
 
 	return shader;
 }

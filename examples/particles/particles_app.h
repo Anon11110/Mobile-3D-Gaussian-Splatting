@@ -96,60 +96,60 @@ class ParticlesApp : public app::IApplication
 	app::Camera m_camera;
 
 	// Particle buffers (double buffered for compute)
-	container::unique_ptr<rhi::IRHIBuffer> m_particleBufferA;
-	container::unique_ptr<rhi::IRHIBuffer> m_particleBufferB;
-	container::unique_ptr<rhi::IRHIBuffer> m_paramsBuffer;
-	void                                  *m_paramsDataPtr = nullptr;        // Persistently mapped
+	rhi::BufferHandle m_particleBufferA;
+	rhi::BufferHandle m_particleBufferB;
+	rhi::BufferHandle m_paramsBuffer;
+	void             *m_paramsDataPtr = nullptr;        // Persistently mapped
 
 	// MVP uniform buffer for rendering
-	container::unique_ptr<rhi::IRHIBuffer> m_mvpBuffer;
-	void                                  *m_mvpDataPtr = nullptr;        // Persistently mapped
+	rhi::BufferHandle m_mvpBuffer;
+	void             *m_mvpDataPtr = nullptr;        // Persistently mapped
 
 	// Shader factory and shaders
 	container::unique_ptr<engine::ShaderFactory> m_shaderFactory;
-	container::shared_ptr<rhi::IRHIShader>       m_computeShader;
-	container::shared_ptr<rhi::IRHIShader>       m_vertexShader;
-	container::shared_ptr<rhi::IRHIShader>       m_fragmentShader;
+	rhi::ShaderHandle                            m_computeShader;
+	rhi::ShaderHandle                            m_vertexShader;
+	rhi::ShaderHandle                            m_fragmentShader;
 
 	// Compute pipeline resources
-	container::unique_ptr<rhi::IRHIDescriptorSetLayout> m_computeDescriptorSetLayout;
-	container::unique_ptr<rhi::IRHIDescriptorSet>       m_computeDescriptorSetA;        // A->B
-	container::unique_ptr<rhi::IRHIDescriptorSet>       m_computeDescriptorSetB;        // B->A
-	container::unique_ptr<rhi::IRHIPipeline>            m_computePipeline;
+	rhi::DescriptorSetLayoutHandle m_computeDescriptorSetLayout;
+	rhi::DescriptorSetHandle       m_computeDescriptorSetA;        // A->B
+	rhi::DescriptorSetHandle       m_computeDescriptorSetB;        // B->A
+	rhi::PipelineHandle            m_computePipeline;
 
 	// Graphics pipeline resources
-	container::unique_ptr<rhi::IRHIDescriptorSetLayout> m_graphicsDescriptorSetLayout;
-	container::unique_ptr<rhi::IRHIDescriptorSet>       m_graphicsDescriptorSet;
-	container::unique_ptr<rhi::IRHIPipeline>            m_graphicsPipeline;
+	rhi::DescriptorSetLayoutHandle m_graphicsDescriptorSetLayout;
+	rhi::DescriptorSetHandle       m_graphicsDescriptorSet;
+	rhi::PipelineHandle            m_graphicsPipeline;
 
 	// Sphere rendering resources
-	container::unique_ptr<rhi::IRHIBuffer>              m_sphereVertexBuffer;
-	container::unique_ptr<rhi::IRHIBuffer>              m_sphereIndexBuffer;
-	container::vector<uint16_t>                         m_sphereIndices;
-	container::unique_ptr<rhi::IRHIBuffer>              m_debugUboBuffer1;        // Separate buffer for sphere 1
-	container::unique_ptr<rhi::IRHIBuffer>              m_debugUboBuffer2;        // Separate buffer for sphere 2
-	void                                               *m_debugUboDataPtr1 = nullptr;
-	void                                               *m_debugUboDataPtr2 = nullptr;
-	container::shared_ptr<rhi::IRHIShader>              m_debugVertexShader;
-	container::shared_ptr<rhi::IRHIShader>              m_debugFragmentShader;
-	container::unique_ptr<rhi::IRHIDescriptorSetLayout> m_debugDescriptorSetLayout;
-	container::unique_ptr<rhi::IRHIDescriptorSet>       m_debugDescriptorSet1;        // Descriptor set for sphere 1
-	container::unique_ptr<rhi::IRHIDescriptorSet>       m_debugDescriptorSet2;        // Descriptor set for sphere 2
-	container::unique_ptr<rhi::IRHIPipeline>            m_debugPipeline;
+	rhi::BufferHandle              m_sphereVertexBuffer;
+	rhi::BufferHandle              m_sphereIndexBuffer;
+	container::vector<uint16_t>    m_sphereIndices;
+	rhi::BufferHandle              m_debugUboBuffer1;        // Separate buffer for sphere 1
+	rhi::BufferHandle              m_debugUboBuffer2;        // Separate buffer for sphere 2
+	void                          *m_debugUboDataPtr1 = nullptr;
+	void                          *m_debugUboDataPtr2 = nullptr;
+	rhi::ShaderHandle              m_debugVertexShader;
+	rhi::ShaderHandle              m_debugFragmentShader;
+	rhi::DescriptorSetLayoutHandle m_debugDescriptorSetLayout;
+	rhi::DescriptorSetHandle       m_debugDescriptorSet1;        // Descriptor set for sphere 1
+	rhi::DescriptorSetHandle       m_debugDescriptorSet2;        // Descriptor set for sphere 2
+	rhi::PipelineHandle            m_debugPipeline;
 
 	// Synchronization objects (per frame in flight)
-	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_imageAvailableSemaphores;
-	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_computeFinishedSemaphores;
-	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_graphicsReleasedSemaphores;
-	container::vector<container::unique_ptr<rhi::IRHIFence>>     m_inFlightFences;
+	container::vector<rhi::SemaphoreHandle> m_imageAvailableSemaphores;
+	container::vector<rhi::SemaphoreHandle> m_computeFinishedSemaphores;
+	container::vector<rhi::SemaphoreHandle> m_graphicsReleasedSemaphores;
+	container::vector<rhi::FenceHandle>     m_inFlightFences;
 
 	// Render finished semaphores (per swapchain image)
-	container::vector<container::unique_ptr<rhi::IRHISemaphore>> m_renderFinishedSemaphores;
+	container::vector<rhi::SemaphoreHandle> m_renderFinishedSemaphores;
 
 	// Command lists (per frame in flight)
-	container::vector<container::unique_ptr<rhi::IRHICommandList>> m_computeCommandLists;
-	container::vector<container::unique_ptr<rhi::IRHICommandList>> m_graphicsPreCommandLists;
-	container::vector<container::unique_ptr<rhi::IRHICommandList>> m_graphicsCommandLists;
+	container::vector<rhi::CommandListHandle> m_computeCommandLists;
+	container::vector<rhi::CommandListHandle> m_graphicsPreCommandLists;
+	container::vector<rhi::CommandListHandle> m_graphicsCommandLists;
 
 	// Swapchain state tracking
 	container::vector<bool> m_imageFirstUse;

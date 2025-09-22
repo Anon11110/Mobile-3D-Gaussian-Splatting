@@ -19,11 +19,11 @@ class Scene
 	struct GpuData
 	{
 		// Attribute Buffers
-		std::unique_ptr<rhi::IRHIBuffer> positions;
-		std::unique_ptr<rhi::IRHIBuffer> scales;
-		std::unique_ptr<rhi::IRHIBuffer> rotations;        // quaternions
-		std::unique_ptr<rhi::IRHIBuffer> colors;
-		std::unique_ptr<rhi::IRHIBuffer> shRest;
+		rhi::BufferHandle positions;
+		rhi::BufferHandle scales;
+		rhi::BufferHandle rotations;        // quaternions
+		rhi::BufferHandle colors;
+		rhi::BufferHandle shRest;
 	};
 
 	explicit Scene(rhi::IRHIDevice *device);
@@ -40,7 +40,7 @@ class Scene
 	void AllocateGpuBuffers();
 
 	// Uploads static attribute data (positions, scales, rotations, colors, SH) to GPU
-	std::shared_ptr<rhi::IRHIFence> UploadAttributeData();
+	rhi::FenceHandle UploadAttributeData();
 
 	const GpuData &GetGpuData() const;
 	uint32_t       GetTotalSplatCount() const;
