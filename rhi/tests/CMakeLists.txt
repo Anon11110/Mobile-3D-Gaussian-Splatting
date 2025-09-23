@@ -4,7 +4,6 @@
 add_executable(rhi-tests
     main.cpp
     test_ref_count.cpp
-    test_resource_management.cpp
 )
 
 # Include directories

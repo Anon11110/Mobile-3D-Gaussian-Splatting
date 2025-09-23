@@ -83,9 +83,6 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 			vkDeviceWaitIdle(device);
 		}
 
-		// Clean up all deferred deletions
-		ProcessDeferredDeletions(true);
-
 		// Destroy descriptor pools first
 		if (graphicsDescriptorPool != VK_NULL_HANDLE)
 		{
@@ -307,9 +304,6 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 
 	FenceHandle UploadBufferAsync(IRHIBuffer *dstBuffer, const void *data, size_t size, size_t offset = 0) override
 	{
-		// Process any completed deferred deletions first
-		ProcessDeferredDeletions(false);
-
 		auto *vkBuffer = static_cast<VulkanBuffer *>(dstBuffer);
 
 		// Create staging buffer in host-visible memory
@@ -502,46 +496,10 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 
 	void RetireCompletedFrame() override
 	{
-		// Process any completed deferred deletions
-		ProcessDeferredDeletions(false);
+		///@todo
 	}
 
   private:
-	void ProcessDeferredDeletions(bool waitForAll)
-	{
-		std::lock_guard<std::mutex> lock(deferredDeletionsMutex);
-
-		auto it = deferredDeletions.begin();
-		while (it != deferredDeletions.end())
-		{
-			bool shouldDelete = false;
-
-			if (waitForAll)
-			{
-				// In destructor, wait for all fences to ensure GPU work is complete
-				it->fence->Wait(UINT64_MAX);
-				shouldDelete = true;
-			}
-			else
-			{
-				// During normal operation, only clean up signaled fences
-				shouldDelete = it->fence->IsSignaled();
-			}
-
-			if (shouldDelete)
-			{
-				vkFreeCommandBuffers(device, transferCommandPool, 1, &it->commandBuffer);
-				vmaDestroyBuffer(allocator, it->stagingBuffer, it->stagingAllocation);
-
-				it = deferredDeletions.erase(it);
-			}
-			else
-			{
-				++it;
-			}
-		}
-	}
-
 	VkDescriptorPool GetDescriptorPool(QueueType queueType)
 	{
 		switch (queueType)

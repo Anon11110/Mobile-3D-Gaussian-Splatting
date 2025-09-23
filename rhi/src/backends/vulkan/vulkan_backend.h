@@ -274,15 +274,12 @@ class VulkanCommandList final : public RefCounter<IRHICommandList>
 	PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
 	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
 
-	// Resource tracking for GPU lifetime management
-	std::vector<RefCntPtr<IRefCounted>> m_referencedResources;
-
   public:
 	VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType, uint32_t queueFamily,
 	                  uint32_t graphicsFamily, uint32_t computeFamily, uint32_t transferFamily,
 	                  PFN_vkCmdBeginRenderingKHR beginFunc,
 	                  PFN_vkCmdEndRenderingKHR   endFunc);
-	~VulkanCommandList() override;
+	~VulkanCommandList() override = default;
 
 	VulkanCommandList(const VulkanCommandList &)            = delete;
 	VulkanCommandList &operator=(const VulkanCommandList &) = delete;

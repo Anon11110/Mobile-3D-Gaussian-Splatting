@@ -279,7 +279,7 @@ The RHI employs a custom, intrusive reference-counting system for all resource m
 A key feature of this architecture is ensuring that resources are not destroyed while the GPU is still using them. This is achieved through a deferred destruction mechanism.
 
 - **Internal References**: When a resource is used in a command list (e.g., binding a vertex buffer), the command list creates an internal `RefCntPtr` reference to that resource. This keeps the resource alive at least until the GPU has finished executing that command list.
-- **Frame Retirement**: The `IRHIDevice` interface provides a `RetireCompletedFrame()` method. This method should be called once per frame (typically after `Present()`). Its job is to identify command lists that the GPU has finished executing and release the internal references they hold. Once all references to a resource are released, it is safely destroyed.
+-**Frame Retirement (TODO)**: The `IRHIDevice` interface provides a `RetireCompletedFrame()` method . This method should be called once per frame (typically after `Present()`). Its job is to identify command lists that the GPU has finished executing and release the internal references they hold. Once all references to a resource are released, it is safely destroyed.
 
 This system enables a powerful "fire-and-forget" pattern, where resources can be created in a local scope, used for rendering, and allowed to go out of scope without causing GPU crashes. The RHI guarantees they will be kept alive until execution is complete.
 
