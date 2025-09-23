@@ -82,7 +82,7 @@ bool TriangleApp::OnInit(app::DeviceManager *deviceManager)
 	pipelineDesc.topology = rhi::PrimitiveTopology::TRIANGLE_LIST;
 
 	pipelineDesc.rasterizationState.cullMode    = rhi::CullMode::BACK;
-	pipelineDesc.rasterizationState.frontFace   = rhi::FrontFace::CLOCKWISE;
+	pipelineDesc.rasterizationState.frontFace   = rhi::FrontFace::COUNTER_CLOCKWISE;
 	pipelineDesc.rasterizationState.polygonMode = rhi::PolygonMode::FILL;
 
 	pipelineDesc.colorBlendAttachments.resize(1);
