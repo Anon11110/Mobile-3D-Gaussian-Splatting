@@ -83,6 +83,14 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 			vkDeviceWaitIdle(device);
 		}
 
+		// Clean up deferred deletions (staging buffers from async uploads)
+		for (const auto &deletion : deferredDeletions)
+		{
+			vmaDestroyBuffer(allocator, deletion.stagingBuffer, deletion.stagingAllocation);
+			vkFreeCommandBuffers(device, transferCommandPool, 1, &deletion.commandBuffer);
+		}
+		deferredDeletions.clear();
+
 		// Destroy descriptor pools first
 		if (graphicsDescriptorPool != VK_NULL_HANDLE)
 		{
