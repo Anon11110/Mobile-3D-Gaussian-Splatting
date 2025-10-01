@@ -7,6 +7,7 @@
 #include <msplat/core/containers/vector.h>
 #include <msplat/engine/splat_loader.h>
 #include <msplat/engine/splat_mesh.h>
+#include <msplat/engine/splat_sorter.h>
 #include <mutex>
 #include <rhi/rhi.h>
 
@@ -24,6 +25,9 @@ class Scene
 		rhi::BufferHandle rotations;        // quaternions
 		rhi::BufferHandle colors;
 		rhi::BufferHandle shRest;
+
+		// Sorted indices for rendering
+		rhi::BufferHandle sorted_indices;
 	};
 
 	explicit Scene(rhi::IRHIDevice *device);
@@ -36,11 +40,17 @@ class Scene
 	// Removes a mesh by ID. Returns true if the mesh was found and removed
 	bool RemoveMesh(SplatMesh::ID id);
 
-	// Allocates GPU buffers for attribute data
+	// Allocates GPU buffers for attribute data and sorted indices
 	void AllocateGpuBuffers();
 
 	// Uploads static attribute data (positions, scales, rotations, colors, SH) to GPU
 	rhi::FenceHandle UploadAttributeData();
+
+	// Triggers a new sort based on the camera's view matrix
+	void UpdateView(const math::mat4 &view_matrix);
+
+	// Checks for sorted data and uploads it to the GPU if available
+	rhi::FenceHandle ConsumeAndUploadSortedIndices();
 
 	const GpuData &GetGpuData() const;
 	uint32_t       GetTotalSplatCount() const;
@@ -63,7 +73,12 @@ class Scene
 	bool                         attributeDataUploaded{false};        // Track if attribute data has been uploaded
 	bool                         gpuBuffersAllocated{false};          // Track if GPU buffers are allocated
 
+	// CPU-side data for sorting
+	container::vector<math::vec3>      splat_positions;
+	container::unique_ptr<SplatSorter> splat_sorter;
+
 	uint32_t CalculateMaxShCoeffsPerSplat() const;
+	void     UpdateSplatPositions();
 };
 
 template <typename Func>

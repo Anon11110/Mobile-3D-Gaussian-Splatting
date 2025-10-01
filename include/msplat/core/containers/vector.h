@@ -125,6 +125,20 @@ class vector
 		other.mMemoryResource = pmr::GetUpstreamAllocator();
 	}
 
+	// Initializer list constructor
+	vector(std::initializer_list<T> ilist, std::pmr::memory_resource *memres = nullptr) :
+	    mData(nullptr), mSize(0), mCapacity(0), mMemoryResource(memres ? memres : pmr::GetUpstreamAllocator())
+	{
+		if (ilist.size() > 0)
+		{
+			reserve(ilist.size());
+			for (const T &value : ilist)
+			{
+				push_back(value);
+			}
+		}
+	}
+
 	// Destructor
 	~vector()
 	{

@@ -314,6 +314,12 @@ void VulkanCommandList::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, in
 	vkCmdDrawIndexed(commandBuffer, indexCount, 1, firstIndex, vertexOffset, 0);
 }
 
+void VulkanCommandList::DrawIndexedInstanced(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex,
+                                             int32_t vertexOffset, uint32_t firstInstance)
+{
+	vkCmdDrawIndexed(commandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+}
+
 void VulkanCommandList::DrawIndexedIndirect(IRHIBuffer *buffer, size_t offset, uint32_t drawCount, uint32_t stride)
 {
 	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);

@@ -3,6 +3,7 @@
 set(ENGINE_HEADERS
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/splat_soa.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/splat_loader.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/engine/splat_sorter.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/shader_factory.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/mesh_generator.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/splat_mesh.h
@@ -11,6 +12,7 @@ set(ENGINE_HEADERS
 
 set(ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/engine/splat_loader.cpp
+    ${CMAKE_SOURCE_DIR}/src/engine/splat_sorter.cpp
     ${CMAKE_SOURCE_DIR}/src/engine/shader_factory.cpp
     ${CMAKE_SOURCE_DIR}/src/engine/mesh_generator.cpp
     ${CMAKE_SOURCE_DIR}/src/engine/splat_mesh.cpp

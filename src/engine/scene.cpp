@@ -1,6 +1,7 @@
 #include <msplat/core/log.h>
 #include <msplat/core/math/math.h>
 #include <msplat/engine/scene.h>
+#include <msplat/engine/splat_sorter.h>
 
 namespace msplat::engine
 {
@@ -304,6 +305,19 @@ void Scene::AllocateGpuBuffers()
 		gpuData.shRest     = device->CreateBuffer(desc);
 	}
 
+	// Sorted indices buffer for rendering order
+	{
+		BufferDesc desc{};
+		desc.usage             = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage     = ResourceUsage::DynamicUpload;
+		desc.size              = totalSplatCount * sizeof(uint32_t);
+		gpuData.sorted_indices = device->CreateBuffer(desc);
+	}
+
+	// Initialize CPU-side sorting system
+	splat_sorter = container::make_unique<SplatSorter>(totalSplatCount);
+	splat_positions.reserve(totalSplatCount);
+
 	gpuBuffersAllocated = true;
 	LOG_INFO("Allocated GPU buffers for {} splats (CPU-sort pipeline mode)", totalSplatCount);
 }
@@ -312,6 +326,53 @@ bool Scene::IsAttributeDataUploaded() const
 {
 	std::lock_guard<std::mutex> lock(meshesMutex);
 	return attributeDataUploaded;
+}
+
+void Scene::UpdateView(const math::mat4 &view_matrix)
+{
+	if (!splat_sorter)
+	{
+		LOG_WARNING("SplatSorter not initialized. Call AllocateGpuBuffers() first.");
+		return;
+	}
+
+	UpdateSplatPositions();
+	splat_sorter->RequestSort(splat_positions, view_matrix);
+}
+
+rhi::FenceHandle Scene::ConsumeAndUploadSortedIndices()
+{
+	if (!splat_sorter)
+	{
+		LOG_WARNING("SplatSorter not initialized. Call AllocateGpuBuffers() first.");
+		return nullptr;
+	}
+
+	if (!splat_sorter->IsSortComplete())
+	{
+		// No new sorted data available yet
+		return nullptr;
+	}
+
+	auto sortedIndices = splat_sorter->GetSortedIndices();
+	if (sortedIndices.empty())
+	{
+		return nullptr;
+	}
+
+	if (!gpuData.sorted_indices)
+	{
+		LOG_ERROR("Sorted indices GPU buffer not allocated");
+		return nullptr;
+	}
+
+	// Upload the sorted indices to the GPU
+	rhi::FenceHandle fence = device->UploadBufferAsync(
+	    gpuData.sorted_indices.Get(),
+	    sortedIndices.data(),
+	    sortedIndices.size() * sizeof(uint32_t));
+
+	return fence;
 }
 
 uint32_t Scene::CalculateMaxShCoeffsPerSplat() const
@@ -326,6 +387,31 @@ uint32_t Scene::CalculateMaxShCoeffsPerSplat() const
 		}
 	}
 	return maxShCoeffsPerSplat;
+}
+
+void Scene::UpdateSplatPositions()
+{
+	std::lock_guard<std::mutex> lock(meshesMutex);
+
+	splat_positions.clear();
+	splat_positions.reserve(totalSplatCount);
+
+	for (const auto &mesh : meshes)
+	{
+		if (!mesh.HasCpuData())
+			continue;
+
+		auto           splatData   = mesh.GetSplatData();
+		const auto    &modelMatrix = mesh.GetModelMatrix();
+		const uint32_t count       = splatData->numSplats;
+
+		for (uint32_t i = 0; i < count; ++i)
+		{
+			math::vec3 localPos(splatData->posX[i], splatData->posY[i], splatData->posZ[i]);
+			math::vec4 worldPos = modelMatrix * math::vec4(localPos, 1.0f);
+			splat_positions.push_back(math::vec3(worldPos));
+		}
+	}
 }
 
 }        // namespace msplat::engine
