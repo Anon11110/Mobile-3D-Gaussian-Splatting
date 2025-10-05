@@ -6,6 +6,8 @@
 
 #include <GLFW/glfw3.h>
 
+#include <msplat/core/windows_sanitized.h>
+
 namespace
 {
 // A simple quad mesh for instanced rendering
@@ -95,13 +97,48 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 
 	// 6. Create Descriptor Set
 	m_descriptorSet = device->CreateDescriptorSet(m_descriptorSetLayout.Get());
-	m_descriptorSet->BindBuffer(0, {m_frameUboBuffer.Get()});
-	m_descriptorSet->BindBuffer(1, {m_scene->GetGpuData().positions.Get()});
-	m_descriptorSet->BindBuffer(2, {m_scene->GetGpuData().scales.Get()});
-	m_descriptorSet->BindBuffer(3, {m_scene->GetGpuData().rotations.Get()});
-	m_descriptorSet->BindBuffer(4, {m_scene->GetGpuData().colors.Get()});
-	m_descriptorSet->BindBuffer(5, {m_scene->GetGpuData().shRest.Get()});
-	m_descriptorSet->BindBuffer(6, {m_scene->GetGpuData().sorted_indices.Get()});
+
+	// Binding 0: UBO
+	rhi::BufferBinding uboBinding{};
+	uboBinding.buffer = m_frameUboBuffer.Get();
+	uboBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
+	m_descriptorSet->BindBuffer(0, uboBinding);
+
+	// Binding 1: Positions
+	rhi::BufferBinding posBinding{};
+	posBinding.buffer = m_scene->GetGpuData().positions.Get();
+	posBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(1, posBinding);
+
+	// Binding 2: Scales
+	rhi::BufferBinding scaleBinding{};
+	scaleBinding.buffer = m_scene->GetGpuData().scales.Get();
+	scaleBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(2, scaleBinding);
+
+	// Binding 3: Rotations
+	rhi::BufferBinding rotBinding{};
+	rotBinding.buffer = m_scene->GetGpuData().rotations.Get();
+	rotBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(3, rotBinding);
+
+	// Binding 4: Colors
+	rhi::BufferBinding colorBinding{};
+	colorBinding.buffer = m_scene->GetGpuData().colors.Get();
+	colorBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(4, colorBinding);
+
+	// Binding 5: SH Rest
+	rhi::BufferBinding shBinding{};
+	shBinding.buffer = m_scene->GetGpuData().shRest.Get();
+	shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(5, shBinding);
+
+	// Binding 6: Sorted Indices
+	rhi::BufferBinding indicesBinding{};
+	indicesBinding.buffer = m_scene->GetGpuData().sorted_indices.Get();
+	indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(6, indicesBinding);
 
 	// 7. Create Graphics Pipeline
 	rhi::GraphicsPipelineDesc pipelineDesc{};
@@ -194,6 +231,20 @@ void NaiveSplatCpuApp::OnRender()
 	auto cmdList = device->CreateCommandList();
 	cmdList->Begin();
 
+	// Transition swapchain image to render target
+	// Using Undefined as source allows driver to skip preserving contents (optimal for CLEAR)
+	rhi::TextureTransition renderTransition{};
+	renderTransition.texture = swapchain->GetBackBuffer(imageIndex);
+	renderTransition.before  = rhi::ResourceState::Undefined;        // Don't care about previous contents
+	renderTransition.after   = rhi::ResourceState::RenderTarget;
+
+	cmdList->Barrier(
+	    rhi::PipelineScope::Graphics,
+	    rhi::PipelineScope::Graphics,
+	    {},
+	    {&renderTransition, 1},
+	    {});
+
 	rhi::RenderingInfo renderingInfo{};
 	renderingInfo.colorAttachments.resize(1);
 	renderingInfo.colorAttachments[0].view    = swapchain->GetBackBufferView(imageIndex);
@@ -215,6 +266,20 @@ void NaiveSplatCpuApp::OnRender()
 	cmdList->DrawIndexedInstanced(static_cast<uint32_t>(g_quadIndices.size()), m_scene->GetTotalSplatCount(), 0, 0, 0);
 
 	cmdList->EndRendering();
+
+	// Transition swapchain image to present layout
+	rhi::TextureTransition presentTransition{};
+	presentTransition.texture = swapchain->GetBackBuffer(imageIndex);
+	presentTransition.before  = rhi::ResourceState::RenderTarget;
+	presentTransition.after   = rhi::ResourceState::Present;
+
+	cmdList->Barrier(
+	    rhi::PipelineScope::Graphics,
+	    rhi::PipelineScope::Graphics,
+	    {},
+	    {&presentTransition, 1},
+	    {});
+
 	cmdList->End();
 
 	// Submit to the graphics queue
@@ -245,13 +310,34 @@ void NaiveSplatCpuApp::OnRender()
 void NaiveSplatCpuApp::OnShutdown()
 {
 	LOG_INFO("NaiveSplatCpuApp::OnShutdown");
+
 	if (m_deviceManager && m_deviceManager->GetDevice())
 	{
 		m_deviceManager->GetDevice()->WaitIdle();
-	}
-	if (m_frameUboDataPtr)
-	{
-		m_frameUboBuffer->Unmap();
+
+		if (m_frameUboDataPtr)
+		{
+			m_frameUboBuffer->Unmap();
+			m_frameUboDataPtr = nullptr;
+		}
+
+		m_inFlightFences.clear();
+		m_imageAvailableSemaphores.clear();
+		m_renderFinishedSemaphores.clear();
+
+		m_pipeline            = nullptr;
+		m_descriptorSet       = nullptr;
+		m_descriptorSetLayout = nullptr;
+
+		m_vertexShader   = nullptr;
+		m_fragmentShader = nullptr;
+		m_shaderFactory  = nullptr;
+
+		m_frameUboBuffer   = nullptr;
+		m_quadIndexBuffer  = nullptr;
+		m_quadVertexBuffer = nullptr;
+
+		m_scene.reset();
 	}
 }
 

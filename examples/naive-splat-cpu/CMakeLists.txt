@@ -22,6 +22,16 @@ target_include_directories(naive-splat-cpu PRIVATE
 
 target_compile_features(naive-splat-cpu PRIVATE cxx_std_20)
 
+# Apply Windows macro fix to this target
+apply_windows_macro_fix(naive-splat-cpu)
+
+# Platform-specific settings
+if(WIN32)
+    set_target_properties(naive-splat-cpu PROPERTIES
+        WIN32_EXECUTABLE FALSE  # Console application
+    )
+endif()
+
 set_target_properties(naive-splat-cpu PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
