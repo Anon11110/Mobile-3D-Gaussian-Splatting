@@ -20,3 +20,6 @@ add_subdirectory(unit-tests)
 
 # Add performance tests
 add_subdirectory(perf-tests)
+
+# Add GPU sorting renderer example
+add_subdirectory(gpu-sorting-renderer)

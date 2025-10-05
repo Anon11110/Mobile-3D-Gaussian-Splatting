@@ -42,7 +42,7 @@ function(compile_shaders SHADER_SRC_DIR TARGET_NAME)
         # Add compilation command to the target
         add_custom_command(
             TARGET ${SHADER_TARGET_NAME}
-            COMMAND ${GLSLC_EXECUTABLE} ${SHADER_FILE} -o ${SPIRV_FILE}
+            COMMAND ${GLSLC_EXECUTABLE} ${SHADER_FILE} -o ${SPIRV_FILE} --target-spv=spv1.3
             COMMENT "Compiling shader: ${SHADER_NAME} -> ${SHADER_NAME}.spv"
             VERBATIM
         )

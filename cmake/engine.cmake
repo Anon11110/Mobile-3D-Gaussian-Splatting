@@ -8,6 +8,7 @@ set(ENGINE_HEADERS
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/mesh_generator.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/splat_mesh.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/scene.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/engine/gpu_splat_sorter.h
 )
 
 set(ENGINE_SOURCES
@@ -17,6 +18,7 @@ set(ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/engine/mesh_generator.cpp
     ${CMAKE_SOURCE_DIR}/src/engine/splat_mesh.cpp
     ${CMAKE_SOURCE_DIR}/src/engine/scene.cpp
+    ${CMAKE_SOURCE_DIR}/src/msplat/engine/gpu_splat_sorter.cpp
     ${CMAKE_SOURCE_DIR}/third-party/miniply/miniply.cpp
 )
 

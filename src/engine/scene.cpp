@@ -113,10 +113,10 @@ rhi::FenceHandle Scene::UploadAttributeData()
 	container::vector<float> colors;
 	container::vector<float> shRest;
 
-	positions.reserve(totalSplatCount * 3);
-	scales.reserve(totalSplatCount * 3);
+	positions.reserve(totalSplatCount * 4);
+	scales.reserve(totalSplatCount * 4);
 	rotations.reserve(totalSplatCount * 4);
-	colors.reserve(totalSplatCount * 3);
+	colors.reserve(totalSplatCount * 4);
 	shRest.reserve(totalShCoeffs);
 
 	// Consolidate all mesh data
@@ -133,6 +133,7 @@ rhi::FenceHandle Scene::UploadAttributeData()
 			positions.push_back(splatData->posX[i]);
 			positions.push_back(splatData->posY[i]);
 			positions.push_back(splatData->posZ[i]);
+			positions.push_back(1.0f);
 		}
 
 		for (uint32_t i = 0; i < count; ++i)
@@ -140,6 +141,7 @@ rhi::FenceHandle Scene::UploadAttributeData()
 			scales.push_back(splatData->scaleX[i]);
 			scales.push_back(splatData->scaleY[i]);
 			scales.push_back(splatData->scaleZ[i]);
+			scales.push_back(1.0f);
 		}
 
 		for (uint32_t i = 0; i < count; ++i)
@@ -155,6 +157,7 @@ rhi::FenceHandle Scene::UploadAttributeData()
 			colors.push_back(splatData->fDc0[i]);
 			colors.push_back(splatData->fDc1[i]);
 			colors.push_back(splatData->fDc2[i]);
+			colors.push_back(splatData->opacity[i]);
 		}
 
 		for (const auto &coeff : splatData->fRest)
@@ -259,21 +262,21 @@ void Scene::AllocateGpuBuffers()
 
 	using namespace rhi;
 
-	// Position buffer (x, y, z)
+	// Position buffer (x, y, z, padding)
 	{
 		BufferDesc desc{};
 		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
 		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * 3 * sizeof(float);
+		desc.size          = totalSplatCount * 4 * sizeof(float);
 		gpuData.positions  = device->CreateBuffer(desc);
 	}
 
-	// Scale buffer (sx, sy, sz)
+	// Scale buffer (sx, sy, sz, padding)
 	{
 		BufferDesc desc{};
 		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
 		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * 3 * sizeof(float);
+		desc.size          = totalSplatCount * 4 * sizeof(float);
 		gpuData.scales     = device->CreateBuffer(desc);
 	}
 
@@ -286,12 +289,12 @@ void Scene::AllocateGpuBuffers()
 		gpuData.rotations  = device->CreateBuffer(desc);
 	}
 
-	// Color buffer (r, g, b)
+	// Color buffer (r, g, b, alpha)
 	{
 		BufferDesc desc{};
 		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
 		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * 3 * sizeof(float);
+		desc.size          = totalSplatCount * 4 * sizeof(float);
 		gpuData.colors     = device->CreateBuffer(desc);
 	}
 

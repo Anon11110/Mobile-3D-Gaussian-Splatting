@@ -1,0 +1,52 @@
+#version 460
+
+layout (local_size_x = 256) in;
+
+// Binding 0: Positions buffer
+layout(set = 0, binding = 0, std430) readonly buffer Positions
+{
+    vec4 positions[];
+};
+
+// Binding 1: Output buffer for sortable depth keys
+layout(set = 0, binding = 1) writeonly buffer SplatKeys
+{
+    uint splatKeys[];
+};
+
+// Binding 2: Camera data
+layout(set = 0, binding = 2) uniform CameraUBO
+{
+    mat4 viewMatrix;
+};
+
+layout(push_constant) uniform PushConstants
+{
+    uint numElements;
+};
+
+// Converts a float to a sortable uint. For standard right-handed view spaces,
+// larger Z is further away. To sort far-to-near (descending depth), we want
+// larger Z values to have smaller uint keys.
+uint FloatToSortableUint(float val)
+{
+    uint u = floatBitsToUint(val);
+    uint mask = (u & 0x80000000u) != 0u ? 0xFFFFFFFFu : 0x80000000u;
+    return 0xFFFFFFFFu - (u ^ mask);
+}
+
+void main()
+{
+    uint splatID = gl_GlobalInvocationID.x;
+    if (splatID >= numElements)
+        return;
+
+    // Read position from AoS buffer - positions are vec4 with (x, y, z, 1.0)
+    vec3 worldPos = positions[splatID].xyz;
+    vec4 viewPos = viewMatrix * vec4(worldPos, 1.0);
+
+    // RH camera with -Z forward: farther → larger depth value
+    float depth = -viewPos.z;
+
+    splatKeys[splatID] = FloatToSortableUint(depth);
+}
