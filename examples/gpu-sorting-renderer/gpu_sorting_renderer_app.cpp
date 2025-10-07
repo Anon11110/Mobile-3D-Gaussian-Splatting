@@ -252,43 +252,45 @@ void GpuSortingRendererApp::OnMouseMove(double xpos, double ypos)
 
 void GpuSortingRendererApp::LoadSplatFile(const char *filepath)
 {
-	engine::SplatLoader loader;
-	auto                futureData = loader.Load(filepath);
+	// engine::SplatLoader loader;
+	// auto                futureData = loader.Load(filepath);
 
-	auto splatData = futureData.get();
+	// auto splatData = futureData.get();
 
-	if (splatData && splatData->numSplats > 0)
-	{
-		scene->AddMesh(splatData, math::Identity());
-		scene->AllocateGpuBuffers();
-		rhi::FenceHandle uploadFence = scene->UploadAttributeData();
-		uploadFence->Wait(UINT64_MAX);
-		LOG_INFO("Loaded {} splats from {}", splatData->numSplats, filepath);
-	}
-	else
-	{
-		CreateTestSplatData();
-	}
+	// if (splatData && splatData->numSplats > 0)
+	// {
+	// 	scene->AddMesh(splatData, math::Identity());
+	// 	scene->AllocateGpuBuffers();
+	// 	rhi::FenceHandle uploadFence = scene->UploadAttributeData();
+	// 	uploadFence->Wait(UINT64_MAX);
+	// 	LOG_INFO("Loaded {} splats from {}", splatData->numSplats, filepath);
+	// }
+	// else
+	// {
+	// 	CreateTestSplatData();
+	// }
+
+	CreateTestSplatData();
 }
 
 void GpuSortingRendererApp::CreateTestSplatData()
 {
 	// Create simple test splats at known Z positions to verify depth calculation
 	// Camera is at (0, 0, 5) looking down -Z axis (towards origin)
-	const uint32_t testSplatCount = 10;
+	const uint32_t testSplatCount = 1000;
 	auto           testData       = container::make_shared<engine::SplatSoA>();
 	testData->Resize(testSplatCount, 0);        // No SH coefficients for test data
 
 	LOG_INFO("Creating {} test splats for depth calculation verification", testSplatCount);
 	LOG_INFO("Camera position: (0, 0, 5), looking towards origin (down -Z axis)");
-	LOG_INFO("Test splat positions:");
 
 	// Create splats at different known Z positions
+	// Distribute splats from Z=-495 to Z=504 (1000 splats with spacing of 1.0)
 	for (uint32_t i = 0; i < testSplatCount; ++i)
 	{
 		// Place splats in a line along Z axis, all in front of camera
-		// Camera is at Z=5, so we place splats from Z=-5 to Z=4
-		float z = -5.0f + i * 1.0f;        // Z from -5 to 4
+		// Camera is at Z=5, so we place splats from Z=-495 to Z=504
+		float z = -495.0f + i * 1.0f;        // Z from -495 to 504
 
 		testData->posX[i] = 0.0f;
 		testData->posY[i] = 0.0f;
@@ -297,8 +299,18 @@ void GpuSortingRendererApp::CreateTestSplatData()
 		// View space Z = world_Z - camera_Z = z - 5
 		float expectedViewZ = z - 5.0f;
 		float expectedDepth = -expectedViewZ;
-		LOG_INFO("  Splat[{}]: World Z={:.1f}, Expected view Z={:.1f}, Expected depth={:.1f}",
-		         i, z, expectedViewZ, expectedDepth);
+
+		// Only log first few, last few, and the special case at z=5
+		if (i < 5 || i >= testSplatCount - 5 || i == 500)
+		{
+			LOG_INFO("  Splat[{}]: World Z={:.1f}, Expected view Z={:.1f}, Expected depth={:.1f}{}",
+			         i, z, expectedViewZ, expectedDepth,
+			         (i == 500) ? " <- Camera plane (depth=0)" : "");
+		}
+		else if (i == 5)
+		{
+			LOG_INFO("  ... (omitting middle entries for brevity) ...");
+		}
 
 		float scale         = 0.05f;
 		testData->scaleX[i] = scale;
@@ -319,8 +331,14 @@ void GpuSortingRendererApp::CreateTestSplatData()
 
 	LOG_INFO("");
 	LOG_INFO("Expected sorting order (far to near):");
-	LOG_INFO("  Farthest: Splat[0] at Z=-5 (depth=10.0)");
-	LOG_INFO("  Nearest:  Splat[9] at Z=4 (depth=1.0)");
+	LOG_INFO("  Farthest: Splat[0] at Z=-495.0 (depth=500.0)");
+	LOG_INFO("  Camera plane: Splat[500] at Z=5.0 (depth=0.0)");
+	LOG_INFO("  Nearest:  Splat[999] at Z=504.0 (depth=-499.0)");
+	LOG_INFO("");
+	LOG_INFO("Depth distribution:");
+	LOG_INFO("  Positive depths (behind camera): Splats 0-499 (500 splats)");
+	LOG_INFO("  Zero depth (at camera): Splat 500 (1 splat)");
+	LOG_INFO("  Negative depths (in front): Splats 501-999 (499 splats)");
 
 	scene->AddMesh(testData, math::Identity());
 	scene->AllocateGpuBuffers();

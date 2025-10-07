@@ -1,0 +1,90 @@
+#version 460
+#extension GL_KHR_shader_subgroup_basic : enable
+
+#define WORKGROUP_SIZE 256
+#define RADIX_SORT_BINS 256
+
+layout (local_size_x = WORKGROUP_SIZE) in;
+
+layout(push_constant) uniform PushConstants
+{
+    uint numElements;
+    uint shift;
+    uint numWorkgroups;
+    uint numBlocksPerWorkgroup;
+} pc;
+
+layout(std430, set = 0, binding = 0) readonly buffer DepthKeys
+{
+    uint depthKeys[];
+};
+
+layout(std430, set = 0, binding = 1) buffer Histograms
+{
+    uint histograms[];
+};
+
+const uint waveSize = 32;
+const uint maxWaves = WORKGROUP_SIZE / waveSize;
+
+// Final per-WG histogram (256 bins)
+// LDS space: 256 bins * 4 bytes = 1024 bytes
+shared uint ldsHist[RADIX_SORT_BINS];
+
+// Wave-private histograms to reduce LDS hot spots.
+// Layout: ldsWaveHist[bin * maxWaves + waveId] -> count for (bin, wave)
+// LDS space for all waves: maxWaves * 256 bins * 4 bytes = 8192 bytes
+shared uint ldsWaveHist[RADIX_SORT_BINS * maxWaves];
+
+void main()
+{
+    const uint lid = gl_LocalInvocationID.x;
+    const uint wid = gl_WorkGroupID.x;
+    const uint waveId = gl_SubgroupID;
+    const uint numWaves = gl_NumSubgroups;
+
+    if (lid < RADIX_SORT_BINS)
+    {
+        ldsHist[lid] = 0u;
+    }
+
+    for (uint i = lid; i < RADIX_SORT_BINS * maxWaves; i += WORKGROUP_SIZE)
+    {
+        ldsWaveHist[i] = 0u;
+    }
+    barrier();
+
+    const uint wgSpan = pc.numBlocksPerWorkgroup * WORKGROUP_SIZE;
+    const uint baseElem = wid * wgSpan + lid;
+    const uint mask = RADIX_SORT_BINS - 1u;
+
+    // Accumulate into wave-private histogram to reduce contention
+    // TODO: benchmark later to see if it's beneficial
+    for (uint block = 0u; block < pc.numBlocksPerWorkgroup; ++block)
+    {
+        const uint elemId = baseElem + block * WORKGROUP_SIZE;
+        if (elemId < pc.numElements)
+        {
+            const uint key = depthKeys[elemId];
+            const uint bin = (key >> pc.shift) & mask;
+            atomicAdd(ldsWaveHist[bin * maxWaves + waveId], 1u);
+        }
+    }
+    barrier();
+
+    if (lid < RADIX_SORT_BINS)
+    {
+        uint sum = 0u;
+        for (uint w = 0u; w < numWaves; ++w)
+        {
+            sum += ldsWaveHist[lid * maxWaves + w];
+        }
+        ldsHist[lid] = sum;
+    }
+    barrier();
+
+    if (lid < RADIX_SORT_BINS)
+    {
+        histograms[wid * RADIX_SORT_BINS + lid] = ldsHist[lid];
+    }
+}

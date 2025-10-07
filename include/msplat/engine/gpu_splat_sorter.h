@@ -58,13 +58,17 @@ class GpuSplatSorter
 	rhi::BufferHandle sortIndicesA;
 	rhi::BufferHandle sortIndicesB;
 	rhi::BufferHandle histograms;
+	rhi::BufferHandle verificationHistogram;
 	rhi::BufferHandle cameraUBO;
 
 	rhi::PipelineHandle depthCalcPipeline;
+	rhi::PipelineHandle histogramPipeline;
 
 	rhi::DescriptorSetLayoutHandle depthCalcSetLayout;
+	rhi::DescriptorSetLayoutHandle histogramSetLayout;
 
 	rhi::DescriptorSetHandle depthCalcDescriptorSet;
+	rhi::DescriptorSetHandle histogramDescriptorSets[4];
 };
 
 }        // namespace msplat::engine
