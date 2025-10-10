@@ -171,7 +171,7 @@ void GpuSplatSorter::CreateComputePipelines()
 		// Binding 1: Output histograms
 		layoutDesc.bindings.push_back({
 			1,
-			rhi::DescriptorType::STORAGE_BUFFER,
+			rhi::DescriptorType::STORAGE_BUFFER_DYNAMIC,
 			1,
 			rhi::ShaderStageFlags::COMPUTE
 		});
@@ -238,31 +238,29 @@ void GpuSplatSorter::CreateDescriptorSets()
 		depthCalcDescriptorSet->BindBuffer(2, cameraBinding);
 	}
 
-	// Create descriptor sets for histogram
+	// Create descriptor set for histogram
 	{
+		histogramDescriptorSet = device->CreateDescriptorSet(histogramSetLayout.Get(), rhi::QueueType::COMPUTE);
+
+		// Binding 0: Input elements (depth keys)
+		rhi::BufferBinding inputBinding = {};
+		inputBinding.buffer = splatDepths.Get();
+		inputBinding.offset = 0;
+		inputBinding.range = 0;
+		inputBinding.type = rhi::DescriptorType::STORAGE_BUFFER;
+		histogramDescriptorSet->BindBuffer(0, inputBinding);
+
+		// Binding 1: Output histograms
+		// Range per binding
 		uint32_t numWorkgroups = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
 		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 
-		for (uint32_t pass = 0; pass < RadixPasses; ++pass)
-		{
-			histogramDescriptorSets[pass] = device->CreateDescriptorSet(histogramSetLayout.Get(), rhi::QueueType::COMPUTE);
-
-			// Binding 0: Input elements (depth keys)
-			rhi::BufferBinding inputBinding = {};
-			inputBinding.buffer = splatDepths.Get();
-			inputBinding.offset = 0;
-			inputBinding.range = 0;
-			inputBinding.type = rhi::DescriptorType::STORAGE_BUFFER;
-			histogramDescriptorSets[pass]->BindBuffer(0, inputBinding);
-
-			// Binding 1: Output histograms (with offset for this pass)
-			rhi::BufferBinding histogramBinding = {};
-			histogramBinding.buffer = histograms.Get();
-			histogramBinding.offset = pass * histogramSizePerPass;
-			histogramBinding.range = histogramSizePerPass;
-			histogramBinding.type = rhi::DescriptorType::STORAGE_BUFFER;
-			histogramDescriptorSets[pass]->BindBuffer(1, histogramBinding);
-		}
+		rhi::BufferBinding histogramBinding = {};
+		histogramBinding.buffer = histograms.Get();
+		histogramBinding.offset = 0;
+		histogramBinding.range = histogramSizePerPass;
+		histogramBinding.type = rhi::DescriptorType::STORAGE_BUFFER_DYNAMIC;
+		histogramDescriptorSet->BindBuffer(1, histogramBinding);
 	}
 }
 
@@ -342,6 +340,9 @@ void GpuSplatSorter::RecordRadixSort(rhi::IRHICommandList* cmdList)
 
 	cmdList->SetPipeline(histogramPipeline.Get());
 
+	// Size of histogram data for one pass
+	uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
+
 	// Compute histograms for all 4 passes (8 bits each)
 	for (uint32_t pass = 0; pass < RadixPasses; ++pass)
 	{
@@ -353,7 +354,9 @@ void GpuSplatSorter::RecordRadixSort(rhi::IRHICommandList* cmdList)
 		pushConstants.numWorkgroups = numWorkgroups;
 		pushConstants.numBlocksPerWorkgroup = numBlocksPerWorkgroup;
 
-		cmdList->BindDescriptorSet(0, histogramDescriptorSets[pass].Get());
+		// Dynamic offset for this pass
+		uint32_t dynamicOffset = pass * histogramSizePerPass;
+		cmdList->BindDescriptorSet(0, histogramDescriptorSet.Get(), {&dynamicOffset, 1});
 
 		cmdList->PushConstants(
 			rhi::ShaderStageFlags::COMPUTE,

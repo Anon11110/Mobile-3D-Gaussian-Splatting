@@ -68,7 +68,7 @@ class GpuSplatSorter
 	rhi::DescriptorSetLayoutHandle histogramSetLayout;
 
 	rhi::DescriptorSetHandle depthCalcDescriptorSet;
-	rhi::DescriptorSetHandle histogramDescriptorSets[4];
+	rhi::DescriptorSetHandle histogramDescriptorSet;
 };
 
 }        // namespace msplat::engine

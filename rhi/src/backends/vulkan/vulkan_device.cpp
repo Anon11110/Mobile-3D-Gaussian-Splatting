@@ -1257,15 +1257,21 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		                                                       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
 		                                                       {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 500},
 		                                                       {VK_DESCRIPTOR_TYPE_SAMPLER, 500},
-		                                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 200}};
+		                                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 200},
+		                                                       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 100},
+		                                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 100}};
 
 		std::vector<VkDescriptorPoolSize> computePoolSizes = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2000},
 		                                                      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 500},
 		                                                      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 500},
-		                                                      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 200}};
+		                                                      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 200},
+		                                                      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 100},
+		                                                      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 200}};
 
 		std::vector<VkDescriptorPoolSize> transferPoolSizes = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 100},
-		                                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 100}};
+		                                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 100},
+		                                                       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 50},
+		                                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 50}};
 
 		// Create graphics descriptor pool
 		VkDescriptorPoolCreateInfo poolInfo{};

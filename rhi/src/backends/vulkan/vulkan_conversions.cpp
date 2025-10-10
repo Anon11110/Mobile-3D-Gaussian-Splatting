@@ -149,6 +149,12 @@ VkDescriptorType DescriptorTypeToVulkan(DescriptorType type)
 		case DescriptorType::STORAGE_BUFFER:
 			return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 
+		// Dynamic buffers
+		case DescriptorType::UNIFORM_BUFFER_DYNAMIC:
+			return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+		case DescriptorType::STORAGE_BUFFER_DYNAMIC:
+			return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+
 		// Texel buffer views
 		case DescriptorType::UNIFORM_TEXEL_BUFFER:
 			return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
