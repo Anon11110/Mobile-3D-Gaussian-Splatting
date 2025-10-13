@@ -45,6 +45,12 @@ class GpuSplatSorter
 		uint32_t numBlocksPerWorkgroup;
 	};
 
+	struct ScanPushConstants
+	{
+		uint32_t numElements;
+		uint32_t passType;        // 0 = scan blocks, 1 = scan block sums, 2 = add offsets
+	};
+
 	rhi::IRHIDevice *device;
 	uint32_t         totalSplatCount;
 	bool             isInitialized;
@@ -53,22 +59,32 @@ class GpuSplatSorter
 	rhi::BufferHandle splatIndicesOriginal;
 
 	rhi::BufferHandle verificationDepths;
+	rhi::BufferHandle verificationSortedKeys;
+	rhi::BufferHandle verificationSortedIndices;
 	rhi::BufferHandle sortKeysA;
 	rhi::BufferHandle sortKeysB;
 	rhi::BufferHandle sortIndicesA;
 	rhi::BufferHandle sortIndicesB;
 	rhi::BufferHandle histograms;
+	rhi::BufferHandle blockSums;
 	rhi::BufferHandle verificationHistogram;
 	rhi::BufferHandle cameraUBO;
 
 	rhi::PipelineHandle depthCalcPipeline;
 	rhi::PipelineHandle histogramPipeline;
+	rhi::PipelineHandle radixPrefixScanPipeline;
+	rhi::PipelineHandle scatterPairsPipeline;
 
 	rhi::DescriptorSetLayoutHandle depthCalcSetLayout;
 	rhi::DescriptorSetLayoutHandle histogramSetLayout;
+	rhi::DescriptorSetLayoutHandle scanSetLayout;
+	rhi::DescriptorSetLayoutHandle scatterPairsSetLayout;
 
 	rhi::DescriptorSetHandle depthCalcDescriptorSet;
-	rhi::DescriptorSetHandle histogramDescriptorSet;
+	rhi::DescriptorSetHandle histogramDescriptorSets[4];
+	rhi::DescriptorSetHandle scanDescriptorSets[4];
+	rhi::DescriptorSetHandle scanBlockSumsDescriptorSet;
+	rhi::DescriptorSetHandle scatterPairsDescriptorSets[4];
 };
 
 }        // namespace msplat::engine
