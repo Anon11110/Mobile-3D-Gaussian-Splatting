@@ -24,8 +24,7 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 	auto *swapchain = m_deviceManager->GetSwapchain();
 
 	// Initialize particle data
-	container::vector<Particle> initialParticles;
-	initialParticles.resize(PARTICLE_COUNT);
+	container::vector<Particle> initialParticles(PARTICLE_COUNT);
 	for (uint32_t i = 0; i < PARTICLE_COUNT; ++i)
 	{
 		float x = (static_cast<float>(i) / PARTICLE_COUNT - 0.5f) * 2.0f;

@@ -139,6 +139,20 @@ class vector
 		}
 	}
 
+	// Size constructor - creates vector with n default-constructed elements
+	explicit vector(size_t count, std::pmr::memory_resource *memres = nullptr) :
+	    mData(nullptr), mSize(0), mCapacity(0), mMemoryResource(memres ? memres : pmr::GetUpstreamAllocator())
+	{
+		resize(count);
+	}
+
+	// Size and value constructor - creates vector with n copies of value
+	vector(size_t count, const T &value, std::pmr::memory_resource *memres = nullptr) :
+	    mData(nullptr), mSize(0), mCapacity(0), mMemoryResource(memres ? memres : pmr::GetUpstreamAllocator())
+	{
+		resize(count, value);
+	}
+
 	// Destructor
 	~vector()
 	{
