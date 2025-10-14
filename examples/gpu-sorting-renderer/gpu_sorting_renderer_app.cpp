@@ -246,25 +246,25 @@ void GpuSortingRendererApp::OnMouseMove(double xpos, double ypos)
 
 void GpuSortingRendererApp::LoadSplatFile(const char *filepath)
 {
-	// engine::SplatLoader loader;
-	// auto                futureData = loader.Load(filepath);
+	engine::SplatLoader loader;
+	auto                futureData = loader.Load(filepath);
 
-	// auto splatData = futureData.get();
+	auto splatData = futureData.get();
 
-	// if (splatData && splatData->numSplats > 0)
-	// {
-	// 	scene->AddMesh(splatData, math::Identity());
-	// 	scene->AllocateGpuBuffers();
-	// 	rhi::FenceHandle uploadFence = scene->UploadAttributeData();
-	// 	uploadFence->Wait(UINT64_MAX);
-	// 	LOG_INFO("Loaded {} splats from {}", splatData->numSplats, filepath);
-	// }
-	// else
-	// {
-	// 	CreateTestSplatData();
-	// }
+	if (splatData && splatData->numSplats > 0)
+	{
+		scene->AddMesh(splatData, math::Identity());
+		scene->AllocateGpuBuffers();
+		rhi::FenceHandle uploadFence = scene->UploadAttributeData();
+		uploadFence->Wait(UINT64_MAX);
+		LOG_INFO("Loaded {} splats from {}", splatData->numSplats, filepath);
+	}
+	else
+	{
+		CreateTestSplatData();
+	}
 
-	CreateTestSplatData();
+	// CreateTestSplatData();
 }
 
 void GpuSortingRendererApp::CreateTestSplatData()

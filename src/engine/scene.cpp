@@ -119,6 +119,9 @@ rhi::FenceHandle Scene::UploadAttributeData()
 	colors.reserve(totalSplatCount * 4);
 	shRest.reserve(totalShCoeffs);
 
+	// Spherical harmonics constant for degree 0
+	constexpr float shC0 = 0.28209479177387814f;
+
 	// Consolidate all mesh data
 	for (const auto &mesh : meshes)
 	{
@@ -138,9 +141,10 @@ rhi::FenceHandle Scene::UploadAttributeData()
 
 		for (uint32_t i = 0; i < count; ++i)
 		{
-			scales.push_back(splatData->scaleX[i]);
-			scales.push_back(splatData->scaleY[i]);
-			scales.push_back(splatData->scaleZ[i]);
+			// Scales are stored in log space, convert to linear space with exp()
+			scales.push_back(math::Exp(splatData->scaleX[i]));
+			scales.push_back(math::Exp(splatData->scaleY[i]));
+			scales.push_back(math::Exp(splatData->scaleZ[i]));
 			scales.push_back(1.0f);
 		}
 
@@ -154,10 +158,19 @@ rhi::FenceHandle Scene::UploadAttributeData()
 
 		for (uint32_t i = 0; i < count; ++i)
 		{
-			colors.push_back(splatData->fDc0[i]);
-			colors.push_back(splatData->fDc1[i]);
-			colors.push_back(splatData->fDc2[i]);
-			colors.push_back(splatData->opacity[i]);
+			// Convert SH degree 0 coefficients to RGB color: shC0 * fDc + 0.5
+			float r = math::Clamp(shC0 * splatData->fDc0[i] + 0.5f, 0.0f, 1.0f);
+			float g = math::Clamp(shC0 * splatData->fDc1[i] + 0.5f, 0.0f, 1.0f);
+			float b = math::Clamp(shC0 * splatData->fDc2[i] + 0.5f, 0.0f, 1.0f);
+
+			// Opacity is stored as a logit (pre-sigmoid), convert to alpha [0,1] with sigmoid
+			float opacityLogit = splatData->opacity[i];
+			float alpha        = math::Clamp(1.0f / (1.0f + math::Exp(-opacityLogit)), 0.0f, 1.0f);
+
+			colors.push_back(r);
+			colors.push_back(g);
+			colors.push_back(b);
+			colors.push_back(alpha);
 		}
 
 		for (const auto &coeff : splatData->fRest)
