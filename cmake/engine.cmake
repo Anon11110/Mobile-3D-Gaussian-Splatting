@@ -18,7 +18,7 @@ set(ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/engine/mesh_generator.cpp
     ${CMAKE_SOURCE_DIR}/src/engine/splat_mesh.cpp
     ${CMAKE_SOURCE_DIR}/src/engine/scene.cpp
-    ${CMAKE_SOURCE_DIR}/src/msplat/engine/gpu_splat_sorter.cpp
+    ${CMAKE_SOURCE_DIR}/src/engine/gpu_splat_sorter.cpp
     ${CMAKE_SOURCE_DIR}/third-party/miniply/miniply.cpp
 )
 

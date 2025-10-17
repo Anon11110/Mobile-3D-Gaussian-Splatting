@@ -85,6 +85,7 @@ void main()
 
     if (lid < RADIX_SORT_BINS)
     {
-        histograms[wid * RADIX_SORT_BINS + lid] = ldsHist[lid];
+        // Write in bin-major order: [bin0: WG0..WGn | bin1: WG0..WGn | ... | bin255: WG0..WGn]
+        histograms[lid * pc.numWorkgroups + wid] = ldsHist[lid];
     }
 }

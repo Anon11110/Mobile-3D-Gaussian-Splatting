@@ -63,7 +63,8 @@ void main()
     // Read from the scanned histogram for this workgroup
     if (lID < RADIX_SORT_BINS)
     {
-        localOffsets[lID] = scannedGlobalOffsets[wID * RADIX_SORT_BINS + lID];
+        // Histogram: [bin0: WG0..WGn | bin1: WG0..WGn | ...]
+        localOffsets[lID] = scannedGlobalOffsets[lID * pc.numWorkgroups + wID];
     }
     barrier();
 

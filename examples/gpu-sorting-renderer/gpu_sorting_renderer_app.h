@@ -6,6 +6,7 @@
 #include "core/containers/vector.h"
 #include "core/math/math.h"
 #include "core/timer.h"
+#include <cstdlib>
 #include <msplat/engine/shader_factory.h>
 
 namespace rhi
@@ -80,4 +81,6 @@ class GpuSortingRendererApp : public app::IApplication
 	bool              verifyNextSort           = false;
 	bool              checkVerificationResults = false;
 	uint32_t          frameCount               = 0;
+
+	container::vector<math::vec3> testSplatPositions;
 };

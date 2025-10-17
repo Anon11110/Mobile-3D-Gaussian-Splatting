@@ -23,7 +23,7 @@ class GpuSplatSorter
 	// Phase 1: Prepare verification (copies data to readback buffers)
 	void PrepareVerification(rhi::IRHICommandList *cmdList);
 	// Phase 2: Check results after GPU work completes
-	bool CheckVerificationResults();
+	bool CheckVerificationResults(const container::vector<math::vec3> *testPositions = nullptr);
 
   private:
 	void CreateInitialIndicesBuffer(uint32_t totalSplatCount);
@@ -32,10 +32,12 @@ class GpuSplatSorter
 	void RecordDepthCalculation(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera);
 	void RecordRadixSort(rhi::IRHICommandList *cmdList);
 
-	static constexpr uint32_t WorkgroupSize = 256;
-	static constexpr uint32_t RadixSortBins = 256;
-	static constexpr uint32_t RadixPasses   = 4;
-	static constexpr uint32_t SubgroupSize  = 32;
+	static constexpr uint32_t WorkgroupSize    = 256;
+	static constexpr uint32_t MaxWorkgroups    = 256;
+	static constexpr uint32_t RadixSortBins    = 256;
+	static constexpr uint32_t ElementPerThread = 4;
+	static constexpr uint32_t RadixPasses      = 4;
+	static constexpr uint32_t SubgroupSize     = 32;
 
 	struct PushConstants
 	{
