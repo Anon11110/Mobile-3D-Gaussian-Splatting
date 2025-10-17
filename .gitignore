@@ -54,6 +54,7 @@ AGENTS.md
 .cursor/
 .vscode/
 .mcp.json
+.serena/
 
 # Ignore all compiled SPIR-V shader binaries
 shaders/compiled/*.spv
@@ -64,3 +65,6 @@ examples/particles/shaders/compiled/*.spv
 assets/splats/flowers_1/
 assets/splats/*.ply
 assets/splats/*.zipexamples/naive-splat-cpu/shaders/compiled/*.spv
+
+# References
+refs/
