@@ -8,12 +8,12 @@
 namespace msplat::engine
 {
 
-class SplatSorter
+class CpuSplatSorter
 {
   public:
 	// Pre-allocates internal buffers for a given number of splats.
-	explicit SplatSorter(uint32_t max_splats);
-	~SplatSorter();        // Destructor will handle joining the worker thread.
+	explicit CpuSplatSorter(uint32_t max_splats);
+	~CpuSplatSorter();        // Destructor will handle joining the worker thread.
 
 	// Triggers a new sort on the background thread. This is a non-blocking call.
 	// It takes the consolidated positions of all splats and the camera's view matrix.
@@ -27,8 +27,8 @@ class SplatSorter
 	container::span<const uint32_t> GetSortedIndices();
 
   private:
-	SplatSorter(const SplatSorter &)            = delete;
-	SplatSorter &operator=(const SplatSorter &) = delete;
+	CpuSplatSorter(const CpuSplatSorter &)            = delete;
+	CpuSplatSorter &operator=(const CpuSplatSorter &) = delete;
 
 	class Impl;
 	container::unique_ptr<Impl> p_impl;

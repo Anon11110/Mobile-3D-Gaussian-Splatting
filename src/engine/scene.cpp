@@ -1,7 +1,7 @@
 #include <msplat/core/log.h>
 #include <msplat/core/math/math.h>
+#include <msplat/engine/cpu_splat_sorter.h>
 #include <msplat/engine/scene.h>
-#include <msplat/engine/splat_sorter.h>
 
 namespace msplat::engine
 {
@@ -268,7 +268,7 @@ void Scene::AllocateGpuBuffers()
 	}
 
 	// Initialize CPU-side sorting system
-	splat_sorter = container::make_unique<SplatSorter>(totalSplatCount);
+	splat_sorter = container::make_unique<CpuSplatSorter>(totalSplatCount);
 	splat_positions.reserve(totalSplatCount);
 
 	gpuBuffersAllocated = true;
@@ -285,7 +285,7 @@ void Scene::UpdateView(const math::mat4 &view_matrix)
 {
 	if (!splat_sorter)
 	{
-		LOG_WARNING("SplatSorter not initialized. Call AllocateGpuBuffers() first.");
+		LOG_WARNING("CpuSplatSorter not initialized. Call AllocateGpuBuffers() first.");
 		return;
 	}
 
@@ -297,7 +297,7 @@ rhi::FenceHandle Scene::ConsumeAndUploadSortedIndices()
 {
 	if (!splat_sorter)
 	{
-		LOG_WARNING("SplatSorter not initialized. Call AllocateGpuBuffers() first.");
+		LOG_WARNING("CpuSplatSorter not initialized. Call AllocateGpuBuffers() first.");
 		return nullptr;
 	}
 

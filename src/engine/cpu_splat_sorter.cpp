@@ -1,4 +1,4 @@
-#include "engine/splat_sorter.h"
+#include "engine/cpu_splat_sorter.h"
 #include "core/log.h"
 #include <algorithm>
 #include <atomic>
@@ -9,7 +9,7 @@
 namespace msplat::engine
 {
 
-class SplatSorter::Impl
+class CpuSplatSorter::Impl
 {
   public:
 	explicit Impl(uint32_t max_splats);
@@ -41,7 +41,7 @@ class SplatSorter::Impl
 	math::mat4                    m_worker_view_matrix;
 };
 
-SplatSorter::Impl::Impl(uint32_t max_splats)
+CpuSplatSorter::Impl::Impl(uint32_t max_splats)
 {
 	m_indices_A.resize(max_splats);
 	m_indices_B.resize(max_splats);
@@ -50,10 +50,10 @@ SplatSorter::Impl::Impl(uint32_t max_splats)
 	m_producerBuffer = m_indices_A.data();
 	m_consumerBuffer.store(nullptr);        // No data ready initially
 
-	m_workerThread = std::thread(&SplatSorter::Impl::SortWorker, this);
+	m_workerThread = std::thread(&CpuSplatSorter::Impl::SortWorker, this);
 }
 
-SplatSorter::Impl::~Impl()
+CpuSplatSorter::Impl::~Impl()
 {
 	{
 		std::unique_lock<std::mutex> lock(m_mutex);
@@ -66,7 +66,7 @@ SplatSorter::Impl::~Impl()
 	}
 }
 
-void SplatSorter::Impl::RequestSort(const container::vector<math::vec3> &splat_positions, const math::mat4 &view_matrix)
+void CpuSplatSorter::Impl::RequestSort(const container::vector<math::vec3> &splat_positions, const math::mat4 &view_matrix)
 {
 	{
 		std::unique_lock<std::mutex> lock(m_mutex);
@@ -82,12 +82,12 @@ void SplatSorter::Impl::RequestSort(const container::vector<math::vec3> &splat_p
 	m_cv.notify_one();
 }
 
-bool SplatSorter::Impl::IsSortComplete() const
+bool CpuSplatSorter::Impl::IsSortComplete() const
 {
 	return m_consumerBuffer.load() != nullptr;
 }
 
-container::span<const uint32_t> SplatSorter::Impl::GetSortedIndices()
+container::span<const uint32_t> CpuSplatSorter::Impl::GetSortedIndices()
 {
 	uint32_t *readyBuffer = m_consumerBuffer.exchange(nullptr);
 	if (readyBuffer)
@@ -100,7 +100,7 @@ container::span<const uint32_t> SplatSorter::Impl::GetSortedIndices()
 	return {};
 }
 
-void SplatSorter::Impl::SortWorker()
+void CpuSplatSorter::Impl::SortWorker()
 {
 	while (true)
 	{
@@ -134,21 +134,21 @@ void SplatSorter::Impl::SortWorker()
 	}
 }
 
-// --- SplatSorter PIMPL Forwarders ---
+// --- CpuSplatSorter PIMPL Forwarders ---
 
-SplatSorter::SplatSorter(uint32_t max_splats) :
+CpuSplatSorter::CpuSplatSorter(uint32_t max_splats) :
     p_impl(container::make_unique<Impl>(max_splats))
 {}
-SplatSorter::~SplatSorter() = default;
-void SplatSorter::RequestSort(const container::vector<math::vec3> &splat_positions, const math::mat4 &view_matrix)
+CpuSplatSorter::~CpuSplatSorter() = default;
+void CpuSplatSorter::RequestSort(const container::vector<math::vec3> &splat_positions, const math::mat4 &view_matrix)
 {
 	p_impl->RequestSort(splat_positions, view_matrix);
 }
-bool SplatSorter::IsSortComplete() const
+bool CpuSplatSorter::IsSortComplete() const
 {
 	return p_impl->IsSortComplete();
 }
-container::span<const uint32_t> SplatSorter::GetSortedIndices()
+container::span<const uint32_t> CpuSplatSorter::GetSortedIndices()
 {
 	return p_impl->GetSortedIndices();
 }

@@ -5,9 +5,9 @@
 #include <msplat/core/containers/filesystem.h>
 #include <msplat/core/containers/memory.h>
 #include <msplat/core/containers/vector.h>
+#include <msplat/engine/cpu_splat_sorter.h>
 #include <msplat/engine/splat_loader.h>
 #include <msplat/engine/splat_mesh.h>
-#include <msplat/engine/splat_sorter.h>
 #include <mutex>
 #include <rhi/rhi.h>
 
@@ -74,8 +74,8 @@ class Scene
 	bool                         gpuBuffersAllocated{false};          // Track if GPU buffers are allocated
 
 	// CPU-side data for sorting
-	container::vector<math::vec3>      splat_positions;
-	container::unique_ptr<SplatSorter> splat_sorter;
+	container::vector<math::vec3>         splat_positions;
+	container::unique_ptr<CpuSplatSorter> splat_sorter;
 
 	uint32_t CalculateMaxShCoeffsPerSplat() const;
 	void     UpdateSplatPositions();
