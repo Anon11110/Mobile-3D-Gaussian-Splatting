@@ -64,4 +64,4 @@ add_custom_command(TARGET naive-splat-cpu POST_BUILD
 
 # Compile shaders
 include(${CMAKE_SOURCE_DIR}/cmake/compileshaders.cmake)
-add_shader_directory(naive-splat-cpu ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
+add_shader_directory(naive-splat-cpu ${CMAKE_SOURCE_DIR}/shaders)

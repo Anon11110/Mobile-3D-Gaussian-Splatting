@@ -86,12 +86,9 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 	rhi::DescriptorSetLayoutDesc layoutDesc{};
 	layoutDesc.bindings = {
 	    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::ALL_GRAPHICS},
-	    {1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // Positions
-	    {2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // Scales
-	    {3, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // Rotations
-	    {4, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // SH Coefficients
-	    {5, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // Opacities
-	    {6, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // Sorted Indices
+	    {1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // Splat Attributes (interleaved)
+	    {2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // SH Coefficients
+	    {3, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // Sorted Indices
 	};
 	m_descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 
@@ -104,41 +101,23 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 	uboBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
 	m_descriptorSet->BindBuffer(0, uboBinding);
 
-	// Binding 1: Positions
-	rhi::BufferBinding posBinding{};
-	posBinding.buffer = m_scene->GetGpuData().positions.Get();
-	posBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(1, posBinding);
+	// Binding 1: Splat Attributes (interleaved: position + scale + rotation + color)
+	rhi::BufferBinding attributesBinding{};
+	attributesBinding.buffer = m_scene->GetGpuData().splat_attributes.Get();
+	attributesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(1, attributesBinding);
 
-	// Binding 2: Scales
-	rhi::BufferBinding scaleBinding{};
-	scaleBinding.buffer = m_scene->GetGpuData().scales.Get();
-	scaleBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(2, scaleBinding);
-
-	// Binding 3: Rotations
-	rhi::BufferBinding rotBinding{};
-	rotBinding.buffer = m_scene->GetGpuData().rotations.Get();
-	rotBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(3, rotBinding);
-
-	// Binding 4: Colors
-	rhi::BufferBinding colorBinding{};
-	colorBinding.buffer = m_scene->GetGpuData().colors.Get();
-	colorBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(4, colorBinding);
-
-	// Binding 5: SH Rest
+	// Binding 2: SH Coefficients
 	rhi::BufferBinding shBinding{};
 	shBinding.buffer = m_scene->GetGpuData().shRest.Get();
 	shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(5, shBinding);
+	m_descriptorSet->BindBuffer(2, shBinding);
 
-	// Binding 6: Sorted Indices
+	// Binding 3: Sorted Indices
 	rhi::BufferBinding indicesBinding{};
 	indicesBinding.buffer = m_scene->GetGpuData().sorted_indices.Get();
 	indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(6, indicesBinding);
+	m_descriptorSet->BindBuffer(3, indicesBinding);
 
 	// 7. Create Graphics Pipeline
 	rhi::GraphicsPipelineDesc pipelineDesc{};

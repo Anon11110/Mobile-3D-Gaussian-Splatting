@@ -19,11 +19,11 @@ class Scene
   public:
 	struct GpuData
 	{
-		// Attribute Buffers
-		rhi::BufferHandle positions;
-		rhi::BufferHandle scales;
-		rhi::BufferHandle rotations;        // quaternions
-		rhi::BufferHandle colors;
+		// Interleaved splat attributes buffer (AoS layout)
+		// Each splat: vec4 position + vec4 scale + vec4 rotation + vec4 color = 64 bytes
+		rhi::BufferHandle splat_attributes;
+
+		// SH coefficients (kept separate - variable size, less frequent access)
 		rhi::BufferHandle shRest;
 
 		// Sorted indices for rendering

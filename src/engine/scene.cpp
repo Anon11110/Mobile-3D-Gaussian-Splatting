@@ -107,22 +107,17 @@ rhi::FenceHandle Scene::UploadAttributeData()
 		return nullptr;
 	}
 
-	container::vector<float> positions;
-	container::vector<float> scales;
-	container::vector<float> rotations;
-	container::vector<float> colors;
+	// Interleaved attributes: position + scale + rotation + color per splat
+	container::vector<float> interleavedAttributes;
 	container::vector<float> shRest;
 
-	positions.reserve(totalSplatCount * 4);
-	scales.reserve(totalSplatCount * 4);
-	rotations.reserve(totalSplatCount * 4);
-	colors.reserve(totalSplatCount * 4);
+	interleavedAttributes.reserve(totalSplatCount * 16);        // 16 floats per splat
 	shRest.reserve(totalShCoeffs);
 
 	// Spherical harmonics constant for degree 0
 	constexpr float shC0 = 0.28209479177387814f;
 
-	// Consolidate all mesh data
+	// Consolidate all mesh data with interleaved layout
 	for (const auto &mesh : meshes)
 	{
 		auto splatData = mesh.GetSplatData();
@@ -131,34 +126,28 @@ rhi::FenceHandle Scene::UploadAttributeData()
 
 		uint32_t count = splatData->numSplats;
 
+		// Pack attributes in AoS format: position + scale + rotation + color
 		for (uint32_t i = 0; i < count; ++i)
 		{
-			positions.push_back(splatData->posX[i]);
-			positions.push_back(splatData->posY[i]);
-			positions.push_back(splatData->posZ[i]);
-			positions.push_back(1.0f);
-		}
+			// Position (vec4: xyz + padding)
+			interleavedAttributes.push_back(splatData->posX[i]);
+			interleavedAttributes.push_back(splatData->posY[i]);
+			interleavedAttributes.push_back(splatData->posZ[i]);
+			interleavedAttributes.push_back(1.0f);
 
-		for (uint32_t i = 0; i < count; ++i)
-		{
-			// Scales are stored in log space, convert to linear space with exp()
-			scales.push_back(math::Exp(splatData->scaleX[i]));
-			scales.push_back(math::Exp(splatData->scaleY[i]));
-			scales.push_back(math::Exp(splatData->scaleZ[i]));
-			scales.push_back(1.0f);
-		}
+			// Scale (vec4: xyz + padding) - convert from log space
+			interleavedAttributes.push_back(math::Exp(splatData->scaleX[i]));
+			interleavedAttributes.push_back(math::Exp(splatData->scaleY[i]));
+			interleavedAttributes.push_back(math::Exp(splatData->scaleZ[i]));
+			interleavedAttributes.push_back(1.0f);
 
-		for (uint32_t i = 0; i < count; ++i)
-		{
-			rotations.push_back(splatData->rotX[i]);
-			rotations.push_back(splatData->rotY[i]);
-			rotations.push_back(splatData->rotZ[i]);
-			rotations.push_back(splatData->rotW[i]);
-		}
+			// Rotation (vec4: quaternion xyzw)
+			interleavedAttributes.push_back(splatData->rotX[i]);
+			interleavedAttributes.push_back(splatData->rotY[i]);
+			interleavedAttributes.push_back(splatData->rotZ[i]);
+			interleavedAttributes.push_back(splatData->rotW[i]);
 
-		for (uint32_t i = 0; i < count; ++i)
-		{
-			// Convert SH degree 0 coefficients to RGB color: shC0 * fDc + 0.5
+			// Color (vec4: rgba) - convert SH degree 0 and opacity
 			float r = math::Clamp(shC0 * splatData->fDc0[i] + 0.5f, 0.0f, 1.0f);
 			float g = math::Clamp(shC0 * splatData->fDc1[i] + 0.5f, 0.0f, 1.0f);
 			float b = math::Clamp(shC0 * splatData->fDc2[i] + 0.5f, 0.0f, 1.0f);
@@ -167,12 +156,13 @@ rhi::FenceHandle Scene::UploadAttributeData()
 			float opacityLogit = splatData->opacity[i];
 			float alpha        = math::Clamp(1.0f / (1.0f + math::Exp(-opacityLogit)), 0.0f, 1.0f);
 
-			colors.push_back(r);
-			colors.push_back(g);
-			colors.push_back(b);
-			colors.push_back(alpha);
+			interleavedAttributes.push_back(r);
+			interleavedAttributes.push_back(g);
+			interleavedAttributes.push_back(b);
+			interleavedAttributes.push_back(alpha);
 		}
 
+		// SH coefficients (kept separate)
 		for (const auto &coeff : splatData->fRest)
 		{
 			shRest.push_back(coeff);
@@ -181,41 +171,14 @@ rhi::FenceHandle Scene::UploadAttributeData()
 
 	std::vector<rhi::FenceHandle> uploadFences;
 
-	// Upload all attribute buffers asynchronously
-	rhi::FenceHandle positionsFence = device->UploadBufferAsync(
-	    gpuData.positions.Get(),
-	    positions.data(),
-	    positions.size() * sizeof(float));
-	if (positionsFence)
+	// Upload interleaved attributes buffer
+	rhi::FenceHandle attributesFence = device->UploadBufferAsync(
+	    gpuData.splat_attributes.Get(),
+	    interleavedAttributes.data(),
+	    interleavedAttributes.size() * sizeof(float));
+	if (attributesFence)
 	{
-		uploadFences.push_back(positionsFence);
-	}
-
-	rhi::FenceHandle scalesFence = device->UploadBufferAsync(
-	    gpuData.scales.Get(),
-	    scales.data(),
-	    scales.size() * sizeof(float));
-	if (scalesFence)
-	{
-		uploadFences.push_back(scalesFence);
-	}
-
-	rhi::FenceHandle rotationsFence = device->UploadBufferAsync(
-	    gpuData.rotations.Get(),
-	    rotations.data(),
-	    rotations.size() * sizeof(float));
-	if (rotationsFence)
-	{
-		uploadFences.push_back(rotationsFence);
-	}
-
-	rhi::FenceHandle colorsFence = device->UploadBufferAsync(
-	    gpuData.colors.Get(),
-	    colors.data(),
-	    colors.size() * sizeof(float));
-	if (colorsFence)
-	{
-		uploadFences.push_back(colorsFence);
+		uploadFences.push_back(attributesFence);
 	}
 
 	if (!shRest.empty())
@@ -275,40 +238,14 @@ void Scene::AllocateGpuBuffers()
 
 	using namespace rhi;
 
-	// Position buffer (x, y, z, padding)
+	// Interleaved splat attributes buffer (AoS layout: position + scale + rotation + color)
+	// Each splat: vec4 position + vec4 scale + vec4 rotation + vec4 color = 64 bytes
 	{
 		BufferDesc desc{};
-		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * 4 * sizeof(float);
-		gpuData.positions  = device->CreateBuffer(desc);
-	}
-
-	// Scale buffer (sx, sy, sz, padding)
-	{
-		BufferDesc desc{};
-		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * 4 * sizeof(float);
-		gpuData.scales     = device->CreateBuffer(desc);
-	}
-
-	// Rotation buffer (quaternion: x, y, z, w)
-	{
-		BufferDesc desc{};
-		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * 4 * sizeof(float);
-		gpuData.rotations  = device->CreateBuffer(desc);
-	}
-
-	// Color buffer (r, g, b, alpha)
-	{
-		BufferDesc desc{};
-		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * 4 * sizeof(float);
-		gpuData.colors     = device->CreateBuffer(desc);
+		desc.usage               = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage       = ResourceUsage::Static;
+		desc.size                = totalSplatCount * 16 * sizeof(float);        // 16 floats per splat
+		gpuData.splat_attributes = device->CreateBuffer(desc);
 	}
 
 	// Spherical harmonics coefficients buffer
