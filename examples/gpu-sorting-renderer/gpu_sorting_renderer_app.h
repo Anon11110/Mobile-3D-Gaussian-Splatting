@@ -80,6 +80,7 @@ class GpuSortingRendererApp : public app::IApplication
 	bool              sortingEnabled           = true;
 	bool              verifyNextSort           = false;
 	bool              checkVerificationResults = false;
+	bool              useSimpleVerification    = true;
 	uint32_t          frameCount               = 0;
 
 	container::vector<math::vec3> testSplatPositions;

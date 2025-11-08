@@ -1483,4 +1483,67 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 	return allCorrect && histogramCorrect && scatterCorrect;
 }
 
+bool GpuSplatSorter::VerifySortOrder()
+{
+	if (!verificationSortedKeys)
+	{
+		LOG_WARNING("No verification data available - call PrepareVerification first");
+		return false;
+	}
+
+	uint32_t *sortedKeys = static_cast<uint32_t *>(verificationSortedKeys->Map());
+	if (!sortedKeys)
+	{
+		LOG_ERROR("Failed to map verification buffer for sort order check");
+		return false;
+	}
+
+	LOG_INFO("=== Simple Sort Order Verification ===");
+	LOG_INFO("Checking if {} keys are sorted in ascending order...", totalSplatCount);
+
+	bool     isOrdered       = true;
+	uint32_t outOfOrderCount = 0;
+
+	for (uint32_t i = 1; i < totalSplatCount; ++i)
+	{
+		if (sortedKeys[i - 1] > sortedKeys[i])
+		{
+			isOrdered = false;
+			outOfOrderCount++;
+
+			if (outOfOrderCount <= 5)
+			{
+				LOG_ERROR("  Out of order at position {}: key[{}]={:#010x} > key[{}]={:#010x}",
+				          i, i - 1, sortedKeys[i - 1], i, sortedKeys[i]);
+			}
+		}
+	}
+
+	if (isOrdered)
+	{
+		LOG_INFO("Sort order verification PASSED: All {} keys are in ascending order ✓", totalSplatCount);
+
+		LOG_INFO("First 3 keys: {:#010x}, {:#010x}, {:#010x}",
+		         sortedKeys[0],
+		         totalSplatCount > 1 ? sortedKeys[1] : 0,
+		         totalSplatCount > 2 ? sortedKeys[2] : 0);
+
+		if (totalSplatCount >= 3)
+		{
+			LOG_INFO("Last 3 keys:  {:#010x}, {:#010x}, {:#010x}",
+			         sortedKeys[totalSplatCount - 3],
+			         sortedKeys[totalSplatCount - 2],
+			         sortedKeys[totalSplatCount - 1]);
+		}
+	}
+	else
+	{
+		LOG_ERROR("Sort order verification FAILED: Found {} out-of-order pairs ✗", outOfOrderCount);
+	}
+
+	verificationSortedKeys->Unmap();
+
+	return isOrdered;
+}
+
 }        // namespace msplat::engine

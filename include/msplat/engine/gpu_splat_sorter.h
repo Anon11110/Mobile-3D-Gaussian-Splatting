@@ -24,6 +24,8 @@ class GpuSplatSorter
 	void PrepareVerification(rhi::IRHICommandList *cmdList);
 	// Phase 2: Check results after GPU work completes
 	bool CheckVerificationResults(const container::vector<math::vec3> *testPositions = nullptr);
+	// Simple verification: Only checks if final sorted keys are in ascending order
+	bool VerifySortOrder();
 
   private:
 	void CreateInitialIndicesBuffer(uint32_t totalSplatCount);

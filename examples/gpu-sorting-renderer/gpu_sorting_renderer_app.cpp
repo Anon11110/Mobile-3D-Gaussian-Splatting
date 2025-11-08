@@ -109,7 +109,16 @@ void GpuSortingRendererApp::OnRender()
 	{
 		LOG_INFO("Checking sorting verification results...");
 
-		bool sortingCorrect = sorter->CheckVerificationResults(&testSplatPositions);
+		bool sortingCorrect;
+		if (useSimpleVerification)
+		{
+			sortingCorrect = sorter->VerifySortOrder();
+		}
+		else
+		{
+			sortingCorrect = sorter->CheckVerificationResults(&testSplatPositions);
+		}
+
 		if (sortingCorrect)
 		{
 			LOG_INFO("Sorting verification completed successfully");
@@ -224,7 +233,15 @@ void GpuSortingRendererApp::OnKey(int key, int action, int mods)
 			case GLFW_KEY_V:
 				// Verify sorting on next frame
 				verifyNextSort = true;
-				LOG_INFO("Will verify sorting on next frame");
+				LOG_INFO("Will verify sorting on next frame using {} verification",
+				         useSimpleVerification ? "SIMPLE" : "COMPREHENSIVE");
+				break;
+
+			case GLFW_KEY_M:
+				// Toggle verification mode
+				useSimpleVerification = !useSimpleVerification;
+				LOG_INFO("Verification mode switched to: {}",
+				         useSimpleVerification ? "SIMPLE (sort order only)" : "COMPREHENSIVE (all steps)");
 				break;
 
 			case GLFW_KEY_ESCAPE:
