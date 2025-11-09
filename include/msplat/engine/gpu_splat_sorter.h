@@ -11,6 +11,12 @@ namespace msplat::engine
 class GpuSplatSorter
 {
   public:
+	enum class SortMethod
+	{
+		Prescan,              // Uses pre-scanned histograms (5 dispatches per pass)
+		IntegratedScan        // Integrated prefix sum in scatter (2 dispatches per pass)
+	};
+
 	GpuSplatSorter(rhi::IRHIDevice *device);
 	~GpuSplatSorter() = default;
 
@@ -18,6 +24,20 @@ class GpuSplatSorter
 	void Sort(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera);
 
 	rhi::BufferHandle GetSortedIndices() const;
+
+	// Method switching
+	void SetSortMethod(SortMethod method)
+	{
+		sortMethod = method;
+	}
+	SortMethod GetSortMethod() const
+	{
+		return sortMethod;
+	}
+	const char *GetSortMethodName() const
+	{
+		return sortMethod == SortMethod::Prescan ? "Prescan" : "Integrated";
+	}
 
 	// Verification methods
 	// Phase 1: Prepare verification (copies data to readback buffers)
@@ -32,7 +52,8 @@ class GpuSplatSorter
 	void CreateComputePipelines();
 	void CreateDescriptorSets();
 	void RecordDepthCalculation(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera);
-	void RecordRadixSort(rhi::IRHICommandList *cmdList);
+	void RecordRadixSortPrescan(rhi::IRHICommandList *cmdList);
+	void RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList);
 
 	static constexpr uint32_t WorkgroupSize    = 256;
 	static constexpr uint32_t MaxWorkgroups    = 256;
@@ -77,18 +98,23 @@ class GpuSplatSorter
 	rhi::PipelineHandle depthCalcPipeline;
 	rhi::PipelineHandle histogramPipeline;
 	rhi::PipelineHandle radixPrefixScanPipeline;
-	rhi::PipelineHandle scatterPairsPipeline;
+	rhi::PipelineHandle scatterPairsPipeline;               // Default scatter with integrated scan
+	rhi::PipelineHandle scatterPairsPrescanPipeline;        // Scatter with prescan method
 
 	rhi::DescriptorSetLayoutHandle depthCalcSetLayout;
 	rhi::DescriptorSetLayoutHandle histogramSetLayout;
 	rhi::DescriptorSetLayoutHandle scanSetLayout;
-	rhi::DescriptorSetLayoutHandle scatterPairsSetLayout;
+	rhi::DescriptorSetLayoutHandle scatterPairsSetLayout;                  // For prescan method
+	rhi::DescriptorSetLayoutHandle scatterPairsIntegratedSetLayout;        // For integrated scan method
 
 	rhi::DescriptorSetHandle depthCalcDescriptorSet;
 	rhi::DescriptorSetHandle histogramDescriptorSets[4];
 	rhi::DescriptorSetHandle scanDescriptorSets[4];
 	rhi::DescriptorSetHandle scanBlockSumsDescriptorSet;
-	rhi::DescriptorSetHandle scatterPairsDescriptorSets[4];
+	rhi::DescriptorSetHandle scatterPairsPrescanDescriptorSets[4];           // Prescan method descriptor sets
+	rhi::DescriptorSetHandle scatterPairsIntegratedDescriptorSets[4];        // Integrated scan descriptor sets
+
+	SortMethod sortMethod = SortMethod::IntegratedScan;
 };
 
 }        // namespace msplat::engine

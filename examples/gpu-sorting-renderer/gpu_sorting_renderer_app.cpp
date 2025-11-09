@@ -149,7 +149,8 @@ void GpuSortingRendererApp::OnRender()
 		{
 			if (fpsCounter.shouldUpdate())
 			{
-				LOG_INFO("FPS: {:.2f}", fpsCounter.getFPS());
+				LOG_INFO("FPS: {:.2f} ({})", fpsCounter.getFPS(),
+				         sorter ? sorter->GetSortMethodName() : "No sorter");
 			}
 		}
 	}
@@ -238,6 +239,23 @@ void GpuSortingRendererApp::OnKey(int key, int action, int mods)
 				break;
 
 			case GLFW_KEY_M:
+				// Toggle sorting method between prescan and integrated scan
+				if (sorter)
+				{
+					if (sorter->GetSortMethod() == engine::GpuSplatSorter::SortMethod::IntegratedScan)
+					{
+						sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::Prescan);
+						LOG_INFO("Switched to Prescan radix sort method");
+					}
+					else
+					{
+						sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::IntegratedScan);
+						LOG_INFO("Switched to Integrated Scan radix sort method");
+					}
+				}
+				break;
+
+			case GLFW_KEY_T:
 				// Toggle verification mode
 				useSimpleVerification = !useSimpleVerification;
 				LOG_INFO("Verification mode switched to: {}",
@@ -288,7 +306,7 @@ void GpuSortingRendererApp::LoadSplatFile(const char *filepath)
 void GpuSortingRendererApp::CreateTestSplatData()
 {
 	// Camera is at (0, 0, 5) looking down -Z axis (towards origin)
-	const uint32_t testSplatCount = 10000;
+	const uint32_t testSplatCount = 10000000;
 	auto           testData       = container::make_shared<engine::SplatSoA>();
 	testData->Resize(testSplatCount, 0);
 

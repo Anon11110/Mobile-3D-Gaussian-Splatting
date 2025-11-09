@@ -10,7 +10,7 @@
 
 layout (local_size_x = WORKGROUP_SIZE) in;
 
-layout (push_constant, std430) uniform PushConstants
+layout (push_constant) uniform PushConstants
 {
     uint numElements;
     uint shift;
@@ -40,13 +40,15 @@ layout (std430, set = 0, binding = 3) writeonly buffer OutputSplatIndices
     uint outputSplatIndices[];
 };
 
-// Exclusively scanned global offsets from scan passes
-layout (std430, set = 0, binding = 4) readonly buffer ScannedGlobalOffsets
+// Histograms from histogram pass
+// Layout: [bin0: WG0..WGn | bin1: WG0..WGn | ... ]
+layout (std430, set = 0, binding = 4) readonly buffer Histograms
 {
-    uint scannedGlobalOffsets[]; // RADIX_SORT_BINS * numWorkgroups
+    uint histograms[]; // RADIX_SORT_BINS * numWorkgroups
 };
 
-shared uint[RADIX_SORT_BINS] localOffsets; // Local copy of offsets for this workgroup
+shared uint[RADIX_SORT_BINS / SUBGROUP_SIZE] sums; // subgroup reductions
+shared uint[RADIX_SORT_BINS] globalOffsets; // global exclusive scan (prefix sum)
 
 struct BinFlags
 {
@@ -59,23 +61,79 @@ void main()
     uint gID = gl_GlobalInvocationID.x;
     uint lID = gl_LocalInvocationID.x;
     uint wID = gl_WorkGroupID.x;
+    uint sID = gl_SubgroupID;
+    uint lsID = gl_SubgroupInvocationID;
 
-    // Read from the scanned histogram for this workgroup
+    uint localHistogram = 0;
+    uint prefixSum = 0;
+    uint histogramCount = 0;
+
+    // Calculate global prefix sum for histogram bins
     if (lID < RADIX_SORT_BINS)
     {
-        // Histogram: [bin0: WG0..WGn | bin1: WG0..WGn | ...]
-        localOffsets[lID] = scannedGlobalOffsets[lID * pc.numWorkgroups + wID];
+        uint count = 0;
+        for (uint j = 0; j < pc.numWorkgroups; j++)
+        {
+            // Histogram is stored in bin-major order: [bin0: WG0..WGn | bin1: WG0..WGn | ...]
+            const uint t = histograms[lID * pc.numWorkgroups + j];
+            localHistogram = (j == wID) ? count : localHistogram;
+            count += t;
+        }
+        histogramCount = count;
+
+        // Subgroup-level reduction and prefix sum
+        const uint sum = subgroupAdd(histogramCount);
+        prefixSum = subgroupExclusiveAdd(histogramCount);
+
+        if (subgroupElect())
+        {
+            sums[sID] = sum;
+        }
     }
     barrier();
 
-    // Scatter keys and values according to global offsets
+    // Complete the global prefix sum
+    if (lID < RADIX_SORT_BINS)
+    {
+        uint sumsPrefixSum = 0;
+
+        // First, have subgroup 0 scan the sums array
+        if (sID == 0)
+        {
+            // Each thread in subgroup 0 loads one sum value if it exists
+            uint mySum = 0;
+            if (lsID < (RADIX_SORT_BINS / SUBGROUP_SIZE))
+            {
+                mySum = sums[lsID];
+            }
+
+            // Do exclusive prefix sum across the subgroup
+            uint scannedSum = subgroupExclusiveAdd(mySum);
+
+            if (lsID < (RADIX_SORT_BINS / SUBGROUP_SIZE))
+            {
+                sums[lsID] = scannedSum;
+            }
+        }
+        barrier();
+
+        // Now read the scanned sum for our subgroup
+        sumsPrefixSum = sums[sID];
+
+        const uint globalHistogram = sumsPrefixSum + prefixSum;
+        globalOffsets[lID] = globalHistogram + localHistogram;
+    }
+    barrier();
+
+    // ==== Scatter keys and indices according to global offsets ====
     const uint flagsBin = lID / 32;
-    const uint flagsBit = 1 << (lID % 32);
+    const uint flagsBit = 1u << (lID % 32);
 
     for (uint index = 0; index < pc.numBlocksPerWorkgroup; index++)
     {
         uint elementId = wID * pc.numBlocksPerWorkgroup * WORKGROUP_SIZE + index * WORKGROUP_SIZE + lID;
 
+        // Initialize bin flags
         if (lID < RADIX_SORT_BINS)
         {
             for (int i = 0; i < WORKGROUP_SIZE / 32; i++)
@@ -88,46 +146,51 @@ void main()
         uint depthKey = 0;
         uint splatIdx = 0;
         uint binID = 0;
+        uint binOffset = 0;
 
         if (elementId < pc.numElements)
         {
             depthKey = inputDepthKeys[elementId];
             splatIdx = inputSplatIndices[elementId];
             binID = uint(depthKey >> pc.shift) & uint(RADIX_SORT_BINS - 1);
-            atomicAdd(binFlags[binID].flags[flagsBin], flagsBit);
+
+            // Offset for this workgroup
+            binOffset = globalOffsets[binID];
+
+            // Add bit to flag
+            atomicOr(binFlags[binID].flags[flagsBin], flagsBit);
         }
         barrier();
 
-        if (elementId < pc.numElements)
+        // Compute exclusive scan of the set flags (0..0 for thread 0, 0..1 for thread 1, 0..2 for thread 2, etc)
+        uint bits = 0u;
+        for (uint k = 0u; k < flagsBin; ++k)
         {
-            uint binOffset = localOffsets[binID];
-
-            // Calculate output index of element
-            uint prefix = 0;
-            uint count = 0;
-            for (uint i = 0; i < WORKGROUP_SIZE / 32; i++)
-            {
-                const uint bits = binFlags[binID].flags[i];
-                const uint fullCount = bitCount(bits);
-                const uint partialCount = bitCount(bits & (flagsBit - 1));
-                prefix += (i < flagsBin) ? fullCount : 0U;
-                prefix += (i == flagsBin) ? partialCount : 0U;
-                count += fullCount;
-            }
-
-            // Write both depth key and splat index to output
-            uint outputIdx = binOffset + prefix;
-            outputDepthKeys[outputIdx] = depthKey;
-            outputSplatIndices[outputIdx] = splatIdx;
-
-            // Update local offsets for next block within this workgroup
-            // Only one thread per bin should do this
-            if (prefix == count - 1)
-            {
-                atomicAdd(localOffsets[binID], count);
-            }
+            bits += bitCount(binFlags[binID].flags[k]);
         }
 
+        // Add partial bits from my own flag uint
+        uint myFlags = binFlags[binID].flags[flagsBin];
+        uint ltMask = (1u << (lID % 32)) - 1u;
+        bits += bitCount(myFlags & ltMask);
+
+        if (elementId < pc.numElements)
+        {
+            outputDepthKeys[binOffset + bits] = depthKey;
+            outputSplatIndices[binOffset + bits] = splatIdx;
+        }
+        barrier();
+
+        // Update offsets for each bin
+        if (lID < RADIX_SORT_BINS)
+        {
+            uint bits = 0;
+            for (uint k = 0; k < WORKGROUP_SIZE / 32; k++)
+            {
+                bits += bitCount(binFlags[lID].flags[k]);
+            }
+            globalOffsets[lID] += bits;
+        }
         barrier();
     }
 }

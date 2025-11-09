@@ -10,7 +10,7 @@
 
 layout (local_size_x = WORKGROUP_SIZE) in;
 
-layout (push_constant, std430) uniform PushConstants
+layout (push_constant) uniform PushConstants
 {
     uint numElements;
     uint passType;           // 0 = scan blocks, 1 = scan block sums, 2 = add offsets
