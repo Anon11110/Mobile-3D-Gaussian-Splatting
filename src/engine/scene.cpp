@@ -107,17 +107,22 @@ rhi::FenceHandle Scene::UploadAttributeData()
 		return nullptr;
 	}
 
-	// Interleaved attributes: position + scale + rotation + color per splat
-	container::vector<float> interleavedAttributes;
+	container::vector<float> positions;
+	container::vector<float> scales;
+	container::vector<float> rotations;
+	container::vector<float> colors;
 	container::vector<float> shRest;
 
-	interleavedAttributes.reserve(totalSplatCount * 16);        // 16 floats per splat
+	positions.reserve(totalSplatCount * 4);
+	scales.reserve(totalSplatCount * 4);
+	rotations.reserve(totalSplatCount * 4);
+	colors.reserve(totalSplatCount * 4);
 	shRest.reserve(totalShCoeffs);
 
 	// Spherical harmonics constant for degree 0
 	constexpr float shC0 = 0.28209479177387814f;
 
-	// Consolidate all mesh data with interleaved layout
+	// Consolidate all mesh data
 	for (const auto &mesh : meshes)
 	{
 		auto splatData = mesh.GetSplatData();
@@ -126,28 +131,31 @@ rhi::FenceHandle Scene::UploadAttributeData()
 
 		uint32_t count = splatData->numSplats;
 
-		// Pack attributes in AoS format: position + scale + rotation + color
+		// Pack attributes in SoA format
 		for (uint32_t i = 0; i < count; ++i)
 		{
-			// Position (vec4: xyz + padding)
-			interleavedAttributes.push_back(splatData->posX[i]);
-			interleavedAttributes.push_back(splatData->posY[i]);
-			interleavedAttributes.push_back(splatData->posZ[i]);
-			interleavedAttributes.push_back(1.0f);
+			// Position
+			positions.push_back(splatData->posX[i]);
+			positions.push_back(splatData->posY[i]);
+			positions.push_back(splatData->posZ[i]);
+			positions.push_back(0.0f);        // padding
 
-			// Scale (vec4: xyz + padding) - convert from log space
-			interleavedAttributes.push_back(math::Exp(splatData->scaleX[i]));
-			interleavedAttributes.push_back(math::Exp(splatData->scaleY[i]));
-			interleavedAttributes.push_back(math::Exp(splatData->scaleZ[i]));
-			interleavedAttributes.push_back(1.0f);
+			// Scale - convert from log space
+			float scaleX = math::Exp(splatData->scaleX[i]);
+			float scaleY = math::Exp(splatData->scaleY[i]);
+			float scaleZ = math::Exp(splatData->scaleZ[i]);
+			scales.push_back(scaleX);
+			scales.push_back(scaleY);
+			scales.push_back(scaleZ);
+			scales.push_back(0.0f);        // padding
 
-			// Rotation (vec4: quaternion xyzw)
-			interleavedAttributes.push_back(splatData->rotX[i]);
-			interleavedAttributes.push_back(splatData->rotY[i]);
-			interleavedAttributes.push_back(splatData->rotZ[i]);
-			interleavedAttributes.push_back(splatData->rotW[i]);
+			// Rotation
+			rotations.push_back(splatData->rotX[i]);
+			rotations.push_back(splatData->rotY[i]);
+			rotations.push_back(splatData->rotZ[i]);
+			rotations.push_back(splatData->rotW[i]);
 
-			// Color (vec4: rgba) - convert SH degree 0 and opacity
+			// Color - convert SH degree 0 and opacity
 			float r = math::Clamp(shC0 * splatData->fDc0[i] + 0.5f, 0.0f, 1.0f);
 			float g = math::Clamp(shC0 * splatData->fDc1[i] + 0.5f, 0.0f, 1.0f);
 			float b = math::Clamp(shC0 * splatData->fDc2[i] + 0.5f, 0.0f, 1.0f);
@@ -156,13 +164,13 @@ rhi::FenceHandle Scene::UploadAttributeData()
 			float opacityLogit = splatData->opacity[i];
 			float alpha        = math::Clamp(1.0f / (1.0f + math::Exp(-opacityLogit)), 0.0f, 1.0f);
 
-			interleavedAttributes.push_back(r);
-			interleavedAttributes.push_back(g);
-			interleavedAttributes.push_back(b);
-			interleavedAttributes.push_back(alpha);
+			colors.push_back(r);
+			colors.push_back(g);
+			colors.push_back(b);
+			colors.push_back(alpha);
 		}
 
-		// SH coefficients (kept separate)
+		// SH coefficients
 		for (const auto &coeff : splatData->fRest)
 		{
 			shRest.push_back(coeff);
@@ -171,14 +179,41 @@ rhi::FenceHandle Scene::UploadAttributeData()
 
 	std::vector<rhi::FenceHandle> uploadFences;
 
-	// Upload interleaved attributes buffer
-	rhi::FenceHandle attributesFence = device->UploadBufferAsync(
-	    gpuData.splat_attributes.Get(),
-	    interleavedAttributes.data(),
-	    interleavedAttributes.size() * sizeof(float));
-	if (attributesFence)
+	// Upload SoA buffers
+	rhi::FenceHandle positionsFence = device->UploadBufferAsync(
+	    gpuData.positions.Get(),
+	    positions.data(),
+	    positions.size() * sizeof(float));
+	if (positionsFence)
 	{
-		uploadFences.push_back(attributesFence);
+		uploadFences.push_back(positionsFence);
+	}
+
+	rhi::FenceHandle scalesFence = device->UploadBufferAsync(
+	    gpuData.scales.Get(),
+	    scales.data(),
+	    scales.size() * sizeof(float));
+	if (scalesFence)
+	{
+		uploadFences.push_back(scalesFence);
+	}
+
+	rhi::FenceHandle rotationsFence = device->UploadBufferAsync(
+	    gpuData.rotations.Get(),
+	    rotations.data(),
+	    rotations.size() * sizeof(float));
+	if (rotationsFence)
+	{
+		uploadFences.push_back(rotationsFence);
+	}
+
+	rhi::FenceHandle colorsFence = device->UploadBufferAsync(
+	    gpuData.colors.Get(),
+	    colors.data(),
+	    colors.size() * sizeof(float));
+	if (colorsFence)
+	{
+		uploadFences.push_back(colorsFence);
 	}
 
 	if (!shRest.empty())
@@ -238,14 +273,41 @@ void Scene::AllocateGpuBuffers()
 
 	using namespace rhi;
 
-	// Interleaved splat attributes buffer (AoS layout: position + scale + rotation + color)
-	// Each splat: vec4 position + vec4 scale + vec4 rotation + vec4 color = 64 bytes
+	// Splat attribute buffers
 	{
+		// Positions buffer
 		BufferDesc desc{};
-		desc.usage               = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage       = ResourceUsage::Static;
-		desc.size                = totalSplatCount * 16 * sizeof(float);        // 16 floats per splat
-		gpuData.splat_attributes = device->CreateBuffer(desc);
+		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage = ResourceUsage::Static;
+		desc.size          = totalSplatCount * 4 * sizeof(float);
+		gpuData.positions  = device->CreateBuffer(desc);
+	}
+
+	{
+		// Scales buffer
+		BufferDesc desc{};
+		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage = ResourceUsage::Static;
+		desc.size          = totalSplatCount * 4 * sizeof(float);
+		gpuData.scales     = device->CreateBuffer(desc);
+	}
+
+	{
+		// Rotations buffer
+		BufferDesc desc{};
+		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage = ResourceUsage::Static;
+		desc.size          = totalSplatCount * 4 * sizeof(float);
+		gpuData.rotations  = device->CreateBuffer(desc);
+	}
+
+	{
+		// Colors buffer
+		BufferDesc desc{};
+		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage = ResourceUsage::Static;
+		desc.size          = totalSplatCount * 4 * sizeof(float);
+		gpuData.colors     = device->CreateBuffer(desc);
 	}
 
 	// Spherical harmonics coefficients buffer
@@ -261,15 +323,15 @@ void Scene::AllocateGpuBuffers()
 	// Sorted indices buffer for rendering order
 	{
 		BufferDesc desc{};
-		desc.usage             = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage     = ResourceUsage::DynamicUpload;
-		desc.size              = totalSplatCount * sizeof(uint32_t);
-		gpuData.sorted_indices = device->CreateBuffer(desc);
+		desc.usage            = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage    = ResourceUsage::DynamicUpload;
+		desc.size             = totalSplatCount * sizeof(uint32_t);
+		gpuData.sortedIndices = device->CreateBuffer(desc);
 	}
 
 	// Initialize CPU-side sorting system
-	splat_sorter = container::make_unique<CpuSplatSorter>(totalSplatCount);
-	splat_positions.reserve(totalSplatCount);
+	splatSorter = container::make_unique<CpuSplatSorter>(totalSplatCount);
+	splatPositions.reserve(totalSplatCount);
 
 	gpuBuffersAllocated = true;
 	LOG_INFO("Allocated GPU buffers for {} splats (CPU-sort pipeline mode)", totalSplatCount);
@@ -283,37 +345,37 @@ bool Scene::IsAttributeDataUploaded() const
 
 void Scene::UpdateView(const math::mat4 &view_matrix)
 {
-	if (!splat_sorter)
+	if (!splatSorter)
 	{
 		LOG_WARNING("CpuSplatSorter not initialized. Call AllocateGpuBuffers() first.");
 		return;
 	}
 
 	UpdateSplatPositions();
-	splat_sorter->RequestSort(splat_positions, view_matrix);
+	splatSorter->RequestSort(splatPositions, view_matrix);
 }
 
 rhi::FenceHandle Scene::ConsumeAndUploadSortedIndices()
 {
-	if (!splat_sorter)
+	if (!splatSorter)
 	{
 		LOG_WARNING("CpuSplatSorter not initialized. Call AllocateGpuBuffers() first.");
 		return nullptr;
 	}
 
-	if (!splat_sorter->IsSortComplete())
+	if (!splatSorter->IsSortComplete())
 	{
 		// No new sorted data available yet
 		return nullptr;
 	}
 
-	auto sortedIndices = splat_sorter->GetSortedIndices();
+	auto sortedIndices = splatSorter->GetSortedIndices();
 	if (sortedIndices.empty())
 	{
 		return nullptr;
 	}
 
-	if (!gpuData.sorted_indices)
+	if (!gpuData.sortedIndices)
 	{
 		LOG_ERROR("Sorted indices GPU buffer not allocated");
 		return nullptr;
@@ -321,7 +383,7 @@ rhi::FenceHandle Scene::ConsumeAndUploadSortedIndices()
 
 	// Upload the sorted indices to the GPU
 	rhi::FenceHandle fence = device->UploadBufferAsync(
-	    gpuData.sorted_indices.Get(),
+	    gpuData.sortedIndices.Get(),
 	    sortedIndices.data(),
 	    sortedIndices.size() * sizeof(uint32_t));
 
@@ -346,8 +408,8 @@ void Scene::UpdateSplatPositions()
 {
 	std::lock_guard<std::mutex> lock(meshesMutex);
 
-	splat_positions.clear();
-	splat_positions.reserve(totalSplatCount);
+	splatPositions.clear();
+	splatPositions.reserve(totalSplatCount);
 
 	for (const auto &mesh : meshes)
 	{
@@ -362,7 +424,7 @@ void Scene::UpdateSplatPositions()
 		{
 			math::vec3 localPos(splatData->posX[i], splatData->posY[i], splatData->posZ[i]);
 			math::vec4 worldPos = modelMatrix * math::vec4(localPos, 1.0f);
-			splat_positions.push_back(math::vec3(worldPos));
+			splatPositions.push_back(math::vec3(worldPos));
 		}
 	}
 }

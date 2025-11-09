@@ -2,18 +2,10 @@
 
 layout (local_size_x = 256) in;
 
-// Binding 0: Splat Attributes buffer (interleaved AoS layout)
-struct SplatAttributes
+// Binding 0: Positions buffer
+layout(set = 0, binding = 0, std430) readonly buffer PositionsBuffer
 {
-    vec4 position;        // xyz + padding
-    vec4 scale;           // xyz + padding
-    vec4 rotation;        // quaternion xyzw
-    vec4 color;           // rgba
-};
-
-layout(set = 0, binding = 0, std430) readonly buffer SplatAttributesBuffer
-{
-    SplatAttributes attributes[];
+    vec3 positions[];
 };
 
 // Binding 1: Output buffer for sortable depth keys
@@ -49,8 +41,7 @@ void main()
     if (splatID >= numElements)
         return;
 
-    // Read position from interleaved attributes buffer
-    vec3 worldPos = attributes[splatID].position.xyz;
+    vec3 worldPos = positions[splatID];
     vec4 viewPos = viewMatrix * vec4(worldPos, 1.0);
 
     // RH camera with -Z forward: farther → larger depth value

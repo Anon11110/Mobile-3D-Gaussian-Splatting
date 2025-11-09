@@ -630,11 +630,11 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 	// Update depth calc descriptor set
 	const Scene::GpuData &gpuData = scene.GetGpuData();
 
-	// Binding 0: Splat Attributes buffer (interleaved AoS layout)
-	rhi::BufferBinding attributesBinding = {};
-	attributesBinding.buffer             = gpuData.splat_attributes.Get();
-	attributesBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-	depthCalcDescriptorSet->BindBuffer(0, attributesBinding);
+	// Binding 0: Positions buffer
+	rhi::BufferBinding positionsBinding = {};
+	positionsBinding.buffer             = gpuData.positions.Get();
+	positionsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+	depthCalcDescriptorSet->BindBuffer(0, positionsBinding);
 
 	RecordDepthCalculation(cmdList, scene, camera);
 

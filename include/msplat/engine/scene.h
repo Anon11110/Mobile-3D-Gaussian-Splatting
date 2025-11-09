@@ -19,15 +19,15 @@ class Scene
   public:
 	struct GpuData
 	{
-		// Interleaved splat attributes buffer (AoS layout)
-		// Each splat: vec4 position + vec4 scale + vec4 rotation + vec4 color = 64 bytes
-		rhi::BufferHandle splat_attributes;
-
-		// SH coefficients (kept separate - variable size, less frequent access)
-		rhi::BufferHandle shRest;
+		// Splat attribute buffers
+		rhi::BufferHandle positions;        // vec3 positions[]
+		rhi::BufferHandle scales;           // vec3 scales[]
+		rhi::BufferHandle rotations;        // vec4 rotations[]
+		rhi::BufferHandle colors;           // vec4 colors[]
+		rhi::BufferHandle shRest;           // float shRest[]
 
 		// Sorted indices for rendering
-		rhi::BufferHandle sorted_indices;
+		rhi::BufferHandle sortedIndices;
 	};
 
 	explicit Scene(rhi::IRHIDevice *device);
@@ -74,8 +74,8 @@ class Scene
 	bool                         gpuBuffersAllocated{false};          // Track if GPU buffers are allocated
 
 	// CPU-side data for sorting
-	container::vector<math::vec3>         splat_positions;
-	container::unique_ptr<CpuSplatSorter> splat_sorter;
+	container::vector<math::vec3>         splatPositions;
+	container::unique_ptr<CpuSplatSorter> splatSorter;
 
 	uint32_t CalculateMaxShCoeffsPerSplat() const;
 	void     UpdateSplatPositions();
