@@ -102,6 +102,7 @@ class GpuSortingRendererApp : public app::IApplication
 	bool              verifyNextSort           = false;
 	bool              checkVerificationResults = false;
 	bool              useSimpleVerification    = true;
+	bool              benchmarkMode            = false;        // Skip present for benchmarking
 	uint32_t          frameCount               = 0;
 
 	container::vector<math::vec3> testSplatPositions;

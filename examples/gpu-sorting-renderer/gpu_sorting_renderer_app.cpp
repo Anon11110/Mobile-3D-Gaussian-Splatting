@@ -204,16 +204,24 @@ void GpuSortingRendererApp::OnRender()
 
 	fpsCounter.frame();
 
-	// Acquire next image
-	uint32_t             acquireSemIndex = frameCount % imageAvailableSemaphores.size();
-	uint32_t             imageIndex      = 0;
-	rhi::SwapchainStatus status          = swapchain->AcquireNextImage(
-        imageIndex,
-        imageAvailableSemaphores[acquireSemIndex].Get());
+	// Acquire next image (skip in benchmark mode)
+	uint32_t acquireSemIndex = frameCount % imageAvailableSemaphores.size();
+	uint32_t imageIndex      = 0;
 
-	if (status == rhi::SwapchainStatus::OUT_OF_DATE)
+	if (!benchmarkMode)
 	{
-		return;
+		rhi::SwapchainStatus status = swapchain->AcquireNextImage(
+		    imageIndex,
+		    imageAvailableSemaphores[acquireSemIndex].Get());
+
+		if (status == rhi::SwapchainStatus::OUT_OF_DATE)
+		{
+			return;
+		}
+	}
+	else
+	{
+		imageIndex = 0;
 	}
 
 	// Update UBO
@@ -354,20 +362,28 @@ void GpuSortingRendererApp::OnRender()
 	cmdList->End();
 
 	// Submit command list
-	rhi::SemaphoreWaitInfo waitInfo = {};
-	waitInfo.semaphore              = imageAvailableSemaphores[acquireSemIndex].Get();
-	waitInfo.waitStage              = rhi::StageMask::RenderTarget;
+	rhi::SubmitInfo submitInfo = {};
+	submitInfo.signalFence     = inFlightFence.Get();
 
-	rhi::SubmitInfo submitInfo    = {};
-	submitInfo.waitSemaphores     = {&waitInfo, 1};
-	rhi::IRHISemaphore *signalSem = renderFinishedSemaphores[imageIndex].Get();
-	submitInfo.signalSemaphores   = {&signalSem, 1};
-	submitInfo.signalFence        = inFlightFence.Get();
+	if (!benchmarkMode)
+	{
+		// Normal mode: wait for image available and signal when rendering is done
+		rhi::SemaphoreWaitInfo waitInfo = {};
+		waitInfo.semaphore              = imageAvailableSemaphores[acquireSemIndex].Get();
+		waitInfo.waitStage              = rhi::StageMask::RenderTarget;
+
+		submitInfo.waitSemaphores     = {&waitInfo, 1};
+		rhi::IRHISemaphore *signalSem = renderFinishedSemaphores[imageIndex].Get();
+		submitInfo.signalSemaphores   = {&signalSem, 1};
+	}
 
 	device->SubmitCommandLists({&cmdList, 1}, rhi::QueueType::GRAPHICS, submitInfo);
 
-	// Present
-	swapchain->Present(imageIndex, renderFinishedSemaphores[imageIndex].Get());
+	// Present (skip in benchmark mode to remove vsync bottleneck)
+	if (!benchmarkMode)
+	{
+		swapchain->Present(imageIndex, renderFinishedSemaphores[imageIndex].Get());
+	}
 
 	frameCount++;
 }
@@ -450,6 +466,13 @@ void GpuSortingRendererApp::OnKey(int key, int action, int mods)
 				useSimpleVerification = !useSimpleVerification;
 				LOG_INFO("Verification mode switched to: {}",
 				         useSimpleVerification ? "SIMPLE (sort order only)" : "COMPREHENSIVE (all steps)");
+				break;
+
+			case GLFW_KEY_B:
+				// Toggle benchmark mode (skip present to remove vsync limit)
+				benchmarkMode = !benchmarkMode;
+				LOG_INFO("Benchmark mode {}", benchmarkMode ? "enabled (no vsync)" : "disabled (vsync on)");
+				fpsCounter.reset();
 				break;
 
 			case GLFW_KEY_ESCAPE:
