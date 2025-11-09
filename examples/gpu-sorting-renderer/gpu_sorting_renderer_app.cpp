@@ -80,8 +80,8 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 	}
 
 	// Load splat rendering shaders
-	vertexShader   = shaderFactory->getOrCreateShader("shaders/compiled/raster.vert.spv", rhi::ShaderStage::VERTEX);
-	fragmentShader = shaderFactory->getOrCreateShader("shaders/compiled/raster.frag.spv", rhi::ShaderStage::FRAGMENT);
+	vertexShader   = shaderFactory->getOrCreateShader("shaders/compiled/splat_raster.vert.spv", rhi::ShaderStage::VERTEX);
+	fragmentShader = shaderFactory->getOrCreateShader("shaders/compiled/splat_raster.frag.spv", rhi::ShaderStage::FRAGMENT);
 
 	// Create UBO
 	rhi::BufferDesc uboDesc{};
@@ -186,7 +186,6 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 void GpuSortingRendererApp::OnUpdate(float deltaTime)
 {
 	camera.Update(deltaTime, deviceManager->GetWindow());
-	fpsCounter.frame();
 }
 
 void GpuSortingRendererApp::OnRender()
@@ -202,6 +201,8 @@ void GpuSortingRendererApp::OnRender()
 	// Wait for previous frame
 	inFlightFence->Wait(UINT64_MAX);
 	inFlightFence->Reset();
+
+	fpsCounter.frame();
 
 	// Acquire next image
 	uint32_t             acquireSemIndex = frameCount % imageAvailableSemaphores.size();
@@ -271,15 +272,6 @@ void GpuSortingRendererApp::OnRender()
 			verifyNextSort           = false;
 		}
 
-		if (frameCount % 60 == 0)
-		{
-			if (fpsCounter.shouldUpdate())
-			{
-				LOG_INFO("FPS: {:.2f} ({})", fpsCounter.getFPS(),
-				         sorter ? sorter->GetSortMethodName() : "No sorter");
-			}
-		}
-
 		// Update sorted indices buffer (only when it changes)
 		rhi::BufferHandle newSortedIndices = sorter->GetSortedIndices();
 		if (newSortedIndices.Get() != sortedIndices.Get())
@@ -291,6 +283,16 @@ void GpuSortingRendererApp::OnRender()
 			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
 			descriptorSet->BindBuffer(6, indicesBinding);
 		}
+	}
+
+	// Log FPS periodically
+	if (frameCount % 60 == 0 && fpsCounter.shouldUpdate())
+	{
+		LOG_INFO("Frame FPS: {:.2f} | Sort: {} | Splats: {}",
+		         fpsCounter.getFPS(),
+		         sortingEnabled ? (sorter ? sorter->GetSortMethodName() : "N/A") : "Disabled",
+		         scene->GetTotalSplatCount());
+		fpsCounter.reset();
 	}
 
 	rhi::IRHITexture *backBuffer = swapchain->GetBackBuffer(imageIndex);

@@ -1,6 +1,21 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+// SH Constants for degrees 1-3
+const float SH_C1 = 0.4886025119029199;
+const float SH_C2_0 = 1.0925484305920792;
+const float SH_C2_1 = -1.0925484305920792;
+const float SH_C2_2 = 0.31539156525252005;
+const float SH_C2_3 = -1.0925484305920792;
+const float SH_C2_4 = 0.5462742152960396;
+const float SH_C3_0 = -0.5900435899266435;
+const float SH_C3_1 = 2.890611442640554;
+const float SH_C3_2 = -0.4570457994644658;
+const float SH_C3_3 = 0.3731763325901154;
+const float SH_C3_4 = -0.4570457994644658;
+const float SH_C3_5 = 1.445305721320277;
+const float SH_C3_6 = -0.5900435899266435;
+
 layout(location = 0) out vec4 outColor;
 layout(location = 1) noperspective out vec2 outUV;
 
@@ -61,6 +76,69 @@ void KillSplat()
 	outUV = vec2(0.0);
 }
 
+// SH evaluation function for degrees 0-3
+vec3 ComputeSH(uint splatIndex, vec3 dir, vec3 baseColor)
+{
+	// The shRest buffer contains 45 floats per splat in planar format:
+	// [0-14]: Red channel coefficients for degrees 1-3
+	// [15-29]: Green channel coefficients for degrees 1-3
+	// [30-44]: Blue channel coefficients for degrees 1-3
+	uint offset = splatIndex * 45;
+
+	float x = dir.x, y = dir.y, z = dir.z;
+
+	// Degree 0 (base color)
+	vec3 result = baseColor;
+
+	// Degree 1 (3 coefficients per channel)
+	result.r += SH_C1 * (-y * shRest[offset + 0] + z * shRest[offset + 1] - x * shRest[offset + 2]);
+	result.g += SH_C1 * (-y * shRest[offset + 15] + z * shRest[offset + 16] - x * shRest[offset + 17]);
+	result.b += SH_C1 * (-y * shRest[offset + 30] + z * shRest[offset + 31] - x * shRest[offset + 32]);
+
+	// Degree 2 (5 coefficients per channel)
+	float xx = x*x, yy = y*y, zz = z*z, xy = x*y, yz = y*z, xz = x*z;
+	result.r += SH_C2_0 * xy * shRest[offset + 3] +
+	            SH_C2_1 * yz * shRest[offset + 4] +
+	            SH_C2_2 * (2.0 * zz - xx - yy) * shRest[offset + 5] +
+	            SH_C2_3 * xz * shRest[offset + 6] +
+	            SH_C2_4 * (xx - yy) * shRest[offset + 7];
+	result.g += SH_C2_0 * xy * shRest[offset + 18] +
+	            SH_C2_1 * yz * shRest[offset + 19] +
+	            SH_C2_2 * (2.0 * zz - xx - yy) * shRest[offset + 20] +
+	            SH_C2_3 * xz * shRest[offset + 21] +
+	            SH_C2_4 * (xx - yy) * shRest[offset + 22];
+	result.b += SH_C2_0 * xy * shRest[offset + 33] +
+	            SH_C2_1 * yz * shRest[offset + 34] +
+	            SH_C2_2 * (2.0 * zz - xx - yy) * shRest[offset + 35] +
+	            SH_C2_3 * xz * shRest[offset + 36] +
+	            SH_C2_4 * (xx - yy) * shRest[offset + 37];
+
+	// Degree 3 (7 coefficients per channel)
+	result.r += SH_C3_0 * y * (3.0 * xx - yy) * shRest[offset + 8] +
+	            SH_C3_1 * xy * z * shRest[offset + 9] +
+	            SH_C3_2 * y * (4.0 * zz - xx - yy) * shRest[offset + 10] +
+	            SH_C3_3 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * shRest[offset + 11] +
+	            SH_C3_4 * x * (4.0 * zz - xx - yy) * shRest[offset + 12] +
+	            SH_C3_5 * z * (xx - yy) * shRest[offset + 13] +
+	            SH_C3_6 * x * (xx - 3.0 * yy) * shRest[offset + 14];
+	result.g += SH_C3_0 * y * (3.0 * xx - yy) * shRest[offset + 23] +
+	            SH_C3_1 * xy * z * shRest[offset + 24] +
+	            SH_C3_2 * y * (4.0 * zz - xx - yy) * shRest[offset + 25] +
+	            SH_C3_3 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * shRest[offset + 26] +
+	            SH_C3_4 * x * (4.0 * zz - xx - yy) * shRest[offset + 27] +
+	            SH_C3_5 * z * (xx - yy) * shRest[offset + 28] +
+	            SH_C3_6 * x * (xx - 3.0 * yy) * shRest[offset + 29];
+	result.b += SH_C3_0 * y * (3.0 * xx - yy) * shRest[offset + 38] +
+	            SH_C3_1 * xy * z * shRest[offset + 39] +
+	            SH_C3_2 * y * (4.0 * zz - xx - yy) * shRest[offset + 40] +
+	            SH_C3_3 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * shRest[offset + 41] +
+	            SH_C3_4 * x * (4.0 * zz - xx - yy) * shRest[offset + 42] +
+	            SH_C3_5 * z * (xx - yy) * shRest[offset + 43] +
+	            SH_C3_6 * x * (xx - 3.0 * yy) * shRest[offset + 44];
+
+	return max(result, vec3(0.0));
+}
+
 void main()
 {
 	uint splatId = gl_VertexIndex / 4;
@@ -71,14 +149,23 @@ void main()
 	vec3  pos   = positions[splatIndex];
 	vec3  scale = scales[splatIndex];
 	vec4  rot   = rotations[splatIndex];
-	vec4  color = colors[splatIndex];
+	vec4  baseColor = colors[splatIndex];
 
 	// Early alpha culling
-	if (color.a < 1.0 / 255.0)
+	if (baseColor.a < 1.0 / 255.0)
 	{
 		KillSplat();
 		return;
 	}
+
+	// Compute view direction in world space (from splat to camera)
+	vec3 viewDir = normalize(ubo.cameraPos.xyz - pos);
+
+	// Evaluate spherical harmonics for view-dependent color
+	vec3 shColor = ComputeSH(splatIndex, viewDir, baseColor.rgb);
+
+	// Update color with SH evaluation result
+	vec4 color = vec4(shColor, baseColor.a);
 
 	// Transform to view space
 	vec4 viewPos4 = ubo.view * vec4(pos, 1.0);
