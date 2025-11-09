@@ -60,6 +60,14 @@ class GpuSortingRendererApp : public app::IApplication
 	void LoadSplatFile(const char *filepath);
 	void CreateTestSplatData();
 
+	struct FrameUBO
+	{
+		math::mat4 viewProjection;
+		math::vec4 cameraPos;
+		math::vec2 viewport;
+		math::vec2 focal;
+	};
+
 	app::DeviceManager *deviceManager = nullptr;
 
 	app::Camera camera;
@@ -68,6 +76,19 @@ class GpuSortingRendererApp : public app::IApplication
 	container::unique_ptr<engine::GpuSplatSorter> sorter;
 
 	container::unique_ptr<engine::ShaderFactory> shaderFactory;
+
+	rhi::BufferHandle quadVertexBuffer;
+	rhi::BufferHandle quadIndexBuffer;
+	rhi::BufferHandle frameUboBuffer;
+	void             *frameUboDataPtr = nullptr;
+	rhi::BufferHandle sortedIndices;
+
+	rhi::ShaderHandle   vertexShader;
+	rhi::ShaderHandle   fragmentShader;
+	rhi::PipelineHandle renderPipeline;
+
+	rhi::DescriptorSetLayoutHandle descriptorSetLayout;
+	rhi::DescriptorSetHandle        descriptorSet;
 
 	container::vector<rhi::SemaphoreHandle> imageAvailableSemaphores;
 	container::vector<rhi::SemaphoreHandle> renderFinishedSemaphores;

@@ -23,6 +23,8 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 		return false;
 	}
 
+	rhi::IRHISwapchain *swapchain = deviceManager->GetSwapchain();
+
 	shaderFactory = container::make_unique<engine::ShaderFactory>(device);
 	scene         = container::make_unique<engine::Scene>(device);
 
@@ -37,7 +39,7 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 	camera.SetMovementSpeed(5.0f);
 	camera.SetMouseSensitivity(0.1f);
 
-	LoadSplatFile("assets/test.splat");
+	LoadSplatFile("assets/flowers_1.ply");
 
 	sorter = container::make_unique<engine::GpuSplatSorter>(device);
 	if (scene->GetTotalSplatCount() > 0)
@@ -45,6 +47,96 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 		sorter->Initialize(scene->GetTotalSplatCount());
 		LOG_INFO("Initialized sorter for {} splats", scene->GetTotalSplatCount());
 	}
+
+	// Create quad mesh for instanced rendering
+	struct QuadVertex
+	{
+		math::vec2 pos;
+	};
+
+	const container::vector<QuadVertex> quadVertices = {
+	    {{-1.0f, -1.0f}},
+	    {{1.0f, -1.0f}},
+	    {{1.0f, 1.0f}},
+	    {{-1.0f, 1.0f}},
+	};
+
+	const container::vector<uint16_t> quadIndices = {0, 1, 2, 2, 3, 0};
+
+	rhi::BufferDesc vbDesc{};
+	vbDesc.size        = quadVertices.size() * sizeof(QuadVertex);
+	vbDesc.usage       = rhi::BufferUsage::VERTEX;
+	vbDesc.initialData = quadVertices.data();
+	quadVertexBuffer   = device->CreateBuffer(vbDesc);
+
+	rhi::BufferDesc ibDesc{};
+	ibDesc.size        = quadIndices.size() * sizeof(uint16_t);
+	ibDesc.usage       = rhi::BufferUsage::INDEX;
+	ibDesc.indexType   = rhi::IndexType::UINT16;
+	ibDesc.initialData = quadIndices.data();
+	quadIndexBuffer    = device->CreateBuffer(ibDesc);
+
+	// Load splat rendering shaders
+	vertexShader   = shaderFactory->getOrCreateShader("shaders/compiled/raster.vert.spv", rhi::ShaderStage::VERTEX);
+	fragmentShader = shaderFactory->getOrCreateShader("shaders/compiled/raster.frag.spv", rhi::ShaderStage::FRAGMENT);
+
+	// Create UBO
+	rhi::BufferDesc uboDesc{};
+	uboDesc.size                      = sizeof(FrameUBO);
+	uboDesc.usage                     = rhi::BufferUsage::UNIFORM;
+	uboDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
+	uboDesc.hints.persistently_mapped = true;
+	frameUboBuffer                    = device->CreateBuffer(uboDesc);
+	frameUboDataPtr                   = frameUboBuffer->Map();
+
+	// Create descriptor set layout
+	rhi::DescriptorSetLayoutDesc layoutDesc{};
+	layoutDesc.bindings = {
+	    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::ALL_GRAPHICS},
+	    {1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // Splat Attributes
+	    {2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // SH Coefficients
+	    {3, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},        // Sorted Indices
+	};
+	descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
+
+	// Create descriptor set
+	descriptorSet = device->CreateDescriptorSet(descriptorSetLayout.Get());
+
+	// Binding 0: UBO
+	rhi::BufferBinding uboBinding{};
+	uboBinding.buffer = frameUboBuffer.Get();
+	uboBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
+	descriptorSet->BindBuffer(0, uboBinding);
+
+	// Binding 1: Splat Attributes
+	rhi::BufferBinding attributesBinding{};
+	attributesBinding.buffer = scene->GetGpuData().splat_attributes.Get();
+	attributesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	descriptorSet->BindBuffer(1, attributesBinding);
+
+	// Binding 2: SH Coefficients
+	rhi::BufferBinding shBinding{};
+	shBinding.buffer = scene->GetGpuData().shRest.Get();
+	shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	descriptorSet->BindBuffer(2, shBinding);
+
+	// Binding 3 (sorted indices) will be updated after sorting
+
+	// Create graphics pipeline
+	rhi::GraphicsPipelineDesc pipelineDesc{};
+	pipelineDesc.vertexShader                = vertexShader.Get();
+	pipelineDesc.fragmentShader              = fragmentShader.Get();
+	pipelineDesc.vertexLayout.attributes     = {{0, 0, rhi::VertexFormat::R32G32_SFLOAT, 0}};
+	pipelineDesc.vertexLayout.bindings       = {{0, sizeof(QuadVertex), false}};
+	pipelineDesc.topology                    = rhi::PrimitiveTopology::TRIANGLE_LIST;
+	pipelineDesc.rasterizationState.cullMode = rhi::CullMode::NONE;
+	pipelineDesc.colorBlendAttachments.resize(1);
+	pipelineDesc.colorBlendAttachments[0].blendEnable         = true;
+	pipelineDesc.colorBlendAttachments[0].srcColorBlendFactor = rhi::BlendFactor::SRC_ALPHA;
+	pipelineDesc.colorBlendAttachments[0].dstColorBlendFactor = rhi::BlendFactor::ONE_MINUS_SRC_ALPHA;
+	pipelineDesc.targetSignature.colorFormats                 = {swapchain->GetBackBuffer(0)->GetFormat()};
+	pipelineDesc.descriptorSetLayouts                         = {descriptorSetLayout.Get()};
+	renderPipeline                                            = device->CreateGraphicsPipeline(pipelineDesc);
 
 	uint32_t imageCount = deviceManager->GetSwapchain()->GetImageCount();
 
@@ -101,6 +193,17 @@ void GpuSortingRendererApp::OnRender()
 		return;
 	}
 
+	// Update UBO
+	int width, height;
+	glfwGetWindowSize(deviceManager->GetWindow(), &width, &height);
+	FrameUBO ubo{};
+	ubo.viewProjection = camera.GetViewProjectionMatrix();
+	ubo.cameraPos      = math::vec4(camera.GetPosition(), 1.0f);
+	ubo.viewport       = {static_cast<float>(width), static_cast<float>(height)};
+	ubo.focal          = {camera.GetProjectionMatrix()[0][0] * width / 2.0f,
+	                      camera.GetProjectionMatrix()[1][1] * height / 2.0f};
+	memcpy(frameUboDataPtr, &ubo, sizeof(FrameUBO));
+
 	rhi::IRHICommandList *cmdList = commandLists[imageIndex].Get();
 	cmdList->Begin();
 
@@ -144,7 +247,6 @@ void GpuSortingRendererApp::OnRender()
 			verifyNextSort           = false;
 		}
 
-		// Log sorting time every 60 frames
 		if (frameCount % 60 == 0)
 		{
 			if (fpsCounter.shouldUpdate())
@@ -153,22 +255,66 @@ void GpuSortingRendererApp::OnRender()
 				         sorter ? sorter->GetSortMethodName() : "No sorter");
 			}
 		}
-	}
 
-	rhi::BufferHandle sortedIndices;
-	if (sorter)
-	{
-		sortedIndices = sorter->GetSortedIndices();
-	}
+		// Update sorted indices buffer (only when it changes)
+		rhi::BufferHandle newSortedIndices = sorter->GetSortedIndices();
+		if (newSortedIndices.Get() != sortedIndices.Get())
+		{
+			sortedIndices = newSortedIndices;
 
-	// TODO: actual rendering using the sorted indices
+			rhi::BufferBinding indicesBinding{};
+			indicesBinding.buffer = sortedIndices.Get();
+			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			descriptorSet->BindBuffer(3, indicesBinding);
+		}
+	}
 
 	rhi::IRHITexture *backBuffer = swapchain->GetBackBuffer(imageIndex);
+
+	// Transition to render target
+	rhi::TextureTransition renderTransition = {};
+	renderTransition.texture                = backBuffer;
+	renderTransition.before                 = rhi::ResourceState::Undefined;
+	renderTransition.after                  = rhi::ResourceState::RenderTarget;
+
+	cmdList->Barrier(
+	    rhi::PipelineScope::Graphics,
+	    rhi::PipelineScope::Graphics,
+	    {},
+	    {&renderTransition, 1},
+	    {});
+
+	// Begin rendering
+	rhi::RenderingInfo renderingInfo{};
+	renderingInfo.colorAttachments.resize(1);
+	renderingInfo.colorAttachments[0].view    = swapchain->GetBackBufferView(imageIndex);
+	renderingInfo.colorAttachments[0].loadOp  = rhi::LoadOp::CLEAR;
+	renderingInfo.colorAttachments[0].storeOp = rhi::StoreOp::STORE;
+	renderingInfo.colorAttachments[0].clearValue.color[0] = 0.0f;
+	renderingInfo.colorAttachments[0].clearValue.color[1] = 0.0f;
+	renderingInfo.colorAttachments[0].clearValue.color[2] = 0.0f;
+	renderingInfo.colorAttachments[0].clearValue.color[3] = 1.0f;
+	renderingInfo.renderAreaWidth             = width;
+	renderingInfo.renderAreaHeight            = height;
+
+	cmdList->BeginRendering(renderingInfo);
+	cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
+	cmdList->SetScissor(0, 0, width, height);
+
+	// Draw the splats quad mesh
+	cmdList->SetPipeline(renderPipeline.Get());
+	cmdList->BindDescriptorSet(0, descriptorSet.Get());
+	cmdList->SetVertexBuffer(0, quadVertexBuffer.Get());
+	cmdList->BindIndexBuffer(quadIndexBuffer.Get());
+
+	cmdList->DrawIndexedInstanced(6, scene->GetTotalSplatCount(), 0, 0, 0);
+
+	cmdList->EndRendering();
 
 	// Transition to present
 	rhi::TextureTransition presentTransition = {};
 	presentTransition.texture                = backBuffer;
-	presentTransition.before                 = rhi::ResourceState::Undefined;
+	presentTransition.before                 = rhi::ResourceState::RenderTarget;
 	presentTransition.after                  = rhi::ResourceState::Present;
 
 	cmdList->Barrier(
@@ -205,7 +351,25 @@ void GpuSortingRendererApp::OnShutdown()
 	{
 		rhi::IRHIDevice *device = deviceManager->GetDevice();
 		device->WaitIdle();
+
+		if (frameUboDataPtr)
+		{
+			frameUboBuffer->Unmap();
+			frameUboDataPtr = nullptr;
+		}
 	}
+
+	renderPipeline = nullptr;
+	descriptorSet = nullptr;
+	descriptorSetLayout = nullptr;
+
+	vertexShader = nullptr;
+	fragmentShader = nullptr;
+
+	frameUboBuffer = nullptr;
+	quadIndexBuffer = nullptr;
+	quadVertexBuffer = nullptr;
+	sortedIndices = nullptr;
 
 	sorter.reset();
 	scene.reset();
@@ -282,25 +446,24 @@ void GpuSortingRendererApp::OnMouseMove(double xpos, double ypos)
 
 void GpuSortingRendererApp::LoadSplatFile(const char *filepath)
 {
-	// engine::SplatLoader loader;
-	// auto                futureData = loader.Load(filepath);
+	engine::SplatLoader loader;
+	auto                futureData = loader.Load(filepath);
 
-	// auto splatData = futureData.get();
+	auto splatData = futureData.get();
 
-	// if (splatData && splatData->numSplats > 0)
-	// {
-	// 	scene->AddMesh(splatData, math::Identity());
-	// 	scene->AllocateGpuBuffers();
-	// 	rhi::FenceHandle uploadFence = scene->UploadAttributeData();
-	// 	uploadFence->Wait(UINT64_MAX);
-	// 	LOG_INFO("Loaded {} splats from {}", splatData->numSplats, filepath);
-	// }
-	// else
-	// {
-	// 	CreateTestSplatData();
-	// }
-
-	CreateTestSplatData();
+	if (splatData && !splatData->empty())
+	{
+		scene->AddMesh(splatData, math::Identity());
+		scene->AllocateGpuBuffers();
+		rhi::FenceHandle uploadFence = scene->UploadAttributeData();
+		uploadFence->Wait(UINT64_MAX);
+		LOG_INFO("Loaded {} splats from {}", splatData->numSplats, filepath);
+	}
+	else
+	{
+		LOG_WARNING("Failed to load splat file {}, creating test data", filepath);
+		CreateTestSplatData();
+	}
 }
 
 void GpuSortingRendererApp::CreateTestSplatData()
