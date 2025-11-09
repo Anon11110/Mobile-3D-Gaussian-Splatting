@@ -1,22 +1,22 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-layout(location = 0) in vec4 in_color;
-layout(location = 1) in vec2 in_uv;
+layout(location = 0) in vec4 inColor;
+layout(location = 1) noperspective in vec2 inUV;
 
-layout(location = 0) out vec4 out_color;
+layout(location = 0) out vec4 outColor;
 
 void main()
 {
 	// Create a soft, circular splat shape
-	float dist_sq = dot(in_uv, in_uv);
-	if (dist_sq > 1.0)
+	float distSq = dot(inUV, inUV);
+	if (distSq > 1.0)
 	{
 		discard;
 	}
 
 	// Apply Gaussian falloff to the alpha
-	float alpha = in_color.a * exp(-0.5 * dist_sq);
+	float alpha = inColor.a * exp(-0.5 * distSq);
 
-	out_color = vec4(in_color.rgb, alpha);
+	outColor = vec4(inColor.rgb, alpha);
 }

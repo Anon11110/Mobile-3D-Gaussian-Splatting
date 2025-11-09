@@ -62,7 +62,8 @@ class GpuSortingRendererApp : public app::IApplication
 
 	struct FrameUBO
 	{
-		math::mat4 viewProjection;
+		math::mat4 view;
+		math::mat4 projection;
 		math::vec4 cameraPos;
 		math::vec2 viewport;
 		math::vec2 focal;
@@ -77,7 +78,6 @@ class GpuSortingRendererApp : public app::IApplication
 
 	container::unique_ptr<engine::ShaderFactory> shaderFactory;
 
-	rhi::BufferHandle quadVertexBuffer;
 	rhi::BufferHandle quadIndexBuffer;
 	rhi::BufferHandle frameUboBuffer;
 	void             *frameUboDataPtr = nullptr;
@@ -88,7 +88,7 @@ class GpuSortingRendererApp : public app::IApplication
 	rhi::PipelineHandle renderPipeline;
 
 	rhi::DescriptorSetLayoutHandle descriptorSetLayout;
-	rhi::DescriptorSetHandle        descriptorSet;
+	rhi::DescriptorSetHandle       descriptorSet;
 
 	container::vector<rhi::SemaphoreHandle> imageAvailableSemaphores;
 	container::vector<rhi::SemaphoreHandle> renderFinishedSemaphores;

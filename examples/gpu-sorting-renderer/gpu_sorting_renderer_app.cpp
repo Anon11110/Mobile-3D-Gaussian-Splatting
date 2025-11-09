@@ -48,33 +48,36 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 		LOG_INFO("Initialized sorter for {} splats", scene->GetTotalSplatCount());
 	}
 
-	// Create quad mesh for instanced rendering
-	struct QuadVertex
+	// Create static index buffer for indexed quad rendering
+	// Pattern: [0,1,2, 2,1,3, 4,5,6, 6,5,7, ...]
+	if (scene->GetTotalSplatCount() > 0)
 	{
-		math::vec2 pos;
-	};
+		uint32_t splatCount = scene->GetTotalSplatCount();
+		uint32_t indexCount = splatCount * 6;
 
-	const container::vector<QuadVertex> quadVertices = {
-	    {{-1.0f, -1.0f}},
-	    {{1.0f, -1.0f}},
-	    {{1.0f, 1.0f}},
-	    {{-1.0f, 1.0f}},
-	};
+		container::vector<uint32_t> indices;
+		indices.reserve(indexCount);
 
-	const container::vector<uint16_t> quadIndices = {0, 1, 2, 2, 3, 0};
+		for (uint32_t i = 0; i < splatCount; ++i)
+		{
+			uint32_t baseVertex = i * 4;
+			// First triangle: 0, 1, 2
+			indices.push_back(baseVertex + 0);
+			indices.push_back(baseVertex + 1);
+			indices.push_back(baseVertex + 2);
+			// Second triangle: 2, 1, 3
+			indices.push_back(baseVertex + 2);
+			indices.push_back(baseVertex + 1);
+			indices.push_back(baseVertex + 3);
+		}
 
-	rhi::BufferDesc vbDesc{};
-	vbDesc.size        = quadVertices.size() * sizeof(QuadVertex);
-	vbDesc.usage       = rhi::BufferUsage::VERTEX;
-	vbDesc.initialData = quadVertices.data();
-	quadVertexBuffer   = device->CreateBuffer(vbDesc);
-
-	rhi::BufferDesc ibDesc{};
-	ibDesc.size        = quadIndices.size() * sizeof(uint16_t);
-	ibDesc.usage       = rhi::BufferUsage::INDEX;
-	ibDesc.indexType   = rhi::IndexType::UINT16;
-	ibDesc.initialData = quadIndices.data();
-	quadIndexBuffer    = device->CreateBuffer(ibDesc);
+		rhi::BufferDesc ibDesc{};
+		ibDesc.size        = indices.size() * sizeof(uint32_t);
+		ibDesc.usage       = rhi::BufferUsage::INDEX;
+		ibDesc.indexType   = rhi::IndexType::UINT32;
+		ibDesc.initialData = indices.data();
+		quadIndexBuffer    = device->CreateBuffer(ibDesc);
+	}
 
 	// Load splat rendering shaders
 	vertexShader   = shaderFactory->getOrCreateShader("shaders/compiled/raster.vert.spv", rhi::ShaderStage::VERTEX);
@@ -147,8 +150,6 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 	rhi::GraphicsPipelineDesc pipelineDesc{};
 	pipelineDesc.vertexShader                = vertexShader.Get();
 	pipelineDesc.fragmentShader              = fragmentShader.Get();
-	pipelineDesc.vertexLayout.attributes     = {{0, 0, rhi::VertexFormat::R32G32_SFLOAT, 0}};
-	pipelineDesc.vertexLayout.bindings       = {{0, sizeof(QuadVertex), false}};
 	pipelineDesc.topology                    = rhi::PrimitiveTopology::TRIANGLE_LIST;
 	pipelineDesc.rasterizationState.cullMode = rhi::CullMode::NONE;
 	pipelineDesc.colorBlendAttachments.resize(1);
@@ -218,11 +219,13 @@ void GpuSortingRendererApp::OnRender()
 	int width, height;
 	glfwGetWindowSize(deviceManager->GetWindow(), &width, &height);
 	FrameUBO ubo{};
-	ubo.viewProjection = camera.GetViewProjectionMatrix();
-	ubo.cameraPos      = math::vec4(camera.GetPosition(), 1.0f);
-	ubo.viewport       = {static_cast<float>(width), static_cast<float>(height)};
-	ubo.focal          = {camera.GetProjectionMatrix()[0][0] * width / 2.0f,
-	                      camera.GetProjectionMatrix()[1][1] * height / 2.0f};
+	ubo.view       = camera.GetViewMatrix();
+	ubo.projection = camera.GetProjectionMatrix();
+	ubo.projection[1][1] *= -1.0f;        // Flip the Y[1][1] component to match Vulkan's NDC
+	ubo.cameraPos = math::vec4(camera.GetPosition(), 1.0f);
+	ubo.viewport  = {static_cast<float>(width), static_cast<float>(height)};
+	ubo.focal     = {ubo.projection[0][0] * width * 0.5f,
+	                 ubo.projection[1][1] * height * 0.5f};
 	memcpy(frameUboDataPtr, &ubo, sizeof(FrameUBO));
 
 	rhi::IRHICommandList *cmdList = commandLists[imageIndex].Get();
@@ -322,13 +325,14 @@ void GpuSortingRendererApp::OnRender()
 	cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
 	cmdList->SetScissor(0, 0, width, height);
 
-	// Draw the splats quad mesh
+	// Draw the splats using indexed procedural vertex generation
 	cmdList->SetPipeline(renderPipeline.Get());
 	cmdList->BindDescriptorSet(0, descriptorSet.Get());
-	cmdList->SetVertexBuffer(0, quadVertexBuffer.Get());
 	cmdList->BindIndexBuffer(quadIndexBuffer.Get());
 
-	cmdList->DrawIndexedInstanced(6, scene->GetTotalSplatCount(), 0, 0, 0);
+	// Draw using index buffer: 6 indices per quad, 4 vertices per splat
+	uint32_t indexCount = scene->GetTotalSplatCount() * 6;
+	cmdList->DrawIndexed(indexCount, 0, 0);
 
 	cmdList->EndRendering();
 
@@ -387,10 +391,9 @@ void GpuSortingRendererApp::OnShutdown()
 	vertexShader   = nullptr;
 	fragmentShader = nullptr;
 
-	frameUboBuffer   = nullptr;
-	quadIndexBuffer  = nullptr;
-	quadVertexBuffer = nullptr;
-	sortedIndices    = nullptr;
+	frameUboBuffer  = nullptr;
+	quadIndexBuffer = nullptr;
+	sortedIndices   = nullptr;
 
 	sorter.reset();
 	scene.reset();

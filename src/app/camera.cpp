@@ -151,7 +151,7 @@ void Camera::UpdateCameraVectors()
 	// Calculate the new front vector
 	math::vec3 front;
 	front.x = math::Cos(math::Radians(m_yaw)) * math::Cos(math::Radians(m_pitch));
-	front.y = math::Sin(math::Radians(m_pitch));
+	front.y = math::Sin(math::Radians(-m_pitch));
 	front.z = math::Sin(math::Radians(m_yaw)) * math::Cos(math::Radians(m_pitch));
 	m_front = math::Normalize(front);
 
