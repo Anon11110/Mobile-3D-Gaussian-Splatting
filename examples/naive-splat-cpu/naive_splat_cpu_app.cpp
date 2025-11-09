@@ -8,25 +8,6 @@
 
 #include <msplat/core/windows_sanitized.h>
 
-namespace
-{
-// A simple quad mesh for instanced rendering
-struct QuadVertex
-{
-	msplat::math::vec2 pos;
-};
-
-const msplat::container::vector<QuadVertex> g_quadVertices = {
-    {{-1.0f, -1.0f}},
-    {{1.0f, -1.0f}},
-    {{1.0f, 1.0f}},
-    {{-1.0f, 1.0f}},
-};
-
-const msplat::container::vector<uint16_t> g_quadIndices = {0, 1, 2, 2, 3, 0};
-
-}        // namespace
-
 bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 {
 	m_deviceManager = deviceManager;
@@ -54,24 +35,41 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 		device->RetireCompletedFrame();
 	}
 
-	// 2. Create Quad Mesh for Instancing
-	rhi::BufferDesc vbDesc{};
-	vbDesc.size        = g_quadVertices.size() * sizeof(QuadVertex);
-	vbDesc.usage       = rhi::BufferUsage::VERTEX;
-	vbDesc.initialData = g_quadVertices.data();
-	m_quadVertexBuffer = device->CreateBuffer(vbDesc);
+	// 2. Create static index buffer for indexed quad rendering
+	// Pattern: [0,1,2, 2,1,3, 4,5,6, 6,5,7, ...]
+	if (m_scene->GetTotalSplatCount() > 0)
+	{
+		uint32_t splatCount = m_scene->GetTotalSplatCount();
+		uint32_t indexCount = splatCount * 6;
 
-	rhi::BufferDesc ibDesc{};
-	ibDesc.size        = g_quadIndices.size() * sizeof(uint16_t);
-	ibDesc.usage       = rhi::BufferUsage::INDEX;
-	ibDesc.indexType   = rhi::IndexType::UINT16;
-	ibDesc.initialData = g_quadIndices.data();
-	m_quadIndexBuffer  = device->CreateBuffer(ibDesc);
+		container::vector<uint32_t> indices;
+		indices.reserve(indexCount);
+
+		for (uint32_t i = 0; i < splatCount; ++i)
+		{
+			uint32_t baseVertex = i * 4;
+			// First triangle: 0, 1, 2
+			indices.push_back(baseVertex + 0);
+			indices.push_back(baseVertex + 1);
+			indices.push_back(baseVertex + 2);
+			// Second triangle: 2, 1, 3
+			indices.push_back(baseVertex + 2);
+			indices.push_back(baseVertex + 1);
+			indices.push_back(baseVertex + 3);
+		}
+
+		rhi::BufferDesc ibDesc{};
+		ibDesc.size        = indices.size() * sizeof(uint32_t);
+		ibDesc.usage       = rhi::BufferUsage::INDEX;
+		ibDesc.indexType   = rhi::IndexType::UINT32;
+		ibDesc.initialData = indices.data();
+		m_quadIndexBuffer  = device->CreateBuffer(ibDesc);
+	}
 
 	// 3. Setup Shaders and Pipeline
 	m_shaderFactory  = msplat::container::make_unique<engine::ShaderFactory>(device);
-	m_vertexShader   = m_shaderFactory->getOrCreateShader("shaders/compiled/raster.vert.spv", rhi::ShaderStage::VERTEX);
-	m_fragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/raster.frag.spv", rhi::ShaderStage::FRAGMENT);
+	m_vertexShader   = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster.vert.spv", rhi::ShaderStage::VERTEX);
+	m_fragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster.frag.spv", rhi::ShaderStage::FRAGMENT);
 
 	// 4. Create UBO
 	rhi::BufferDesc uboDesc{};
@@ -144,12 +142,10 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 	rhi::GraphicsPipelineDesc pipelineDesc{};
 	pipelineDesc.vertexShader                = m_vertexShader.Get();
 	pipelineDesc.fragmentShader              = m_fragmentShader.Get();
-	pipelineDesc.vertexLayout.attributes     = {{0, 0, rhi::VertexFormat::R32G32_SFLOAT, 0}};
-	pipelineDesc.vertexLayout.bindings       = {{0, sizeof(QuadVertex), false}};
 	pipelineDesc.topology                    = rhi::PrimitiveTopology::TRIANGLE_LIST;
 	pipelineDesc.rasterizationState.cullMode = rhi::CullMode::NONE;
 	pipelineDesc.colorBlendAttachments.resize(1);
-	pipelineDesc.colorBlendAttachments[0].blendEnable         = true;        // Enable additive blending
+	pipelineDesc.colorBlendAttachments[0].blendEnable         = true;
 	pipelineDesc.colorBlendAttachments[0].srcColorBlendFactor = rhi::BlendFactor::SRC_ALPHA;
 	pipelineDesc.colorBlendAttachments[0].dstColorBlendFactor = rhi::BlendFactor::ONE_MINUS_SRC_ALPHA;
 	pipelineDesc.targetSignature.colorFormats                 = {swapchain->GetBackBuffer(0)->GetFormat()};
@@ -200,6 +196,8 @@ void NaiveSplatCpuApp::OnRender()
 	m_inFlightFences[m_currentFrame]->Wait();
 	m_inFlightFences[m_currentFrame]->Reset();
 
+	m_fpsCounter.frame();
+
 	// Acquire an image from the swap chain
 	uint32_t imageIndex;
 	auto     acquireStatus = swapchain->AcquireNextImage(imageIndex, m_imageAvailableSemaphores[m_currentFrame].Get());
@@ -213,10 +211,13 @@ void NaiveSplatCpuApp::OnRender()
 	int width, height;
 	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 	FrameUBO ubo{};
-	ubo.viewProjection = m_camera.GetViewProjectionMatrix();
-	ubo.cameraPos      = math::vec4(m_camera.GetPosition(), 1.0f);
-	ubo.viewport       = {(float) width, (float) height};
-	ubo.focal          = {m_camera.GetProjectionMatrix()[0][0] * width / 2.0f, m_camera.GetProjectionMatrix()[1][1] * height / 2.0f};
+	ubo.view       = m_camera.GetViewMatrix();
+	ubo.projection = m_camera.GetProjectionMatrix();
+	ubo.projection[1][1] *= -1.0f;        // Flip Y for Vulkan NDC
+	ubo.cameraPos = math::vec4(m_camera.GetPosition(), 1.0f);
+	ubo.viewport  = {(float) width, (float) height};
+	ubo.focal     = {ubo.projection[0][0] * width * 0.5f,
+	                 ubo.projection[1][1] * height * 0.5f};
 	memcpy(m_frameUboDataPtr, &ubo, sizeof(FrameUBO));
 
 	// Check for new sorted indices and upload them
@@ -257,13 +258,14 @@ void NaiveSplatCpuApp::OnRender()
 	cmdList->SetViewport(0, 0, (float) width, (float) height);
 	cmdList->SetScissor(0, 0, width, height);
 
+	// Draw the splats using indexed procedural vertex generation
 	cmdList->SetPipeline(m_pipeline.Get());
 	cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
-	cmdList->SetVertexBuffer(0, m_quadVertexBuffer.Get());
 	cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
 
-	// Draw the quad mesh instanced for each splat
-	cmdList->DrawIndexedInstanced(static_cast<uint32_t>(g_quadIndices.size()), m_scene->GetTotalSplatCount(), 0, 0, 0);
+	// Draw using index buffer: 6 indices per quad, 4 vertices per splat
+	uint32_t indexCount = m_scene->GetTotalSplatCount() * 6;
+	cmdList->DrawIndexed(indexCount, 0, 0);
 
 	cmdList->EndRendering();
 
@@ -299,10 +301,12 @@ void NaiveSplatCpuApp::OnRender()
 
 	m_currentFrame = (m_currentFrame + 1) % 2;
 
-	m_fpsCounter.frame();
+	// Log FPS periodically
 	if (m_fpsCounter.shouldUpdate())
 	{
-		LOG_INFO("FPS: {}", m_fpsCounter.getFPS());
+		LOG_INFO("Frame FPS: {:.2f} | Sort: CPU | Splats: {}",
+		         m_fpsCounter.getFPS(),
+		         m_scene->GetTotalSplatCount());
 		m_fpsCounter.reset();
 	}
 }
@@ -333,9 +337,8 @@ void NaiveSplatCpuApp::OnShutdown()
 		m_fragmentShader = nullptr;
 		m_shaderFactory  = nullptr;
 
-		m_frameUboBuffer   = nullptr;
-		m_quadIndexBuffer  = nullptr;
-		m_quadVertexBuffer = nullptr;
+		m_frameUboBuffer  = nullptr;
+		m_quadIndexBuffer = nullptr;
 
 		m_scene.reset();
 	}

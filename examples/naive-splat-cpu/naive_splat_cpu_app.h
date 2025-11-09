@@ -37,8 +37,7 @@ class NaiveSplatCpuApp : public app::IApplication
 	container::unique_ptr<engine::Scene>         m_scene;
 	container::unique_ptr<engine::ShaderFactory> m_shaderFactory;
 
-	// Basic quad geometry for instancing
-	rhi::BufferHandle m_quadVertexBuffer;
+	// Quad index buffer for indexed procedural rendering
 	rhi::BufferHandle m_quadIndexBuffer;
 
 	// Shaders
@@ -53,7 +52,8 @@ class NaiveSplatCpuApp : public app::IApplication
 	// Uniform buffer for matrices etc.
 	struct FrameUBO
 	{
-		math::mat4 viewProjection;
+		math::mat4 view;
+		math::mat4 projection;
 		math::vec4 cameraPos;
 		math::vec2 viewport;
 		math::vec2 focal;
