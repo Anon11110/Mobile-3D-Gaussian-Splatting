@@ -235,6 +235,8 @@ void GpuSortingRendererApp::OnRender()
 	ubo.viewport  = {static_cast<float>(width), static_cast<float>(height)};
 	ubo.focal     = {ubo.projection[0][0] * width * 0.5f,
 	                 ubo.projection[1][1] * height * 0.5f};
+	ubo.splatScale = 1.0f;              // Default scale factor
+	ubo.alphaCullThreshold = 1.0f / 255.0f;  // Default alpha cutoff
 	memcpy(frameUboDataPtr, &ubo, sizeof(FrameUBO));
 
 	rhi::IRHICommandList *cmdList = commandLists[imageIndex].Get();

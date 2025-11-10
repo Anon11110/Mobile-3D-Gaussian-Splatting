@@ -6,13 +6,21 @@
 using namespace msplat::math;
 #endif
 
+// Macro for FrameUBO fields
+#define FRAMEUBO_FIELDS 	  \
+	mat4 view;          	  \
+	mat4 projection;    	  \
+	                    	  \
+	vec4 cameraPos;     	  \
+	vec2 viewport;      	  \
+	vec2 focal;         	  \
+	                    	  \
+	float splatScale;   	  \
+	float alphaCullThreshold; \
+
 struct FrameUBO
 {
-	mat4 view;
-	mat4 projection;
-	vec4 cameraPos;
-	vec2 viewport;
-	vec2 focal;
+	FRAMEUBO_FIELDS
 };
 
 #endif // SHADERIO_H

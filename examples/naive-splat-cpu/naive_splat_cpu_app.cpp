@@ -218,6 +218,8 @@ void NaiveSplatCpuApp::OnRender()
 	ubo.viewport  = {(float) width, (float) height};
 	ubo.focal     = {ubo.projection[0][0] * width * 0.5f,
 	                 ubo.projection[1][1] * height * 0.5f};
+	ubo.splatScale = 1.0f;              // Default scale factor
+	ubo.alphaCullThreshold = 1.0f / 255.0f;  // Default alpha cutoff
 	memcpy(m_frameUboDataPtr, &ubo, sizeof(FrameUBO));
 
 	// Check for new sorted indices and upload them

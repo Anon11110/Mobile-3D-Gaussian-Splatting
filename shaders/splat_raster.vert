@@ -1,8 +1,7 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : enable
 #include "shaderio.h"
-
-const float DEPTH_OFFSET_EPSILON = 1e-7;
 
 // SH Constants for degrees 1-3
 const float SH_C1 = 0.4886025119029199;
@@ -22,14 +21,9 @@ const float SH_C3_6 = -0.5900435899266435;
 layout(location = 0) out vec4 outColor;
 layout(location = 1) noperspective out vec2 outUV;
 
-// FrameUBO uniform block - fields defined in shaderio.h
 layout(set = 0, binding = 0) uniform FrameUBOBlock
 {
-	mat4 view;
-	mat4 projection;
-	vec4 cameraPos;
-	vec2 viewport;
-	vec2 focal;
+	FRAMEUBO_FIELDS
 } ubo;
 
 layout(set = 0, binding = 1, std430) readonly buffer PositionsBuffer
@@ -72,6 +66,7 @@ mat3 QuatToMat3(vec4 q)
 	);
 }
 
+/// Kills the splat
 void KillSplat()
 {
 	gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
@@ -79,7 +74,7 @@ void KillSplat()
 	outUV = vec2(0.0);
 }
 
-// SH evaluation function for degrees 0-3
+/// SH evaluation function for degrees 0-3
 vec3 ComputeSH(uint splatIndex, vec3 dir, vec3 baseColor)
 {
 	// The shRest buffer contains 45 floats per splat in planar format:
@@ -142,46 +137,9 @@ vec3 ComputeSH(uint splatIndex, vec3 dir, vec3 baseColor)
 	return max(result, vec3(0.0));
 }
 
-void main()
+/// Helper to get 3D covariance matrix
+mat3 getCovariance3D(vec3 scale, vec4 rot)
 {
-	uint splatId = gl_VertexIndex / 4;
-	uint vertexId = gl_VertexIndex % 4;
-
-	uint splatIndex = indices[splatId];
-
-	vec3  pos   = positions[splatIndex];
-	vec3  scale = scales[splatIndex];
-	vec4  rot   = rotations[splatIndex];
-	vec4  baseColor = colors[splatIndex];
-
-	// Early alpha culling
-	if (baseColor.a < 1.0 / 255.0)
-	{
-		KillSplat();
-		return;
-	}
-
-	// Compute view direction in world space (from splat to camera)
-	vec3 viewDir = normalize(ubo.cameraPos.xyz - pos);
-
-	// Evaluate spherical harmonics for view-dependent color
-	vec3 shColor = ComputeSH(splatIndex, viewDir, baseColor.rgb);
-
-	// Update color with SH evaluation result
-	vec4 color = vec4(shColor, baseColor.a);
-
-	// Transform to view space
-	vec4 viewPos4 = ubo.view * vec4(pos, 1.0);
-	vec3 viewPos = viewPos4.xyz;
-
-	// Early depth culling
-	if (viewPos.z > -0.1)
-	{
-		KillSplat();
-		return;
-	}
-
-	// Build 3D covariance matrix
 	mat3 R = QuatToMat3(rot);
 	mat3 S = mat3(
 		scale.x, 0.0, 0.0,
@@ -189,8 +147,12 @@ void main()
 		0.0, 0.0, scale.z
 	);
 	mat3 M = R * S;
-	mat3 Sigma = M * transpose(M);
+	return M * transpose(M);
+}
 
+/// Projects the 3D covariance to 2D using the Jacobian
+vec3 projectCovariance(mat3 cov3D, vec3 viewPos)
+{
 	// Projective Jacobian
 	float rz = 1.0 / viewPos.z;
 	float rz2 = rz * rz;
@@ -198,73 +160,149 @@ void main()
 	float fy = ubo.focal.y;
 
 	mat3 J = mat3(
-		fx * rz,    0.0,       -(fx * viewPos.x) * rz2,
-		0.0,        fy * rz,   -(fy * viewPos.y) * rz2,
-		0.0,        0.0,       0.0
+		fx * rz, 0.0,     -(fx * viewPos.x) * rz2,
+		0.0,     fy * rz, -(fy * viewPos.y) * rz2,
+		0.0,     0.0,     0.0
 	);
 
 	// Transform 3D covariance to 2D
 	mat3 W = mat3(ubo.view);
-	mat3 T = W * Sigma * transpose(W);
+	mat3 T = W * cov3D * transpose(W);
 	mat3 cov2Dm = J * T * transpose(J);
 
 	// Low-pass filter for anti-aliasing
-	cov2Dm[0][0] += 0.1;
-	cov2Dm[1][1] += 0.1;
+	cov2Dm[0][0] += 0.3;
+	cov2Dm[1][1] += 0.3;
 
-	vec3 cov2d = vec3(cov2Dm[0][0], cov2Dm[0][1], cov2Dm[1][1]);
+	return vec3(cov2Dm[0][0], cov2Dm[0][1], cov2Dm[1][1]);
+}
 
-	// Eigendecomposition
+/// Calculates the basis vectors and radii for the 2D ellipse
+bool getEllipseBasis(vec3 cov2d, out vec2 axis1, out vec2 axis2, out float radius1, out float radius2)
+{
 	float det = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
 
 	if (det <= 1e-6)
 	{
+		// Add a small epsilon to the diagonal to make it invertible
 		cov2d.x += 1e-6;
 		cov2d.z += 1e-6;
 		det = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
 	}
+    if (det <= 0.0) return false;
 
+	// Eigendecomposition
 	float mid = 0.5 * (cov2d.x + cov2d.z);
 	float discriminant = max(0.0, mid * mid - det);
 	float lambda1 = mid + sqrt(discriminant);
 	float lambda2 = mid - sqrt(discriminant);
+
+	// Check for eigenvalue degeneracy (degenerate projection to line or point)
+	if (lambda2 <= 0.0)
+	{
+		return false;
+	}
+
 	lambda1 = max(lambda1, 1e-8);
 	lambda2 = max(lambda2, 1e-8);
+	radius1 = sqrt(8.0) * sqrt(lambda1);
+	radius2 = sqrt(8.0) * sqrt(lambda2);
 
-	float radius1 = 3.0 * sqrt(lambda1);
-	float radius2 = 3.0 * sqrt(lambda2);
 	float minPix = 0.5;
 	radius1 = max(radius1, minPix);
 	radius2 = max(radius2, minPix);
 
-	// Vector-based eigendecomposition
+	// Apply splat scale factor
+	radius1 *= ubo.splatScale;
+	radius2 *= ubo.splatScale;
+
+	// Vector-based eigendecomposition to find axes
 	float a = cov2d.x, b = cov2d.y, c = cov2d.z;
 	float two_b = 2.0 * b;
 	float diff  = a - c;
-	// sqrt(diff*diff + two_b*two_b)
 	float r = length(vec2(two_b, diff));
 	r = max(r, 1e-20);
 
-	float cosT = sqrt( max(0.0, (r + diff) / (2.0 * r)) );
-	float sinT = sqrt( max(0.0, (r - diff) / (2.0 * r)) );
+	float cosT = sqrt(max(0.0, (r + diff) / (2.0 * r)));
+	float sinT = sqrt(max(0.0, (r - diff) / (2.0 * r)));
 	sinT = (b >= 0.0) ? sinT : -sinT;
-	vec2 axis1 = vec2(cosT, sinT);
-	vec2 axis2 = vec2(-axis1.y, axis1.x);
 
-	// Frustum culling
-	vec4 centerClip = ubo.projection * vec4(viewPos, 1.0);
+	axis1 = vec2(cosT, sinT);
+	axis2 = vec2(-axis1.y, axis1.x);
+
+    return true;
+}
+
+/// Checks if the splat is outside the view frustum
+bool isCulledByFrustum(vec4 centerClip, float radius1, float radius2)
+{
 	vec2 centerNDC = centerClip.xy / centerClip.w;
-
 	float maxRadius = max(radius1, radius2);
 	vec2 ndcMargin = (maxRadius / ubo.viewport) * 2.0;
 
-	if (any(lessThan(centerNDC, vec2(-1.3) - ndcMargin)) ||
-	    any(greaterThan(centerNDC, vec2(1.3) + ndcMargin)))
+	return any(lessThan(centerNDC, vec2(-1.3) - ndcMargin)) ||
+	       any(greaterThan(centerNDC, vec2(1.3) + ndcMargin));
+}
+
+void main()
+{
+	uint splatId = gl_VertexIndex / 4;
+	uint vertexId = gl_VertexIndex % 4;
+	uint splatIndex = indices[splatId];
+
+	// --- 1. Fetch Splat Data ---
+	vec3  pos   = positions[splatIndex];
+	vec3  scale = scales[splatIndex];
+	vec4  rot   = rotations[splatIndex];
+	vec4  baseColor = colors[splatIndex];
+
+	// --- 2. Early Culling ---
+	// Alpha culling
+	if (baseColor.a < ubo.alphaCullThreshold)
 	{
 		KillSplat();
 		return;
 	}
 
+	// Transform to view space
+	vec4 viewPos4 = ubo.view * vec4(pos, 1.0);
+	vec3 viewPos = viewPos4.xyz;
+
+	// Depth culling
+	if (viewPos.z > -0.1)
+	{
+		KillSplat();
+		return;
+	}
+
+	// --- 3. Spherical Harmonics ---
+	vec3 viewDir = normalize(ubo.cameraPos.xyz - pos);
+	vec3 shColor = ComputeSH(splatIndex, viewDir, baseColor.rgb);
+	vec4 color = vec4(shColor, baseColor.a);
+
+	// --- 4. Covariance Calculation and Projection ---
+	mat3 cov3D = getCovariance3D(scale, rot);
+	vec3 cov2d = projectCovariance(cov3D, viewPos);
+
+	// --- 5. Eigendecomposition (Compute Splat Basis) ---
+	vec2 axis1, axis2;
+	float radius1, radius2;
+
+	if (!getEllipseBasis(cov2d, axis1, axis2, radius1, radius2))
+	{
+		KillSplat();
+		return;
+	}
+
+	// --- 6. Frustum Culling ---
+	vec4 centerClip = ubo.projection * viewPos4;
+	if (isCulledByFrustum(centerClip, radius1, radius2))
+	{
+		KillSplat();
+		return;
+	}
+
+	// --- 7. Vertex Generation ---
 	vec2 cornerUnit;
 	switch(vertexId)
 	{
@@ -278,11 +316,6 @@ void main()
 	vec2 offsetClip = (screenOffset / ubo.viewport) * 2.0 * centerClip.w;
 
 	gl_Position = centerClip + vec4(offsetClip, 0.0, 0.0);
-
-	// Add a small depth offset based on sorted order to prevent z-fighting.
-	// This assumes front-to-back sorting. The epsilon may need tuning.
-	gl_Position.z += float(splatId) * DEPTH_OFFSET_EPSILON;
-
 	outColor = color;
 	outUV = cornerUnit;
 }
