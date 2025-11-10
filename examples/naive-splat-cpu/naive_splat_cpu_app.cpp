@@ -214,12 +214,12 @@ void NaiveSplatCpuApp::OnRender()
 	ubo.view       = m_camera.GetViewMatrix();
 	ubo.projection = m_camera.GetProjectionMatrix();
 	ubo.projection[1][1] *= -1.0f;        // Flip Y for Vulkan NDC
-	ubo.cameraPos = math::vec4(m_camera.GetPosition(), 1.0f);
-	ubo.viewport  = {(float) width, (float) height};
-	ubo.focal     = {ubo.projection[0][0] * width * 0.5f,
-	                 ubo.projection[1][1] * height * 0.5f};
-	ubo.splatScale = 1.0f;              // Default scale factor
-	ubo.alphaCullThreshold = 1.0f / 255.0f;  // Default alpha cutoff
+	ubo.cameraPos          = math::vec4(m_camera.GetPosition(), 1.0f);
+	ubo.viewport           = {(float) width, (float) height};
+	ubo.focal              = {ubo.projection[0][0] * width * 0.5f,
+	                          ubo.projection[1][1] * height * 0.5f};
+	ubo.splatScale         = 1.0f;                 // Default scale factor
+	ubo.alphaCullThreshold = 1.0f / 255.0f;        // Default alpha cutoff
 	memcpy(m_frameUboDataPtr, &ubo, sizeof(FrameUBO));
 
 	// Check for new sorted indices and upload them
