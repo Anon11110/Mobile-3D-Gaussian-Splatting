@@ -25,24 +25,33 @@ function(compile_shaders SHADER_SRC_DIR TARGET_NAME)
         "${SHADER_SRC_DIR}/*.tese"
     )
 
-    # Create a custom target for shader compilation that always runs
-    set(SHADER_TARGET_NAME "${TARGET_NAME}_shaders")
-    add_custom_target(${SHADER_TARGET_NAME} ALL
-        COMMAND ${CMAKE_COMMAND} -E echo "Force recompiling all shaders..."
+    # Find shader header files for dependency tracking
+    file(GLOB SHADER_HEADERS
+        "${SHADER_SRC_DIR}/*.h"
+        "${CMAKE_SOURCE_DIR}/shaders/*.h"
     )
+
+    # Create a custom target for shader compilation
+    # Note: Uses TARGET-based approach for Xcode compatibility
+    set(SHADER_TARGET_NAME "${TARGET_NAME}_shaders")
+    add_custom_target(${SHADER_TARGET_NAME} ALL)
 
     # Keep track of all SPIRV files
     set(ALL_SPIRV_FILES "")
 
-    # Add compilation commands directly to the target
+    # Add compilation commands with dependency tracking
     foreach(SHADER_FILE ${SHADER_FILES})
         get_filename_component(SHADER_NAME ${SHADER_FILE} NAME)
         set(SPIRV_FILE "${SHADER_COMPILED_DIR}/${SHADER_NAME}.spv")
 
-        # Add compilation command to the target
+        # Add compilation command with header dependency tracking
         add_custom_command(
             TARGET ${SHADER_TARGET_NAME}
-            COMMAND ${GLSLC_EXECUTABLE} ${SHADER_FILE} -o ${SPIRV_FILE} --target-spv=spv1.3
+            COMMAND ${GLSLC_EXECUTABLE}
+                    -I${SHADER_SRC_DIR}
+                    -I${CMAKE_SOURCE_DIR}/shaders
+                    ${SHADER_FILE} -o ${SPIRV_FILE} --target-spv=spv1.3
+            DEPENDS ${SHADER_FILE} ${SHADER_HEADERS}
             COMMENT "Compiling shader: ${SHADER_NAME} -> ${SHADER_NAME}.spv"
             VERBATIM
         )
@@ -69,10 +78,13 @@ function(compile_shaders SHADER_SRC_DIR TARGET_NAME)
     message(STATUS "  Source directory: ${SHADER_SRC_DIR}")
     message(STATUS "  Compiled directory: ${SHADER_COMPILED_DIR}")
     message(STATUS "  Output will be copied to: build/bin/<CONFIG>/shaders/compiled")
+    message(STATUS "  Include paths: ${SHADER_SRC_DIR}, ${CMAKE_SOURCE_DIR}/shaders")
 
-    # Count shaders
+    # Count shaders and headers
     list(LENGTH SHADER_FILES SHADER_COUNT)
+    list(LENGTH SHADER_HEADERS HEADER_COUNT)
     message(STATUS "  Found ${SHADER_COUNT} shader(s) to compile")
+    message(STATUS "  Found ${HEADER_COUNT} shader header(s) for dependency tracking")
 endfunction()
 
 # Helper function to add a shader directory to a target

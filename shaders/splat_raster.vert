@@ -1,5 +1,8 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
+#include "shaderio.h"
+
+const float DEPTH_OFFSET_EPSILON = 1e-7;
 
 // SH Constants for degrees 1-3
 const float SH_C1 = 0.4886025119029199;
@@ -19,15 +22,15 @@ const float SH_C3_6 = -0.5900435899266435;
 layout(location = 0) out vec4 outColor;
 layout(location = 1) noperspective out vec2 outUV;
 
-layout(set = 0, binding = 0) uniform FrameUBO
+// FrameUBO uniform block - fields defined in shaderio.h
+layout(set = 0, binding = 0) uniform FrameUBOBlock
 {
 	mat4 view;
 	mat4 projection;
 	vec4 cameraPos;
 	vec2 viewport;
 	vec2 focal;
-}
-ubo;
+} ubo;
 
 layout(set = 0, binding = 1, std430) readonly buffer PositionsBuffer
 {
@@ -275,6 +278,10 @@ void main()
 	vec2 offsetClip = (screenOffset / ubo.viewport) * 2.0 * centerClip.w;
 
 	gl_Position = centerClip + vec4(offsetClip, 0.0, 0.0);
+
+	// Add a small depth offset based on sorted order to prevent z-fighting.
+	// This assumes front-to-back sorting. The epsilon may need tuning.
+	gl_Position.z += float(splatId) * DEPTH_OFFSET_EPSILON;
 
 	outColor = color;
 	outUV = cornerUnit;

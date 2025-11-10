@@ -7,6 +7,7 @@
 #include "engine/scene.h"
 #include "engine/shader_factory.h"
 #include "rhi/rhi.h"
+#include "shaders/shaderio.h"
 
 // Use msplat namespace to avoid repetitive prefixes
 using namespace msplat;
@@ -50,14 +51,6 @@ class NaiveSplatCpuApp : public app::IApplication
 	rhi::PipelineHandle            m_pipeline;
 
 	// Uniform buffer for matrices etc.
-	struct FrameUBO
-	{
-		math::mat4 view;
-		math::mat4 projection;
-		math::vec4 cameraPos;
-		math::vec2 viewport;
-		math::vec2 focal;
-	};
 	rhi::BufferHandle m_frameUboBuffer;
 	void             *m_frameUboDataPtr = nullptr;
 

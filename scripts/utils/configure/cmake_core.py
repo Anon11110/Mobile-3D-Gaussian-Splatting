@@ -488,9 +488,16 @@ def run_executable(
     term.kv("Executable", str(exe_path))
     term.kv("Working directory", str(exe_dir))
 
+    # Set up platform-specific runtime environment
+    env = os.environ.copy()
+
+    # macOS: Add Vulkan library path for dynamic linking
+    if platform.system().lower() == "darwin":
+        env["DYLD_LIBRARY_PATH"] = "/usr/local/lib"
+
     try:
         # Run from the executable's directory (important for asset loading)
-        result = subprocess.run([f"./{target}"], cwd=exe_dir, check=False)
+        result = subprocess.run([f"./{target}"], cwd=exe_dir, env=env, check=False)
 
         if result.returncode == 0:
             term.success(f"{target} completed successfully")

@@ -6,6 +6,7 @@
 #include "core/containers/vector.h"
 #include "core/math/math.h"
 #include "core/timer.h"
+#include "shaders/shaderio.h"
 #include <cstdlib>
 #include <msplat/engine/shader_factory.h>
 
@@ -59,15 +60,6 @@ class GpuSortingRendererApp : public app::IApplication
   private:
 	void LoadSplatFile(const char *filepath);
 	void CreateTestSplatData();
-
-	struct FrameUBO
-	{
-		math::mat4 view;
-		math::mat4 projection;
-		math::vec4 cameraPos;
-		math::vec2 viewport;
-		math::vec2 focal;
-	};
 
 	app::DeviceManager *deviceManager = nullptr;
 

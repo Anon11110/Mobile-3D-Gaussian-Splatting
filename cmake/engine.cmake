@@ -9,6 +9,7 @@ set(ENGINE_HEADERS
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/splat_mesh.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/scene.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/gpu_splat_sorter.h
+    ${CMAKE_SOURCE_DIR}/shaders/shaderio.h
 )
 
 set(ENGINE_SOURCES
@@ -28,6 +29,7 @@ target_include_directories(engine PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/third-party/miniply
     ${CMAKE_SOURCE_DIR}/rhi/include
+    ${CMAKE_SOURCE_DIR}/shaders
 )
 
 target_link_libraries(engine PUBLIC core RHI)
