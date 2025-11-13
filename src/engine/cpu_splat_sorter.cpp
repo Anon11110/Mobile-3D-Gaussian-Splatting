@@ -1,5 +1,6 @@
 #include "engine/cpu_splat_sorter.h"
 #include "core/log.h"
+#include "engine/splat_math.h"
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -115,10 +116,7 @@ void CpuSplatSorter::Impl::SortWorker()
 		// 1. Calculate depths
 		for (size_t i = 0; i < m_worker_positions.size(); ++i)
 		{
-			const auto &pos = m_worker_positions[i];
-			m_depths[i]     = m_worker_view_matrix[0][2] * pos.x +
-			              m_worker_view_matrix[1][2] * pos.y +
-			              m_worker_view_matrix[2][2] * pos.z;
+			m_depths[i]         = ComputeViewSpaceDepth(m_worker_positions[i], m_worker_view_matrix);
 			m_producerBuffer[i] = static_cast<uint32_t>(i);
 		}
 

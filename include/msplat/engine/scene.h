@@ -20,11 +20,10 @@ class Scene
 	struct GpuData
 	{
 		// Splat attribute buffers
-		rhi::BufferHandle positions;        // vec3 positions[]
-		rhi::BufferHandle scales;           // vec3 scales[]
-		rhi::BufferHandle rotations;        // vec4 rotations[]
-		rhi::BufferHandle colors;           // vec4 colors[]
-		rhi::BufferHandle shRest;           // float shRest[]
+		rhi::BufferHandle positions;            // vec3 positions[]
+		rhi::BufferHandle covariances3D;        // vec3[2] covariances[] (6 floats packed as 2 vec3)
+		rhi::BufferHandle colors;               // vec4 colors[]
+		rhi::BufferHandle shRest;               // float shRest[]
 
 		// Sorted indices for rendering
 		rhi::BufferHandle sortedIndices;
@@ -43,7 +42,7 @@ class Scene
 	// Allocates GPU buffers for attribute data and sorted indices
 	void AllocateGpuBuffers();
 
-	// Uploads static attribute data (positions, scales, rotations, colors, SH) to GPU
+	// Uploads static attribute data (positions, covariances, colors, SH) to GPU
 	rhi::FenceHandle UploadAttributeData();
 
 	// Triggers a new sort based on the camera's view matrix

@@ -146,8 +146,7 @@ void TestGpuUpload(rhi::IRHIDevice* device, const std::filesystem::path& plyPath
 		const auto& gpuData = scene.GetGpuData();
 		LOG_INFO("GPU buffers allocated:");
 		LOG_INFO("  - Positions: {} bytes", gpuData.positions->GetSize());
-		LOG_INFO("  - Scales: {} bytes", gpuData.scales->GetSize());
-		LOG_INFO("  - Rotations: {} bytes", gpuData.rotations->GetSize());
+		LOG_INFO("  - Covariances3D: {} bytes", gpuData.covariances3D->GetSize());
 		LOG_INFO("  - Colors: {} bytes", gpuData.colors->GetSize());
 		if (gpuData.shRest)
 		{

@@ -97,11 +97,10 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 	layoutDesc.bindings = {
 	    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::ALL_GRAPHICS},        // UBO
 	    {1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Positions
-	    {2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Scales
-	    {3, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Rotations
-	    {4, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Colors
-	    {5, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // SH Rest
-	    {6, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Sorted Indices
+	    {2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Covariances3D
+	    {3, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Colors
+	    {4, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // SH Rest
+	    {5, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Sorted Indices
 	};
 	descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 
@@ -120,31 +119,25 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 	positionsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
 	descriptorSet->BindBuffer(1, positionsBinding);
 
-	// Binding 2: Scales
-	rhi::BufferBinding scalesBinding{};
-	scalesBinding.buffer = scene->GetGpuData().scales.Get();
-	scalesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	descriptorSet->BindBuffer(2, scalesBinding);
+	// Binding 2: Covariances3D
+	rhi::BufferBinding cov3DBinding{};
+	cov3DBinding.buffer = scene->GetGpuData().covariances3D.Get();
+	cov3DBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	descriptorSet->BindBuffer(2, cov3DBinding);
 
-	// Binding 3: Rotations
-	rhi::BufferBinding rotationsBinding{};
-	rotationsBinding.buffer = scene->GetGpuData().rotations.Get();
-	rotationsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	descriptorSet->BindBuffer(3, rotationsBinding);
-
-	// Binding 4: Colors
+	// Binding 3: Colors
 	rhi::BufferBinding colorsBinding{};
 	colorsBinding.buffer = scene->GetGpuData().colors.Get();
 	colorsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	descriptorSet->BindBuffer(4, colorsBinding);
+	descriptorSet->BindBuffer(3, colorsBinding);
 
-	// Binding 5: SH Rest
+	// Binding 4: SH Rest
 	rhi::BufferBinding shBinding{};
 	shBinding.buffer = scene->GetGpuData().shRest.Get();
 	shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	descriptorSet->BindBuffer(5, shBinding);
+	descriptorSet->BindBuffer(4, shBinding);
 
-	// Binding 6 (sorted indices) will be updated after sorting
+	// Binding 5 (sorted indices) will be updated after sorting
 
 	// Create graphics pipeline
 	rhi::GraphicsPipelineDesc pipelineDesc{};
@@ -291,7 +284,7 @@ void GpuSortingRendererApp::OnRender()
 			rhi::BufferBinding indicesBinding{};
 			indicesBinding.buffer = sortedIndices.Get();
 			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-			descriptorSet->BindBuffer(6, indicesBinding);
+			descriptorSet->BindBuffer(5, indicesBinding);
 		}
 	}
 

@@ -52,6 +52,7 @@ FORMAT_DIRS = [
     "include/msplat/engine",
     "src/core",
     "src/engine",
+    #"shaders",
 ]
 
 

@@ -2,6 +2,7 @@
 #include <msplat/core/math/math.h>
 #include <msplat/engine/cpu_splat_sorter.h>
 #include <msplat/engine/scene.h>
+#include <msplat/engine/splat_math.h>
 
 namespace msplat::engine
 {
@@ -108,19 +109,14 @@ rhi::FenceHandle Scene::UploadAttributeData()
 	}
 
 	container::vector<float> positions;
-	container::vector<float> scales;
-	container::vector<float> rotations;
+	container::vector<float> covariances;
 	container::vector<float> colors;
 	container::vector<float> shRest;
 
 	positions.reserve(totalSplatCount * 4);
-	scales.reserve(totalSplatCount * 4);
-	rotations.reserve(totalSplatCount * 4);
+	covariances.reserve(totalSplatCount * 8);        // 6 floats + 2 padding = 8 floats per splat
 	colors.reserve(totalSplatCount * 4);
 	shRest.reserve(totalShCoeffs);
-
-	// Spherical harmonics constant for degree 0
-	constexpr float shC0 = 0.28209479177387814f;
 
 	// Consolidate all mesh data
 	for (const auto &mesh : meshes)
@@ -140,33 +136,36 @@ rhi::FenceHandle Scene::UploadAttributeData()
 			positions.push_back(splatData->posZ[i]);
 			positions.push_back(0.0f);        // padding
 
-			// Scale - convert from log space
-			float scaleX = math::Exp(splatData->scaleX[i]);
-			float scaleY = math::Exp(splatData->scaleY[i]);
-			float scaleZ = math::Exp(splatData->scaleZ[i]);
-			scales.push_back(scaleX);
-			scales.push_back(scaleY);
-			scales.push_back(scaleZ);
-			scales.push_back(0.0f);        // padding
+			// Compute 3D covariance from scale and rotation
+			math::vec3 log_scale(splatData->scaleX[i], splatData->scaleY[i], splatData->scaleZ[i]);
+			math::vec3 scale = TransformScale(log_scale);
 
-			// Rotation
-			rotations.push_back(splatData->rotX[i]);
-			rotations.push_back(splatData->rotY[i]);
-			rotations.push_back(splatData->rotZ[i]);
-			rotations.push_back(splatData->rotW[i]);
+			math::vec4 rotation(
+			    splatData->rotX[i],
+			    splatData->rotY[i],
+			    splatData->rotZ[i],
+			    splatData->rotW[i]);
+
+			float cov[6];
+			ComputeCovariance3D(scale, rotation, cov);
+
+			// Pack as 2 vec3 (6 floats + 2 padding)
+			covariances.push_back(cov[0]);        // M11
+			covariances.push_back(cov[1]);        // M12
+			covariances.push_back(cov[2]);        // M13
+			covariances.push_back(0.0f);          // padding
+			covariances.push_back(cov[3]);        // M22
+			covariances.push_back(cov[4]);        // M23
+			covariances.push_back(cov[5]);        // M33
+			covariances.push_back(0.0f);          // padding
 
 			// Color - convert SH degree 0 and opacity
-			float r = math::Clamp(shC0 * splatData->fDc0[i] + 0.5f, 0.0f, 1.0f);
-			float g = math::Clamp(shC0 * splatData->fDc1[i] + 0.5f, 0.0f, 1.0f);
-			float b = math::Clamp(shC0 * splatData->fDc2[i] + 0.5f, 0.0f, 1.0f);
+			math::vec3 rgb   = ComputeSHDegree0Color(splatData->fDc0[i], splatData->fDc1[i], splatData->fDc2[i]);
+			float      alpha = TransformOpacity(splatData->opacity[i]);
 
-			// Opacity is stored as a logit (pre-sigmoid), convert to alpha [0,1] with sigmoid
-			float opacityLogit = splatData->opacity[i];
-			float alpha        = math::Clamp(1.0f / (1.0f + math::Exp(-opacityLogit)), 0.0f, 1.0f);
-
-			colors.push_back(r);
-			colors.push_back(g);
-			colors.push_back(b);
+			colors.push_back(rgb.x);
+			colors.push_back(rgb.y);
+			colors.push_back(rgb.z);
 			colors.push_back(alpha);
 		}
 
@@ -189,22 +188,13 @@ rhi::FenceHandle Scene::UploadAttributeData()
 		uploadFences.push_back(positionsFence);
 	}
 
-	rhi::FenceHandle scalesFence = device->UploadBufferAsync(
-	    gpuData.scales.Get(),
-	    scales.data(),
-	    scales.size() * sizeof(float));
-	if (scalesFence)
+	rhi::FenceHandle covariancesFence = device->UploadBufferAsync(
+	    gpuData.covariances3D.Get(),
+	    covariances.data(),
+	    covariances.size() * sizeof(float));
+	if (covariancesFence)
 	{
-		uploadFences.push_back(scalesFence);
-	}
-
-	rhi::FenceHandle rotationsFence = device->UploadBufferAsync(
-	    gpuData.rotations.Get(),
-	    rotations.data(),
-	    rotations.size() * sizeof(float));
-	if (rotationsFence)
-	{
-		uploadFences.push_back(rotationsFence);
+		uploadFences.push_back(covariancesFence);
 	}
 
 	rhi::FenceHandle colorsFence = device->UploadBufferAsync(
@@ -284,21 +274,12 @@ void Scene::AllocateGpuBuffers()
 	}
 
 	{
-		// Scales buffer
+		// Covariances3D buffer (6 floats per splat, packed as 2 vec3)
 		BufferDesc desc{};
-		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * 4 * sizeof(float);
-		gpuData.scales     = device->CreateBuffer(desc);
-	}
-
-	{
-		// Rotations buffer
-		BufferDesc desc{};
-		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
-		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * 4 * sizeof(float);
-		gpuData.rotations  = device->CreateBuffer(desc);
+		desc.usage            = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage    = ResourceUsage::Static;
+		desc.size             = totalSplatCount * 8 * sizeof(float);        // 2 vec3 (padded) = 8 floats
+		gpuData.covariances3D = device->CreateBuffer(desc);
 	}
 
 	{

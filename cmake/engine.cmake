@@ -7,6 +7,7 @@ set(ENGINE_HEADERS
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/shader_factory.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/mesh_generator.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/splat_mesh.h
+    ${CMAKE_SOURCE_DIR}/include/msplat/engine/splat_math.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/scene.h
     ${CMAKE_SOURCE_DIR}/include/msplat/engine/gpu_splat_sorter.h
     ${CMAKE_SOURCE_DIR}/shaders/shaderio.h
