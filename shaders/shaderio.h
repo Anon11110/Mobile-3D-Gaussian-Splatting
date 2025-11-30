@@ -17,6 +17,11 @@ using namespace msplat::math;
 	                    	  \
 	float splatScale;   	  \
 	float alphaCullThreshold; \
+	                    	  \
+	float maxSplatRadius;     \
+	int   enableSplatFilter;  \
+	vec2  basisViewport;      \
+	float inverseFocalAdj;    \
 
 struct FrameUBO
 {

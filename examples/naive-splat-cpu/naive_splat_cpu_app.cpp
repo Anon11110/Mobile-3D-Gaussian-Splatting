@@ -35,34 +35,19 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 		device->RetireCompletedFrame();
 	}
 
-	// 2. Create static index buffer for indexed quad rendering
-	// Pattern: [0,1,2, 2,1,3, 4,5,6, 6,5,7, ...]
+	// 2. Create quad index buffer for instanced rendering
+	// Uses triangle strip topology: 0, 1, 2, 3 forms two triangles
+	// Triangle 1: vertices 0, 1, 2
+	// Triangle 2: vertices 1, 2, 3
 	if (m_scene->GetTotalSplatCount() > 0)
 	{
-		uint32_t splatCount = m_scene->GetTotalSplatCount();
-		uint32_t indexCount = splatCount * 6;
-
-		container::vector<uint32_t> indices;
-		indices.reserve(indexCount);
-
-		for (uint32_t i = 0; i < splatCount; ++i)
-		{
-			uint32_t baseVertex = i * 4;
-			// First triangle: 0, 1, 2
-			indices.push_back(baseVertex + 0);
-			indices.push_back(baseVertex + 1);
-			indices.push_back(baseVertex + 2);
-			// Second triangle: 2, 1, 3
-			indices.push_back(baseVertex + 2);
-			indices.push_back(baseVertex + 1);
-			indices.push_back(baseVertex + 3);
-		}
+		container::vector<uint32_t> quadIndices = {0, 1, 2, 3};
 
 		rhi::BufferDesc ibDesc{};
-		ibDesc.size        = indices.size() * sizeof(uint32_t);
+		ibDesc.size        = quadIndices.size() * sizeof(uint32_t);
 		ibDesc.usage       = rhi::BufferUsage::INDEX;
 		ibDesc.indexType   = rhi::IndexType::UINT32;
-		ibDesc.initialData = indices.data();
+		ibDesc.initialData = quadIndices.data();
 		m_quadIndexBuffer  = device->CreateBuffer(ibDesc);
 	}
 
@@ -135,12 +120,14 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 	rhi::GraphicsPipelineDesc pipelineDesc{};
 	pipelineDesc.vertexShader                = m_vertexShader.Get();
 	pipelineDesc.fragmentShader              = m_fragmentShader.Get();
-	pipelineDesc.topology                    = rhi::PrimitiveTopology::TRIANGLE_LIST;
+	pipelineDesc.topology                    = rhi::PrimitiveTopology::TRIANGLE_STRIP;
 	pipelineDesc.rasterizationState.cullMode = rhi::CullMode::NONE;
 	pipelineDesc.colorBlendAttachments.resize(1);
 	pipelineDesc.colorBlendAttachments[0].blendEnable         = true;
 	pipelineDesc.colorBlendAttachments[0].srcColorBlendFactor = rhi::BlendFactor::SRC_ALPHA;
 	pipelineDesc.colorBlendAttachments[0].dstColorBlendFactor = rhi::BlendFactor::ONE_MINUS_SRC_ALPHA;
+	pipelineDesc.colorBlendAttachments[0].srcAlphaBlendFactor = rhi::BlendFactor::ONE;
+	pipelineDesc.colorBlendAttachments[0].dstAlphaBlendFactor = rhi::BlendFactor::ONE;
 	pipelineDesc.targetSignature.colorFormats                 = {swapchain->GetBackBuffer(0)->GetFormat()};
 	pipelineDesc.descriptorSetLayouts                         = {m_descriptorSetLayout.Get()};
 	m_pipeline                                                = device->CreateGraphicsPipeline(pipelineDesc);
@@ -211,8 +198,12 @@ void NaiveSplatCpuApp::OnRender()
 	ubo.viewport           = {(float) width, (float) height};
 	ubo.focal              = {ubo.projection[0][0] * width * 0.5f,
 	                          ubo.projection[1][1] * height * 0.5f};
-	ubo.splatScale         = 1.0f;                 // Default scale factor
-	ubo.alphaCullThreshold = 1.0f / 255.0f;        // Default alpha cutoff
+	ubo.splatScale         = 1.0f;                                 // Default scale factor
+	ubo.alphaCullThreshold = 1.0f / 255.0f;                        // Default alpha cutoff
+	ubo.maxSplatRadius     = 2048.0f;                              // Maximum splat radius in pixels
+	ubo.enableSplatFilter  = 1;                                    // Enable EWA filtering
+	ubo.basisViewport      = {1.0f / width, 1.0f / height};        // Resolution-aware scaling
+	ubo.inverseFocalAdj    = 1.0f;                                 // No FOV adjustment by default
 	memcpy(m_frameUboDataPtr, &ubo, sizeof(FrameUBO));
 
 	// Check for new sorted indices and upload them
@@ -258,9 +249,10 @@ void NaiveSplatCpuApp::OnRender()
 	cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
 	cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
 
-	// Draw using index buffer: 6 indices per quad, 4 vertices per splat
-	uint32_t indexCount = m_scene->GetTotalSplatCount() * 6;
-	cmdList->DrawIndexed(indexCount, 0, 0);
+	// Draw using instanced rendering: 4 indices per strip, one instances per splat
+	uint32_t indexCount    = 4;
+	uint32_t instanceCount = m_scene->GetTotalSplatCount();
+	cmdList->DrawIndexedInstanced(indexCount, instanceCount, 0, 0, 0);
 
 	cmdList->EndRendering();
 

@@ -32,6 +32,13 @@ layout(set = 0, binding = 5, std430) readonly buffer SortedIndicesBuffer{ uint i
 
 // clang-format on
 
+// Struct for 2D covariance with alpha compensation
+struct Covariance2D
+{
+	vec3  cov2d;      // (a, b, c) - upper triangle of 2x2 matrix
+	float alphaScale; // determinant-based AA compensation
+};
+
 mat3 QuatToMat3(vec4 q)
 {
 	float x = q.x, y = q.y, z = q.z, w = q.w;
@@ -127,49 +134,83 @@ mat3 GetCovariance3D(uint splatIndex)
 	);
 }
 
-/// Projects the 3D covariance to 2D using the Jacobian
-vec3 ProjectCovariance(mat3 cov3D, vec3 viewPos)
+/// Projects the 3D covariance to 2D with Mip-Splat AA support
+Covariance2D ProjectCovariance3D(mat3 cov3D, vec3 viewPos)
 {
 	// Projective Jacobian
+	Covariance2D result;
+
 	float rz  = 1.0 / viewPos.z;
 	float rz2 = rz * rz;
 	float fx  = ubo.focal.x;
 	float fy  = ubo.focal.y;
 
 	mat3 J = mat3(
-	    fx * rz, 0.0, -(fx * viewPos.x) * rz2,
-	    0.0, fy * rz, -(fy * viewPos.y) * rz2,
-	    0.0, 0.0, 0.0);
+		fx * rz, 0.0,     -(fx * viewPos.x) * rz2,
+		0.0,     fy * rz, -(fy * viewPos.y) * rz2,
+		0.0,     0.0,     0.0
+	);
 
 	// Transform 3D covariance to 2D
 	mat3 W      = mat3(ubo.view);
 	mat3 T      = W * cov3D * transpose(W);
 	mat3 cov2Dm = J * T * transpose(J);
 
-	// Low-pass filter for anti-aliasing
-	cov2Dm[0][0] += 0.3;
-	cov2Dm[1][1] += 0.3;
+	// Compute determinant before blur (top-left 2x2)
+	float a = cov2Dm[0][0];
+	float b = cov2Dm[0][1];
+	float c = cov2Dm[1][1];
 
-	return vec3(cov2Dm[0][0], cov2Dm[0][1], cov2Dm[1][1]);
+	// Compute determinant after blur
+	float a_blur = cov2Dm[0][0];
+	float b_blur = cov2Dm[0][1];
+	float c_blur = cov2Dm[1][1];
+
+	// EWA filtering to make splat wider and darker
+	float alphaScale = 1.0;
+	if (ubo.enableSplatFilter != 0)
+	{
+		// Apply isotropic low-pass filter for anti-aliasing
+		cov2Dm[0][0] += 0.3;
+		cov2Dm[1][1] += 0.3;
+
+		a_blur = cov2Dm[0][0];
+		c_blur = cov2Dm[1][1];
+
+		float detOrig = max(a * c - b * b, 0.0);
+		float detBlur = max(a_blur * c_blur - b_blur * b_blur, 1e-20);
+		alphaScale = sqrt(detOrig / detBlur);
+		alphaScale = clamp(alphaScale, 0.0, 1.0);
+	}
+
+	result.cov2d      = vec3(a_blur, b_blur, c_blur);
+	result.alphaScale = alphaScale;
+	return result;
 }
 
-/// Calculates the basis vectors and radii for the 2D ellipse
+/// Calculates the basis vectors and radii for the 2D ellipse with radius caps
 bool GetEllipseBasis(vec3 cov2d, out vec2 axis1, out vec2 axis2, out float radius1, out float radius2)
 {
-	float det = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
+	float a = cov2d.x;
+	float b = cov2d.y;
+	float c = cov2d.z;
+
+	float det = a * c - b * b;
 
 	if (det <= 1e-6)
 	{
 		// Add a small epsilon to the diagonal to make it invertible
-		cov2d.x += 1e-6;
-		cov2d.z += 1e-6;
-		det = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
+		a += 1e-6;
+		c += 1e-6;
+		det = a * c - b * b;
 	}
 	if (det <= 0.0)
+	{
 		return false;
+	}
 
 	// Eigendecomposition
-	float mid          = 0.5 * (cov2d.x + cov2d.z);
+	float mid          = 0.5 * (a + c);
 	float discriminant = max(0.0, mid * mid - det);
 	float lambda1      = mid + sqrt(discriminant);
 	float lambda2      = mid - sqrt(discriminant);
@@ -182,9 +223,12 @@ bool GetEllipseBasis(vec3 cov2d, out vec2 axis1, out vec2 axis2, out float radiu
 
 	lambda1 = max(lambda1, 1e-8);
 	lambda2 = max(lambda2, 1e-8);
+
+	// Radii in pixels (sqrt(8) * sigma for 3-sigma coverage) to ensure the Gaussian fades to ~1.8% at the edge
 	radius1 = sqrt(8.0) * sqrt(lambda1);
 	radius2 = sqrt(8.0) * sqrt(lambda2);
 
+	// Apply minimum radius constraint
 	float minPix = 0.5;
 	radius1      = max(radius1, minPix);
 	radius2      = max(radius2, minPix);
@@ -193,8 +237,11 @@ bool GetEllipseBasis(vec3 cov2d, out vec2 axis1, out vec2 axis2, out float radiu
 	radius1 *= ubo.splatScale;
 	radius2 *= ubo.splatScale;
 
-	// Vector-based eigendecomposition to find axes
-	float a = cov2d.x, b = cov2d.y, c = cov2d.z;
+	// Cap maximum radius to prevent huge splats
+	float maxPix = ubo.maxSplatRadius;
+	radius1 = min(radius1, maxPix);
+	radius2 = min(radius2, maxPix);
+
 	float two_b = 2.0 * b;
 	float diff  = a - c;
 	float r     = length(vec2(two_b, diff));
@@ -223,8 +270,10 @@ bool IsCulledByFrustum(vec4 centerClip, float radius1, float radius2)
 
 void main()
 {
-	uint splatId    = gl_VertexIndex / 4;
-	uint vertexId   = gl_VertexIndex % 4;
+	// Instanced rendering: gl_InstanceIndex is the splat ID
+	// gl_VertexIndex will be 0, 1, 2, or 3 (from our tiny index buffer)
+	uint splatId    = gl_InstanceIndex;
+	uint vertexId   = gl_VertexIndex;
 	uint splatIndex = indices[splatId];
 
 	// --- 1. Fetch Splat Data ---
@@ -257,9 +306,13 @@ void main()
 	vec4 color   = vec4(shColor, baseColor.a);
 
 	// --- 4. Covariance Projection ---
-	vec3 cov2d = ProjectCovariance(cov3D, viewPos);
+	Covariance2D cov_out = ProjectCovariance3D(cov3D, viewPos);
+	vec3 cov2d = cov_out.cov2d;
 
-	// --- 5. Eigendecomposition (Compute Splat Basis) ---
+	// Apply determinant-based alpha compensation
+	color.a *= cov_out.alphaScale;
+
+	// --- 5. Eigendecomposition with Radius Caps ---
 	vec2  axis1, axis2;
 	float radius1, radius2;
 
@@ -278,25 +331,36 @@ void main()
 	}
 
 	// --- 7. Vertex Generation ---
+	// Triangle strip "Z" pattern mapping:
+	// This forms two triangles: (0,1,2) and (1,2,3)
 	vec2 cornerUnit;
 	switch (vertexId)
 	{
 		case 0:
-			cornerUnit = vec2(-1.0, -1.0);
+			cornerUnit = vec2(-1.0, -1.0);  // Bottom-Left
 			break;
 		case 1:
-			cornerUnit = vec2(1.0, -1.0);
+			cornerUnit = vec2(1.0, -1.0);   // Bottom-Right
 			break;
 		case 2:
-			cornerUnit = vec2(1.0, 1.0);
+			cornerUnit = vec2(-1.0, 1.0);   // Top-Left
 			break;
-		case 3:
-			cornerUnit = vec2(-1.0, 1.0);
+		default:  // case 3
+			cornerUnit = vec2(1.0, 1.0);    // Top-Right
 			break;
 	}
 
-	vec2 screenOffset = cornerUnit.x * radius1 * axis1 + cornerUnit.y * radius2 * axis2;
-	vec2 offsetClip   = (screenOffset / ubo.viewport) * 2.0 * centerClip.w;
+	// Build basis vectors in screen space (pixels)
+	vec2 basis1 = radius1 * axis1;
+	vec2 basis2 = radius2 * axis2;
+
+	vec2 screenOffset = cornerUnit.x * basis1 + cornerUnit.y * basis2;
+
+	// Convert pixels to NDC with adjustable knobs
+	vec2 ndcOffset = screenOffset * ubo.basisViewport * 2.0 * ubo.inverseFocalAdj;
+
+	// Convert NDC offset to clip-space offset
+	vec2 offsetClip = ndcOffset * centerClip.w;
 
 	gl_Position = centerClip + vec4(offsetClip, 0.0, 0.0);
 	outColor    = color;

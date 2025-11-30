@@ -10,13 +10,14 @@ void main()
 {
 	// Create a soft, circular splat shape
 	float distSq = dot(inUV, inUV);
+
 	if (distSq > 1.0)
 	{
 		discard;
 	}
 
-	// Apply Gaussian falloff to the alpha
-	float alpha = inColor.a * exp(-0.5 * distSq);
+	// Scale by 8.0 to match the sqrt(8) expansion in vertex shader
+	float alpha = inColor.a * exp(-0.5 * distSq * 8.0);
 
 	outColor = vec4(inColor.rgb, alpha);
 }
