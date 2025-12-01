@@ -7,7 +7,11 @@
 #include "core/math/math.h"
 #include "core/timer.h"
 #include "shaders/shaderio.h"
+#include <array>
 #include <cstdlib>
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_vulkan.h>
 #include <msplat/engine/shader_factory.h>
 
 namespace rhi
@@ -98,4 +102,19 @@ class GpuSortingRendererApp : public app::IApplication
 	uint32_t          frameCount               = 0;
 
 	container::vector<math::vec3> testSplatPositions;
+
+	// ImGui state
+	void *imguiDescriptorPool = nullptr;
+	bool  showImGui           = true;
+
+	// FPS history for graph
+	static constexpr size_t             FPS_HISTORY_SIZE = 120;
+	std::array<float, FPS_HISTORY_SIZE> fpsHistory       = {};
+	size_t                              fpsHistoryIndex  = 0;
+
+	void InitImGui();
+	void ShutdownImGui();
+	void RenderImGui();
+	void RenderImGuiToCommandBuffer(rhi::IRHICommandList *cmdList);
+	void UpdateFpsHistory();
 };

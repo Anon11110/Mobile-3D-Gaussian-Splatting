@@ -6,8 +6,12 @@
 #include <msplat/engine/gpu_splat_sorter.h>
 #include <msplat/engine/scene.h>
 #include <msplat/engine/splat_loader.h>
+#include <vulkan/vulkan.h>
 
-GpuSortingRendererApp::GpuSortingRendererApp()                                             = default;
+GpuSortingRendererApp::GpuSortingRendererApp()
+{
+	fpsHistory.fill(0.0f);
+}
 GpuSortingRendererApp::~GpuSortingRendererApp()                                            = default;
 GpuSortingRendererApp::GpuSortingRendererApp(GpuSortingRendererApp &&) noexcept            = default;
 GpuSortingRendererApp &GpuSortingRendererApp::operator=(GpuSortingRendererApp &&) noexcept = default;
@@ -159,6 +163,8 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 
 	applicationTimer.start();
 	fpsCounter.reset();
+
+	InitImGui();
 
 	return true;
 }
@@ -331,6 +337,13 @@ void GpuSortingRendererApp::OnRender()
 	uint32_t instanceCount = scene->GetTotalSplatCount();
 	cmdList->DrawIndexedInstanced(indexCount, instanceCount, 0, 0, 0);
 
+	if (showImGui)
+	{
+		UpdateFpsHistory();
+		RenderImGui();
+		RenderImGuiToCommandBuffer(cmdList);
+	}
+
 	cmdList->EndRendering();
 
 	// Transition to present
@@ -381,6 +394,8 @@ void GpuSortingRendererApp::OnShutdown()
 	{
 		rhi::IRHIDevice *device = deviceManager->GetDevice();
 		device->WaitIdle();
+
+		ShutdownImGui();
 
 		if (frameUboDataPtr)
 		{
@@ -460,6 +475,12 @@ void GpuSortingRendererApp::OnKey(int key, int action, int mods)
 				benchmarkMode = !benchmarkMode;
 				LOG_INFO("Benchmark mode {}", benchmarkMode ? "enabled (no vsync)" : "disabled (vsync on)");
 				fpsCounter.reset();
+				break;
+
+			case GLFW_KEY_H:
+				// Toggle ImGui visibility
+				showImGui = !showImGui;
+				LOG_INFO("ImGui {}", showImGui ? "shown" : "hidden");
 				break;
 
 			case GLFW_KEY_ESCAPE:
@@ -628,4 +649,217 @@ void GpuSortingRendererApp::CreateTestSplatData()
 	uploadFence->Wait(UINT64_MAX);
 
 	LOG_INFO("Created random test scene with {} splats", testSplatCount);
+}
+
+void GpuSortingRendererApp::InitImGui()
+{
+	// Setup Dear ImGui context
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO &io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+	ImGui::StyleColorsDark();
+
+	io.FontGlobalScale = 1.3f;
+
+	ImGui_ImplGlfw_InitForVulkan(deviceManager->GetWindow(), true);
+
+	// Get RHI device
+	rhi::IRHIDevice *device = deviceManager->GetDevice();
+
+	// Create ImGui descriptor pool
+	VkDescriptorPoolSize pool_sizes[] = {
+	    {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+	    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+	    {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+	    {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+	    {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+	    {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+	    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+	    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+	    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+	    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+	    {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+
+	VkDescriptorPoolCreateInfo pool_info = {};
+	pool_info.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	pool_info.flags                      = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	pool_info.maxSets                    = 1000;
+	pool_info.poolSizeCount              = std::size(pool_sizes);
+	pool_info.pPoolSizes                 = pool_sizes;
+
+	VkDescriptorPool imguiPool;
+	VkDevice         vkDevice = static_cast<VkDevice>(device->GetNativeDevice());
+	VkResult         result   = vkCreateDescriptorPool(vkDevice, &pool_info, nullptr, &imguiPool);
+	if (result != VK_SUCCESS)
+	{
+		LOG_ERROR("Failed to create ImGui descriptor pool");
+		return;
+	}
+
+	// Store the descriptor pool for cleanup
+	imguiDescriptorPool = static_cast<void *>(imguiPool);
+
+	// Setup ImGui Vulkan backend
+	ImGui_ImplVulkan_InitInfo init_info = {};
+	init_info.Instance                  = static_cast<VkInstance>(device->GetNativeInstance());
+	init_info.PhysicalDevice            = static_cast<VkPhysicalDevice>(device->GetNativePhysicalDevice());
+	init_info.Device                    = vkDevice;
+	init_info.QueueFamily               = device->GetGraphicsQueueFamily();
+	init_info.Queue                     = static_cast<VkQueue>(device->GetNativeGraphicsQueue());
+	init_info.DescriptorPool            = imguiPool;
+	init_info.MinImageCount             = 2;
+	init_info.ImageCount                = deviceManager->GetSwapchain()->GetImageCount();
+	init_info.MSAASamples               = VK_SAMPLE_COUNT_1_BIT;
+	init_info.UseDynamicRendering       = true;
+
+	// Set up color attachment format for dynamic rendering
+	VkFormat colorFormat                                          = VK_FORMAT_R8G8B8A8_UNORM;
+	init_info.PipelineRenderingCreateInfo                         = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
+	init_info.PipelineRenderingCreateInfo.colorAttachmentCount    = 1;
+	init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFormat;
+
+	ImGui_ImplVulkan_Init(&init_info);
+
+	LOG_INFO("ImGui initialized successfully");
+}
+
+void GpuSortingRendererApp::ShutdownImGui()
+{
+	// Cleanup ImGui
+	ImGui_ImplVulkan_Shutdown();
+	ImGui_ImplGlfw_Shutdown();
+	ImGui::DestroyContext();
+
+	// Destroy descriptor pool
+	if (imguiDescriptorPool && deviceManager)
+	{
+		rhi::IRHIDevice *device   = deviceManager->GetDevice();
+		VkDevice         vkDevice = static_cast<VkDevice>(device->GetNativeDevice());
+		VkDescriptorPool pool     = static_cast<VkDescriptorPool>(imguiDescriptorPool);
+		vkDestroyDescriptorPool(vkDevice, pool, nullptr);
+		imguiDescriptorPool = nullptr;
+	}
+}
+
+void GpuSortingRendererApp::UpdateFpsHistory()
+{
+	float currentFps            = static_cast<float>(fpsCounter.getFPS());
+	fpsHistory[fpsHistoryIndex] = currentFps;
+	fpsHistoryIndex             = (fpsHistoryIndex + 1) % FPS_HISTORY_SIZE;
+}
+
+void GpuSortingRendererApp::RenderImGui()
+{
+	// Start the Dear ImGui frame
+	ImGui_ImplVulkan_NewFrame();
+	ImGui_ImplGlfw_NewFrame();
+	ImGui::NewFrame();
+
+	// Create main control window
+	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(400, 500), ImGuiCond_FirstUseEver);
+
+	if (ImGui::Begin("GPU Splat Renderer Controls", &showImGui))
+	{
+		ImGui::Text("Performance");
+		ImGui::Separator();
+
+		// FPS display with current value
+		float currentFps = static_cast<float>(fpsCounter.getFPS());
+		ImGui::Text("FPS: %.1f", currentFps);
+
+		// FPS graph
+		ImGui::PlotLines("FPS History",
+		                 fpsHistory.data(),
+		                 static_cast<int>(FPS_HISTORY_SIZE),
+		                 static_cast<int>(fpsHistoryIndex),
+		                 nullptr,
+		                 0.0f,
+		                 120.0f,
+		                 ImVec2(0, 80));
+
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Text("Rendering Controls");
+		ImGui::Separator();
+
+		// Sorting enabled toggle
+		if (ImGui::Checkbox("Enable Sorting", &sortingEnabled))
+		{
+			LOG_INFO("Sorting {}", sortingEnabled ? "enabled" : "disabled");
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("(?)");
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::SetTooltip("Toggle depth sorting of splats\nDisabling may improve performance but reduce quality");
+		}
+
+		// Sort method selection
+		if (sorter)
+		{
+			ImGui::Text("Sort Method:");
+			int         currentMethod = (sorter->GetSortMethod() == engine::GpuSplatSorter::SortMethod::Prescan) ? 0 : 1;
+			const char *methods[]     = {"Prescan Radix Sort", "Integrated Scan Radix Sort"};
+
+			if (ImGui::Combo("##SortMethod", &currentMethod, methods, 2))
+			{
+				if (currentMethod == 0)
+				{
+					sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::Prescan);
+					LOG_INFO("Switched to Prescan radix sort method");
+				}
+				else
+				{
+					sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::IntegratedScan);
+					LOG_INFO("Switched to Integrated Scan radix sort method");
+				}
+			}
+		}
+
+		ImGui::Spacing();
+
+		// Verification controls
+		ImGui::Text("Verification");
+		if (ImGui::Button("Verify Sorting Result"))
+		{
+			verifyNextSort = true;
+			LOG_INFO("Will verify sorting on next frame");
+		}
+
+		ImGui::Spacing();
+		ImGui::Separator();
+
+		ImGui::Text("Scene Information");
+		ImGui::Separator();
+
+		// Scene stats
+		if (scene)
+		{
+			ImGui::Text("Total Splats: %u", scene->GetTotalSplatCount());
+		}
+		ImGui::Text("Frame Count: %u", frameCount);
+
+		ImGui::Spacing();
+
+		// Application info
+		ImGui::Separator();
+		ImGui::Text("Controls Help");
+		ImGui::Separator();
+		ImGui::BulletText("WASD: Move camera");
+		ImGui::BulletText("Mouse: Look around");
+		ImGui::BulletText("ESC: Exit application");
+		ImGui::BulletText("H: Toggle this UI");
+	}
+	ImGui::End();
+
+	ImGui::Render();
+}
+
+void GpuSortingRendererApp::RenderImGuiToCommandBuffer(rhi::IRHICommandList *cmdList)
+{
+	VkCommandBuffer vkCmdBuf = static_cast<VkCommandBuffer>(cmdList->GetNativeCommandBuffer());
+	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkCmdBuf);
 }

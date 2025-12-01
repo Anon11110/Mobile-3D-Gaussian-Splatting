@@ -507,6 +507,34 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		///@todo
 	}
 
+#ifdef RHI_VULKAN
+	// Vulkan-specific accessors for ImGui integration
+	void *GetNativeInstance() override
+	{
+		return static_cast<void *>(instance);
+	}
+
+	void *GetNativePhysicalDevice() override
+	{
+		return static_cast<void *>(physicalDevice);
+	}
+
+	void *GetNativeDevice() override
+	{
+		return static_cast<void *>(device);
+	}
+
+	void *GetNativeGraphicsQueue() override
+	{
+		return static_cast<void *>(graphicsQueue);
+	}
+
+	uint32_t GetGraphicsQueueFamily() override
+	{
+		return graphicsQueueFamily;
+	}
+#endif
+
   private:
 	VkDescriptorPool GetDescriptorPool(QueueType queueType)
 	{

@@ -331,6 +331,13 @@ class VulkanCommandList final : public RefCounter<IRHICommandList>
 	    std::span<const BufferTransition>  buffer_transitions,
 	    std::span<const TextureTransition> texture_transitions) override;
 
+#ifdef RHI_VULKAN
+	void *GetNativeCommandBuffer() override
+	{
+		return static_cast<void *>(commandBuffer);
+	}
+#endif
+
 	[[nodiscard]] VkCommandBuffer GetHandle() const
 	{
 		return commandBuffer;

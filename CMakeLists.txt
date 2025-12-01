@@ -33,6 +33,9 @@ include(cmake/core.cmake)
 # Include engine library configuration
 include(cmake/engine.cmake)
 
+# Include imgui library configuration
+include(cmake/imgui.cmake)
+
 # Include app library configuration
 include(cmake/app.cmake)
 

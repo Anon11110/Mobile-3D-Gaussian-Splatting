@@ -90,6 +90,16 @@ class IRHIDevice : public IRefCounted
 
 	// Frame retirement for GPU resource lifetime management
 	virtual void RetireCompletedFrame() = 0;
+
+#ifdef RHI_VULKAN
+	// Vulkan-specific accessors for ImGui integration
+	// Returns void* to avoid exposing Vulkan types in the public header
+	virtual void    *GetNativeInstance()       = 0;        // Returns VkInstance
+	virtual void    *GetNativePhysicalDevice() = 0;        // Returns VkPhysicalDevice
+	virtual void    *GetNativeDevice()         = 0;        // Returns VkDevice
+	virtual void    *GetNativeGraphicsQueue()  = 0;        // Returns VkQueue
+	virtual uint32_t GetGraphicsQueueFamily()  = 0;
+#endif
 };
 
 typedef RefCntPtr<IRHIDevice> DeviceHandle;
@@ -208,6 +218,11 @@ class IRHICommandList : public IRefCounted
 	    QueueType                          srcQueue,
 	    std::span<const BufferTransition>  buffer_transitions,
 	    std::span<const TextureTransition> texture_transitions) = 0;
+
+#ifdef RHI_VULKAN
+	// Vulkan-specific accessor for ImGui integration
+	virtual void *GetNativeCommandBuffer() = 0;        // Returns VkCommandBuffer
+#endif
 };
 
 typedef RefCntPtr<IRHICommandList> CommandListHandle;

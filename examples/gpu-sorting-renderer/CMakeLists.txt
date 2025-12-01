@@ -5,8 +5,8 @@ add_executable(gpu-sorting-renderer
     gpu_sorting_renderer_app.h
 )
 
-# Link with RHI, core, engine, and app libraries
-target_link_libraries(gpu-sorting-renderer PRIVATE RHI core engine app)
+# Link with RHI, core, engine, app, and imgui libraries
+target_link_libraries(gpu-sorting-renderer PRIVATE RHI core engine app imgui)
 
 # Set C++ standard
 target_compile_features(gpu-sorting-renderer PRIVATE cxx_std_20)
