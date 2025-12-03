@@ -1,5 +1,6 @@
 #include "engine/cpu_splat_sorter.h"
 #include "core/log.h"
+#include "core/parallel.h"
 #include "engine/splat_math.h"
 #include <algorithm>
 #include <atomic>
@@ -105,30 +106,50 @@ void CpuSplatSorter::Impl::SortWorker()
 {
 	while (true)
 	{
-		std::unique_lock<std::mutex> lock(m_mutex);
-		m_cv.wait(lock, [this] { return m_sortRequested || m_stopWorker; });
-
-		if (m_stopWorker)
+		// Wait for a sort request or shutdown signal
 		{
-			break;
-		}
+			std::unique_lock<std::mutex> lock(m_mutex);
+			m_cv.wait(lock, [this] { return m_sortRequested || m_stopWorker; });
 
-		// 1. Calculate depths
-		for (size_t i = 0; i < m_worker_positions.size(); ++i)
-		{
-			m_depths[i]         = ComputeViewSpaceDepth(m_worker_positions[i], m_worker_view_matrix);
-			m_producerBuffer[i] = static_cast<uint32_t>(i);
+			if (m_stopWorker)
+			{
+				break;
+			}
 		}
+		// Lock released here - safe to do parallel work since:
+		// - m_worker_positions and m_worker_view_matrix are only written by RequestSort
+		//   which returns early if m_sortRequested is true
+		// - m_depths and m_producerBuffer are only accessed by this worker thread
+
+		const size_t count = m_worker_positions.size();
+
+		// 1. Calculate depths in parallel
+		// Uses ParallelFor to distribute depth computation across multiple threads.
+		// Each chunk writes to disjoint ranges of m_depths and m_producerBuffer.
+		core::ParallelFor(
+		    static_cast<size_t>(0), count, static_cast<size_t>(0),        // 0 = use default grain size
+		    [this](size_t begin, size_t end) {
+			    for (size_t i = begin; i < end; ++i)
+			    {
+				    m_depths[i]         = ComputeViewSpaceDepth(m_worker_positions[i], m_worker_view_matrix);
+				    m_producerBuffer[i] = static_cast<uint32_t>(i);
+			    }
+		    });
 
 		// 2. Sort indices based on depths (back to front)
-		std::sort(m_producerBuffer, m_producerBuffer + m_worker_positions.size(),
-		          [&](const uint32_t a, const uint32_t b) {
-			          return m_depths[a] < m_depths[b];
-		          });
+		// Uses ParallelSort which leverages std::execution::par_unseq when available.
+		auto *depthsPtr = m_depths.data();
+		core::ParallelSort(m_producerBuffer, m_producerBuffer + count,
+		                   [depthsPtr](const uint32_t a, const uint32_t b) { return depthsPtr[a] < depthsPtr[b]; });
 
-		// 3. Mark as complete and notify
+		// 3. Mark as complete
 		m_consumerBuffer.store(m_producerBuffer);
-		m_sortRequested = false;
+
+		// Reset request flag (needs lock for synchronization with RequestSort)
+		{
+			std::unique_lock<std::mutex> lock(m_mutex);
+			m_sortRequested = false;
+		}
 	}
 }
 

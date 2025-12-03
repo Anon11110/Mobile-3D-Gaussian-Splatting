@@ -43,8 +43,8 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 	camera.SetMovementSpeed(5.0f);
 	camera.SetMouseSensitivity(0.1f);
 
-	//LoadSplatFile("assets/flowers_1.ply");
-	LoadSplatFile("assets/train_7000.ply");
+	LoadSplatFile("assets/flowers_1.ply");
+	//LoadSplatFile("assets/train_7000.ply");
 
 	sorter = container::make_unique<engine::GpuSplatSorter>(device);
 	if (scene->GetTotalSplatCount() > 0)

@@ -26,6 +26,9 @@ set(CORE_HEADERS
     # Platform headers
     ${CMAKE_SOURCE_DIR}/include/msplat/core/platform.h
 
+    # Parallel headers
+    ${CMAKE_SOURCE_DIR}/include/msplat/core/parallel.h
+
     # Container headers
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/array.h
     ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/filesystem.h
@@ -55,6 +58,9 @@ set(CORE_SOURCES
 
     # Platform sources
     ${CMAKE_SOURCE_DIR}/src/core/platform.cpp
+
+    # Parallel sources
+    ${CMAKE_SOURCE_DIR}/src/core/parallel.cpp
 
     # Container sources
     ${CMAKE_SOURCE_DIR}/src/core/containers/filesystem.cpp
@@ -98,6 +104,58 @@ target_compile_definitions(core PRIVATE
 # Container selection: use system STL if option is enabled
 if(MSPLAT_USE_SYSTEM_STL)
     target_compile_definitions(core PUBLIC MSPLAT_USE_SYSTEM_STL)
+endif()
+
+# ============================================================================
+# Parallel CPU Sorting Configuration
+# ============================================================================
+
+option(MSPLAT_CPU_SORT_PARALLEL "Enable parallel CPU sorting" ON)
+
+# Auto-detect std::execution support
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_FLAGS "${CMAKE_CXX_FLAGS}")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(CMAKE_REQUIRED_FLAGS "-std=c++20")
+endif()
+
+check_cxx_source_compiles("
+    #include <execution>
+    #include <algorithm>
+    #include <vector>
+    int main() {
+        std::vector<int> v{3,1,2};
+        std::sort(std::execution::par_unseq, v.begin(), v.end());
+        return 0;
+    }
+" MSPLAT_HAS_STD_EXECUTION)
+
+# Option to enable std::execution parallel policies (default based on detection)
+option(MSPLAT_ENABLE_STD_PAR_SORT "Use std::execution parallel policies for sorting" ${MSPLAT_HAS_STD_EXECUTION})
+
+if(MSPLAT_CPU_SORT_PARALLEL)
+    target_compile_definitions(core PUBLIC MSPLAT_CPU_SORT_PARALLEL=1)
+    message(STATUS "Parallel CPU sorting: ENABLED")
+else()
+    message(STATUS "Parallel CPU sorting: DISABLED")
+endif()
+
+if(MSPLAT_ENABLE_STD_PAR_SORT)
+    target_compile_definitions(core PUBLIC MSPLAT_ENABLE_STD_PAR_SORT=1)
+    message(STATUS "std::execution parallel policies: ENABLED")
+
+    # Link TBB on Linux if available (required for parallel algorithms on some platforms)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        find_package(TBB QUIET)
+        if(TBB_FOUND)
+            target_link_libraries(core PUBLIC TBB::tbb)
+            message(STATUS "TBB found and linked for parallel algorithms")
+        else()
+            message(STATUS "TBB not found - parallel algorithms may not work optimally")
+        endif()
+    endif()
+else()
+    message(STATUS "std::execution parallel policies: DISABLED")
 endif()
 
 # Link GLM (header-only, so just for interface)

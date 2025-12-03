@@ -19,8 +19,8 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 	// 1. Setup Scene
 	m_scene = msplat::container::make_unique<engine::Scene>(device);
 	engine::SplatLoader loader;
-	//auto                future    = loader.Load("flowers_1.ply");
-	auto                future    = loader.Load("train_7000.ply");
+	auto                future    = loader.Load("flowers_1.ply");
+	//auto                future    = loader.Load("train_7000.ply");
 	auto                splatData = future.get();
 	if (!splatData || splatData->empty())
 	{
