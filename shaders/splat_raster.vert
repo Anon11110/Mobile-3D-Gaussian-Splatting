@@ -211,7 +211,7 @@ bool GetEllipseBasis(vec3 cov2d, out vec2 axis1, out vec2 axis2, out float radiu
 
 	// Eigendecomposition
 	float mid          = 0.5 * (a + c);
-	float discriminant = max(0.0, mid * mid - det);
+	float discriminant = max(0.1, mid * mid - det);
 	float lambda1      = mid + sqrt(discriminant);
 	float lambda2      = mid - sqrt(discriminant);
 
@@ -227,11 +227,6 @@ bool GetEllipseBasis(vec3 cov2d, out vec2 axis1, out vec2 axis2, out float radiu
 	// Radii in pixels (sqrt(8) * sigma for 3-sigma coverage) to ensure the Gaussian fades to ~1.8% at the edge
 	radius1 = sqrt(8.0) * sqrt(lambda1);
 	radius2 = sqrt(8.0) * sqrt(lambda2);
-
-	// Apply minimum radius constraint
-	float minPix = 0.5;
-	radius1      = max(radius1, minPix);
-	radius2      = max(radius2, minPix);
 
 	// Apply splat scale factor
 	radius1 *= ubo.splatScale;
