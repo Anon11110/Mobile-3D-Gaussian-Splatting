@@ -319,7 +319,7 @@ void Scene::AllocateGpuBuffers()
 	}
 
 	// Initialize CPU-side sorting system
-	splatSorter = container::make_unique<CpuSplatSorter>(totalSplatCount);
+	cpuSplatSorter = container::make_unique<CpuSplatSorter>(totalSplatCount);
 	splatPositions.reserve(totalSplatCount);
 
 	gpuBuffersAllocated = true;
@@ -334,31 +334,31 @@ bool Scene::IsAttributeDataUploaded() const
 
 void Scene::UpdateView(const math::mat4 &view_matrix)
 {
-	if (!splatSorter)
+	if (!cpuSplatSorter)
 	{
 		LOG_WARNING("CpuSplatSorter not initialized. Call AllocateGpuBuffers() first.");
 		return;
 	}
 
 	UpdateSplatPositions();
-	splatSorter->RequestSort(splatPositions, view_matrix);
+	cpuSplatSorter->RequestSort(splatPositions, view_matrix);
 }
 
 rhi::FenceHandle Scene::ConsumeAndUploadSortedIndices()
 {
-	if (!splatSorter)
+	if (!cpuSplatSorter)
 	{
 		LOG_WARNING("CpuSplatSorter not initialized. Call AllocateGpuBuffers() first.");
 		return nullptr;
 	}
 
-	if (!splatSorter->IsSortComplete())
+	if (!cpuSplatSorter->IsSortComplete())
 	{
 		// No new sorted data available yet
 		return nullptr;
 	}
 
-	auto sortedIndices = splatSorter->GetSortedIndices();
+	auto sortedIndices = cpuSplatSorter->GetSortedIndices();
 	if (sortedIndices.empty())
 	{
 		return nullptr;

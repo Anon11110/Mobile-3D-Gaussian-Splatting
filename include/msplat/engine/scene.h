@@ -74,7 +74,7 @@ class Scene
 
 	// CPU-side data for sorting
 	container::vector<math::vec3>         splatPositions;
-	container::unique_ptr<CpuSplatSorter> splatSorter;
+	container::unique_ptr<CpuSplatSorter> cpuSplatSorter;
 
 	uint32_t CalculateMaxShCoeffsPerSplat() const;
 	void     UpdateSplatPositions();

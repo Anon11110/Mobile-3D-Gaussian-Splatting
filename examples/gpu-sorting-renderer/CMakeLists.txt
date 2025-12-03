@@ -62,5 +62,8 @@ add_custom_command(TARGET gpu-sorting-renderer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/assets/splats/flowers_1/flowers_1.ply
         $<TARGET_FILE_DIR:gpu-sorting-renderer>/assets/flowers_1.ply
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/assets/splats/train/point_cloud/iteration_7000/point_cloud.ply
+        $<TARGET_FILE_DIR:gpu-sorting-renderer>/assets/train_7000.ply
     COMMENT "Copying splat asset to executable directory"
 )
