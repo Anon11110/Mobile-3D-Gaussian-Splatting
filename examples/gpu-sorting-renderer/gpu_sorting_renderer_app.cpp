@@ -511,6 +511,15 @@ void GpuSortingRendererApp::LoadSplatFile(const char *filepath)
 
 	if (splatData && !splatData->empty())
 	{
+		// Convert coordinate system by flipping Z axis
+		for (uint32_t i = 0; i < splatData->numSplats; ++i)
+		{
+			splatData->posZ[i] = -splatData->posZ[i];
+			// Negate X and Y components of quaternion to maintain correct rotations after Z flip
+			splatData->rotY[i] = -splatData->rotY[i];
+			splatData->rotZ[i] = -splatData->rotZ[i];
+		}
+
 		scene->AddMesh(splatData, math::Identity());
 		scene->AllocateGpuBuffers();
 		rhi::FenceHandle uploadFence = scene->UploadAttributeData();
