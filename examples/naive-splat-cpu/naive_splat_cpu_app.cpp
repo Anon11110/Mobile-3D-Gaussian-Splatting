@@ -19,9 +19,9 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 	// 1. Setup Scene
 	m_scene = msplat::container::make_unique<engine::Scene>(device);
 	engine::SplatLoader loader;
-	auto                future    = loader.Load("flowers_1.ply");
-	//auto                future    = loader.Load("train_7000.ply");
-	auto                splatData = future.get();
+	auto                future = loader.Load("flowers_1.ply");
+	// auto                future    = loader.Load("train_7000.ply");
+	auto splatData = future.get();
 	if (!splatData || splatData->empty())
 	{
 		LOG_ERROR("Failed to load splat data.");
@@ -173,6 +173,14 @@ void NaiveSplatCpuApp::OnRender()
 	auto *device    = m_deviceManager->GetDevice();
 	auto *swapchain = m_deviceManager->GetSwapchain();
 
+	// Check if window is minimized before waiting on fence
+	int width, height;
+	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+	if (width == 0 || height == 0)
+	{
+		return;
+	}
+
 	// Wait for the frame in flight to be finished
 	m_inFlightFences[m_currentFrame]->Wait();
 	m_inFlightFences[m_currentFrame]->Reset();
@@ -188,9 +196,6 @@ void NaiveSplatCpuApp::OnRender()
 		return;
 	}
 
-	// Update UBO
-	int width, height;
-	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 	FrameUBO ubo{};
 	ubo.view       = m_camera.GetViewMatrix();
 	ubo.projection = m_camera.GetProjectionMatrix();

@@ -44,7 +44,7 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 	camera.SetMouseSensitivity(0.1f);
 
 	LoadSplatFile("assets/flowers_1.ply");
-	//LoadSplatFile("assets/train_7000.ply");
+	// LoadSplatFile("assets/train_7000.ply");
 
 	sorter = container::make_unique<engine::GpuSplatSorter>(device);
 	if (scene->GetTotalSplatCount() > 0)
@@ -185,6 +185,14 @@ void GpuSortingRendererApp::OnRender()
 	rhi::IRHIDevice    *device    = deviceManager->GetDevice();
 	rhi::IRHISwapchain *swapchain = deviceManager->GetSwapchain();
 
+	// Check if window is minimized before waiting on fence
+	int width, height;
+	glfwGetWindowSize(deviceManager->GetWindow(), &width, &height);
+	if (width == 0 || height == 0)
+	{
+		return;
+	}
+
 	// Wait for previous frame
 	inFlightFence->Wait(UINT64_MAX);
 	inFlightFence->Reset();
@@ -211,9 +219,6 @@ void GpuSortingRendererApp::OnRender()
 		imageIndex = 0;
 	}
 
-	// Update UBO
-	int width, height;
-	glfwGetWindowSize(deviceManager->GetWindow(), &width, &height);
 	FrameUBO ubo{};
 	ubo.view       = camera.GetViewMatrix();
 	ubo.projection = camera.GetProjectionMatrix();
