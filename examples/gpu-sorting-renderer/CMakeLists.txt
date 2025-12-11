@@ -46,24 +46,6 @@ include(${CMAKE_SOURCE_DIR}/cmake/compileshaders.cmake)
 # Compile shaders from the main shaders directory
 add_shader_directory(gpu-sorting-renderer ${CMAKE_SOURCE_DIR}/shaders)
 
-# Find Python for asset downloading
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-add_custom_command(TARGET gpu-sorting-renderer PRE_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_SOURCE_DIR}/assets/splats
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/download_assets.py
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Downloading splat assets if needed"
-)
-
-# Create assets directory and copy splat file
-add_custom_command(TARGET gpu-sorting-renderer POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:gpu-sorting-renderer>/assets
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/assets/splats/flowers_1/flowers_1.ply
-        $<TARGET_FILE_DIR:gpu-sorting-renderer>/assets/flowers_1.ply
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/assets/splats/train/point_cloud/iteration_7000/point_cloud.ply
-        $<TARGET_FILE_DIR:gpu-sorting-renderer>/assets/train_7000.ply
-    COMMENT "Copying splat asset to executable directory"
-)
+# Setup asset downloading and copying
+include(${CMAKE_SOURCE_DIR}/cmake/copy_assets.cmake)
+setup_splat_assets(gpu-sorting-renderer)

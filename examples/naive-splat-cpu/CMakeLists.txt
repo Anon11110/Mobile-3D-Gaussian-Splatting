@@ -1,7 +1,5 @@
 # Naive Splat CPU Sort Example
 
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
 add_executable(naive-splat-cpu
     main.cpp
     naive_splat_cpu_app.cpp
@@ -46,24 +44,9 @@ if(MSVC)
     set_property(TARGET naive-splat-cpu PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:naive-splat-cpu>)
 endif()
 
-# Download and setup assets
-add_custom_command(TARGET naive-splat-cpu PRE_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_SOURCE_DIR}/assets/splats
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/download_assets.py
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Downloading splat assets if needed"
-)
-
-# Copy assets to executable directory
-add_custom_command(TARGET naive-splat-cpu POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/assets/splats/flowers_1/flowers_1.ply
-        $<TARGET_FILE_DIR:naive-splat-cpu>/flowers_1.ply
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/assets/splats/train/point_cloud/iteration_7000/point_cloud.ply
-        $<TARGET_FILE_DIR:naive-splat-cpu>/train_7000.ply
-    COMMENT "Copying splat asset to executable directory"
-)
+# Setup asset downloading and copying
+include(${CMAKE_SOURCE_DIR}/cmake/copy_assets.cmake)
+setup_splat_assets(naive-splat-cpu)
 
 # Compile shaders
 include(${CMAKE_SOURCE_DIR}/cmake/compileshaders.cmake)

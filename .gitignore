@@ -61,10 +61,9 @@ shaders/compiled/*.spv
 examples/naive-splat-cpu/shaders/compiled/*.spv
 examples/particles/shaders/compiled/*.spv
 
-# Large asset files - downloaded automatically by scripts
-assets/splats/flowers_1/
-assets/splats/*.ply
-assets/splats/*.zipexamples/naive-splat-cpu/shaders/compiled/*.spv
+# Large asset files - downloaded automatically by scripts/download_assets.py
+# All PLY files and asset subdirectories are downloaded on-demand
+assets/splats/
 
 # References
 refs/
