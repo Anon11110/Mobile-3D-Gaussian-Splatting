@@ -3,16 +3,16 @@
 #include "core/log.h"
 #include <GLFW/glfw3.h>
 #include <chrono>
-#include <msplat/engine/gpu_splat_sorter.h>
 #include <msplat/engine/scene.h>
 #include <msplat/engine/splat_loader.h>
+#include <msplat/engine/splat_sort_backend.h>
 #include <vulkan/vulkan.h>
 
 HybridSplatRendererApp::HybridSplatRendererApp()
 {
 	m_fpsHistory.fill(0.0f);
 }
-HybridSplatRendererApp::~HybridSplatRendererApp()                                              = default;
+HybridSplatRendererApp::~HybridSplatRendererApp()                                             = default;
 HybridSplatRendererApp::HybridSplatRendererApp(HybridSplatRendererApp &&) noexcept            = default;
 HybridSplatRendererApp &HybridSplatRendererApp::operator=(HybridSplatRendererApp &&) noexcept = default;
 
@@ -45,11 +45,24 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 
 	LoadSplatFile("assets/flowers_1.ply");
 
-	m_sorter = container::make_unique<engine::GpuSplatSorter>(device);
+	// Create app-owned sorted indices buffer
 	if (m_scene->GetTotalSplatCount() > 0)
 	{
-		m_sorter->Initialize(m_scene->GetTotalSplatCount());
-		LOG_INFO("Initialized sorter for {} splats", m_scene->GetTotalSplatCount());
+		rhi::BufferDesc indicesDesc{};
+		indicesDesc.size  = m_scene->GetTotalSplatCount() * sizeof(uint32_t);
+		indicesDesc.usage = rhi::BufferUsage::STORAGE;
+		m_sortedIndices   = device->CreateBuffer(indicesDesc);
+
+		// Create and initialize GPU backend
+		m_backend = container::make_unique<engine::GpuSplatSortBackend>();
+		if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount()))
+		{
+			LOG_ERROR("Failed to initialize GPU sort backend");
+		}
+		else
+		{
+			LOG_INFO("Initialized GPU sort backend for {} splats", m_scene->GetTotalSplatCount());
+		}
 	}
 
 	// Create quad index buffer for instanced rendering
@@ -59,11 +72,11 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 		container::vector<uint32_t> quadIndices = {0, 1, 2, 3};
 
 		rhi::BufferDesc ibDesc{};
-		ibDesc.size          = quadIndices.size() * sizeof(uint32_t);
-		ibDesc.usage         = rhi::BufferUsage::INDEX;
-		ibDesc.indexType     = rhi::IndexType::UINT32;
-		ibDesc.initialData   = quadIndices.data();
-		m_quadIndexBuffer    = device->CreateBuffer(ibDesc);
+		ibDesc.size        = quadIndices.size() * sizeof(uint32_t);
+		ibDesc.usage       = rhi::BufferUsage::INDEX;
+		ibDesc.indexType   = rhi::IndexType::UINT32;
+		ibDesc.initialData = quadIndices.data();
+		m_quadIndexBuffer  = device->CreateBuffer(ibDesc);
 	}
 
 	// Load splat rendering shaders
@@ -124,7 +137,14 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
 	m_descriptorSet->BindBuffer(4, shBinding);
 
-	// Binding 5 (sorted indices) will be updated after sorting
+	// Binding 5: Sorted indices (app-owned buffer, written to by backend)
+	if (m_sortedIndices)
+	{
+		rhi::BufferBinding indicesBinding{};
+		indicesBinding.buffer = m_sortedIndices.Get();
+		indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(5, indicesBinding);
+	}
 
 	// Create graphics pipeline
 	rhi::GraphicsPipelineDesc pipelineDesc{};
@@ -165,6 +185,54 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	InitImGui();
 
 	return true;
+}
+
+void HybridSplatRendererApp::SwitchBackend(BackendType newType)
+{
+	if (newType == m_currentBackendType)
+	{
+		return;        // Already using this backend
+	}
+
+	rhi::IRHIDevice *device = m_deviceManager->GetDevice();
+
+	// Wait for any in-flight GPU work
+	device->WaitIdle();
+
+	// Destroy current backend
+	m_backend.reset();
+
+	// Create new backend
+	if (newType == BackendType::GPU)
+	{
+		m_backend = container::make_unique<engine::GpuSplatSortBackend>();
+	}
+	else
+	{
+		m_backend = container::make_unique<engine::CpuSplatSortBackend>();
+	}
+
+	// Initialize with existing resources
+	if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount()))
+	{
+		LOG_ERROR("Failed to initialize {} backend, reverting to previous",
+		          newType == BackendType::GPU ? "GPU" : "CPU");
+
+		// Revert to previous backend
+		if (newType == BackendType::GPU)
+		{
+			m_backend = container::make_unique<engine::CpuSplatSortBackend>();
+		}
+		else
+		{
+			m_backend = container::make_unique<engine::GpuSplatSortBackend>();
+		}
+		m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount());
+		return;
+	}
+
+	m_currentBackendType = newType;
+	LOG_INFO("Switched to {} backend ({})", m_backend->GetName(), m_backend->GetMethodName());
 }
 
 void HybridSplatRendererApp::OnUpdate(float deltaTime)
@@ -235,56 +303,26 @@ void HybridSplatRendererApp::OnRender()
 	rhi::IRHICommandList *cmdList = m_commandLists[imageIndex].Get();
 	cmdList->Begin();
 
-	// Check verification results from previous frame if pending
-	if (m_checkVerificationResults && m_sorter)
-	{
-		LOG_INFO("Checking sorting verification results...");
-
-		bool sortingCorrect;
-		if (m_useSimpleVerification)
-		{
-			sortingCorrect = m_sorter->VerifySortOrder();
-		}
-		else
-		{
-			sortingCorrect = m_sorter->CheckVerificationResults(&m_testSplatPositions);
-		}
-
-		if (sortingCorrect)
-		{
-			LOG_INFO("Sorting verification completed successfully");
-		}
-		else
-		{
-			LOG_ERROR("Sorting verification failed - check logs for details");
-		}
-		m_checkVerificationResults = false;
-	}
-
 	// Perform GPU sorting if enabled
-	if (m_sorter && m_sortingEnabled)
+	if (m_backend && m_sortingEnabled)
 	{
-		m_sorter->Sort(cmdList, *m_scene, m_camera);
+		// Update sort via backend (handles compute dispatches and buffer copy internally)
+		m_backend->Update(m_camera);
 
-		// Prepare verification if requested
+		// Handle verification if requested
 		if (m_verifyNextSort)
 		{
-			LOG_INFO("Preparing sorting verification...");
-			m_sorter->PrepareVerification(cmdList);
-			m_checkVerificationResults = true;
-			m_verifyNextSort           = false;
-		}
-
-		// Update sorted indices buffer (only when it changes)
-		rhi::BufferHandle newSortedIndices = m_sorter->GetSortedIndices();
-		if (newSortedIndices.Get() != m_sortedIndices.Get())
-		{
-			m_sortedIndices = newSortedIndices;
-
-			rhi::BufferBinding indicesBinding{};
-			indicesBinding.buffer = m_sortedIndices.Get();
-			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-			m_descriptorSet->BindBuffer(5, indicesBinding);
+			LOG_INFO("Verifying sorting...");
+			bool sortingCorrect = m_backend->VerifySort();
+			if (sortingCorrect)
+			{
+				LOG_INFO("Sorting verification completed successfully");
+			}
+			else
+			{
+				LOG_ERROR("Sorting verification failed - check logs for details");
+			}
+			m_verifyNextSort = false;
 		}
 	}
 
@@ -293,7 +331,7 @@ void HybridSplatRendererApp::OnRender()
 	{
 		LOG_INFO("Frame FPS: {:.2f} | Sort: {} | Splats: {}",
 		         m_fpsCounter.getFPS(),
-		         m_sortingEnabled ? (m_sorter ? m_sorter->GetSortMethodName() : "N/A") : "Disabled",
+		         m_sortingEnabled ? (m_backend ? m_backend->GetMethodName() : "N/A") : "Disabled",
 		         m_scene->GetTotalSplatCount());
 		m_fpsCounter.reset();
 	}
@@ -418,7 +456,7 @@ void HybridSplatRendererApp::OnShutdown()
 	m_quadIndexBuffer = nullptr;
 	m_sortedIndices   = nullptr;
 
-	m_sorter.reset();
+	m_backend.reset();
 	m_scene.reset();
 	m_shaderFactory.reset();
 
@@ -451,16 +489,17 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 
 			case GLFW_KEY_M:
 				// Toggle sorting method between prescan and integrated scan
-				if (m_sorter)
+				if (m_backend)
 				{
-					if (m_sorter->GetSortMethod() == engine::GpuSplatSorter::SortMethod::IntegratedScan)
+					// 0 = Prescan, 1 = IntegratedScan
+					if (m_backend->GetSortMethod() == 1)
 					{
-						m_sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::Prescan);
+						m_backend->SetSortMethod(0);
 						LOG_INFO("Switched to Prescan radix sort method");
 					}
 					else
 					{
-						m_sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::IntegratedScan);
+						m_backend->SetSortMethod(1);
 						LOG_INFO("Switched to Integrated Scan radix sort method");
 					}
 				}
@@ -478,6 +517,18 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 				m_benchmarkMode = !m_benchmarkMode;
 				LOG_INFO("Benchmark mode {}", m_benchmarkMode ? "enabled (no vsync)" : "disabled (vsync on)");
 				m_fpsCounter.reset();
+				break;
+
+			case GLFW_KEY_C:
+				// Switch between CPU and GPU backends
+				if (m_currentBackendType == BackendType::GPU)
+				{
+					SwitchBackend(BackendType::CPU);
+				}
+				else
+				{
+					SwitchBackend(BackendType::GPU);
+				}
 				break;
 
 			case GLFW_KEY_H:
@@ -726,9 +777,9 @@ void HybridSplatRendererApp::InitImGui()
 	init_info.UseDynamicRendering       = true;
 
 	// Set up color attachment format for dynamic rendering (new ImGui API: fields in PipelineInfoMain)
-	VkFormat colorFormat                                                      = VK_FORMAT_R8G8B8A8_UNORM;
-	init_info.PipelineInfoMain.MSAASamples                                    = VK_SAMPLE_COUNT_1_BIT;
-	init_info.PipelineInfoMain.PipelineRenderingCreateInfo                    = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
+	VkFormat colorFormat                                                           = VK_FORMAT_R8G8B8A8_UNORM;
+	init_info.PipelineInfoMain.MSAASamples                                         = VK_SAMPLE_COUNT_1_BIT;
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo                         = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
 	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount    = 1;
 	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFormat;
 
@@ -757,7 +808,7 @@ void HybridSplatRendererApp::ShutdownImGui()
 
 void HybridSplatRendererApp::UpdateFpsHistory()
 {
-	float currentFps              = static_cast<float>(m_fpsCounter.getFPS());
+	float currentFps                = static_cast<float>(m_fpsCounter.getFPS());
 	m_fpsHistory[m_fpsHistoryIndex] = currentFps;
 	m_fpsHistoryIndex               = (m_fpsHistoryIndex + 1) % FPS_HISTORY_SIZE;
 }
@@ -809,24 +860,38 @@ void HybridSplatRendererApp::RenderImGui()
 			ImGui::SetTooltip("Toggle depth sorting of splats\nDisabling may improve performance but reduce quality");
 		}
 
-		// Sort method selection
-		if (m_sorter)
+		// Backend selection
+		ImGui::Text("Sort Backend:");
+		int         backendIndex = static_cast<int>(m_currentBackendType);
+		const char *backends[]   = {"GPU", "CPU"};
+		if (ImGui::Combo("##Backend", &backendIndex, backends, 2))
 		{
-			ImGui::Text("Sort Method:");
-			int         currentMethod = (m_sorter->GetSortMethod() == engine::GpuSplatSorter::SortMethod::Prescan) ? 0 : 1;
-			const char *methods[]     = {"Prescan Radix Sort", "Integrated Scan Radix Sort"};
+			SwitchBackend(static_cast<BackendType>(backendIndex));
+		}
 
-			if (ImGui::Combo("##SortMethod", &currentMethod, methods, 2))
+		// Backend-specific info
+		if (m_backend)
+		{
+			ImGui::Text("Method: %s", m_backend->GetMethodName());
+
+			auto metrics = m_backend->GetMetrics();
+			ImGui::Text("Sort Time: %.2f ms", metrics.sortDurationMs);
+
+			// Upload time only relevant for CPU backend
+			if (m_currentBackendType == BackendType::CPU)
 			{
-				if (currentMethod == 0)
+				ImGui::Text("Upload Time: %.2f ms", metrics.uploadDurationMs);
+			}
+
+			// Sort method switching only for GPU backend
+			if (m_currentBackendType == BackendType::GPU)
+			{
+				int         currentMethod = m_backend->GetSortMethod();
+				const char *methods[]     = {"Prescan Radix Sort", "Integrated Scan Radix Sort"};
+				if (ImGui::Combo("##SortMethod", &currentMethod, methods, 2))
 				{
-					m_sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::Prescan);
-					LOG_INFO("Switched to Prescan radix sort method");
-				}
-				else
-				{
-					m_sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::IntegratedScan);
-					LOG_INFO("Switched to Integrated Scan radix sort method");
+					m_backend->SetSortMethod(currentMethod);
+					LOG_INFO("Switched to {} radix sort method", methods[currentMethod]);
 				}
 			}
 		}
@@ -865,7 +930,8 @@ void HybridSplatRendererApp::RenderImGui()
 		ImGui::BulletText("ESC: Exit application");
 		ImGui::BulletText("H: Toggle this UI");
 		ImGui::BulletText("SPACE: Toggle sorting");
-		ImGui::BulletText("M: Switch sort method");
+		ImGui::BulletText("C: Switch backend (CPU/GPU)");
+		ImGui::BulletText("M: Switch GPU sort method");
 		ImGui::BulletText("V: Verify sorting");
 		ImGui::BulletText("B: Toggle benchmark mode");
 	}

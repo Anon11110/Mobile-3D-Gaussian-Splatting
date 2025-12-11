@@ -48,6 +48,7 @@ FORMAT_DIRS = [
     "examples/splat-loader/",
     "examples/naive-splat-cpu/",
     "examples/gpu-sorting-renderer/",
+    "examples/hybrid-splat-renderer/",
     "include/msplat/core",
     "include/msplat/engine",
     "src/core",

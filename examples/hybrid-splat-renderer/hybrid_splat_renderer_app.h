@@ -36,14 +36,21 @@ class DeviceManager;
 namespace engine
 {
 class Scene;
-class GpuSplatSorter;
+class ISplatSortBackend;
 }        // namespace engine
 }        // namespace msplat
 
 using namespace msplat;
 
+/// Backend type for runtime switching
+enum class BackendType
+{
+	GPU = 0,
+	CPU = 1
+};
+
 /// Hybrid Splat Renderer Application
-/// Phase 1: GPU sorting baseline (foundation for CPU+GPU hybrid in later phases)
+/// Supports runtime switching between CPU and GPU sorting backends
 class HybridSplatRendererApp : public app::IApplication
 {
   public:
@@ -71,8 +78,11 @@ class HybridSplatRendererApp : public app::IApplication
 
 	app::Camera m_camera;
 
-	container::unique_ptr<engine::Scene>          m_scene;
-	container::unique_ptr<engine::GpuSplatSorter> m_sorter;
+	container::unique_ptr<engine::Scene>             m_scene;
+	container::unique_ptr<engine::ISplatSortBackend> m_backend;
+	BackendType                                      m_currentBackendType = BackendType::GPU;
+
+	void SwitchBackend(BackendType newType);
 
 	container::unique_ptr<engine::ShaderFactory> m_shaderFactory;
 
@@ -110,8 +120,8 @@ class HybridSplatRendererApp : public app::IApplication
 	bool  m_showImGui           = true;
 
 	// FPS history for graph
-	static constexpr size_t             FPS_HISTORY_SIZE = 120;
-	std::array<float, FPS_HISTORY_SIZE> m_fpsHistory     = {};
+	static constexpr size_t             FPS_HISTORY_SIZE  = 120;
+	std::array<float, FPS_HISTORY_SIZE> m_fpsHistory      = {};
 	size_t                              m_fpsHistoryIndex = 0;
 
 	void InitImGui();

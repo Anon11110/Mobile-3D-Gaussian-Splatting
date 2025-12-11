@@ -55,6 +55,10 @@ class Scene
 	uint32_t       GetTotalSplatCount() const;
 	bool           IsAttributeDataUploaded() const;
 
+	// Backend integration helpers (for CpuSplatSortBackend)
+	bool                            IsCpuSortComplete() const;
+	container::span<const uint32_t> GetCpuSortedIndices();
+
 	template <typename Func>
 	void ForEachMesh(Func &&f) const;
 

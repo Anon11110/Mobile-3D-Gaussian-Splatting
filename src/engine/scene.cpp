@@ -143,10 +143,10 @@ rhi::FenceHandle Scene::UploadAttributeData()
 			// Quaternion components: PLY stores as (w, x, y, z) in rot_0, rot_1, rot_2, rot_3
 			// Our vec4 expects (x, y, z, w) so we need to remap
 			math::vec4 rotation(
-			    splatData->rotY[i],  // rot_1 (x) → .x
-			    splatData->rotZ[i],  // rot_2 (y) → .y
-			    splatData->rotW[i],  // rot_3 (z) → .z
-			    splatData->rotX[i]); // rot_0 (w) → .w
+			    splatData->rotY[i],         // rot_1 (x) → .x
+			    splatData->rotZ[i],         // rot_2 (y) → .y
+			    splatData->rotW[i],         // rot_3 (z) → .z
+			    splatData->rotX[i]);        // rot_0 (w) → .w
 			rotation = math::Normalize(rotation);
 
 			float cov[6];
@@ -416,6 +416,24 @@ void Scene::UpdateSplatPositions()
 			splatPositions.push_back(math::vec3(worldPos));
 		}
 	}
+}
+
+bool Scene::IsCpuSortComplete() const
+{
+	if (!cpuSplatSorter)
+	{
+		return true;        // No sorter = always "complete"
+	}
+	return cpuSplatSorter->IsSortComplete();
+}
+
+container::span<const uint32_t> Scene::GetCpuSortedIndices()
+{
+	if (!cpuSplatSorter)
+	{
+		return {};
+	}
+	return cpuSplatSorter->GetSortedIndices();
 }
 
 }        // namespace msplat::engine

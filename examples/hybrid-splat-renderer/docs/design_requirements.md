@@ -9,10 +9,10 @@ Design for a single example target under `examples/hybrid-splat-renderer` that m
 | Phase | Status | Date | Notes |
 |-------|--------|------|-------|
 | Phase 1: Foundation | **COMPLETE** | 2025-12-11 | GPU sorting baseline working |
-| Phase 2: Backend Interface | Pending | - | - |
-| Phase 3: GPU Backend | Pending | - | - |
-| Phase 4: CPU Backend | Pending | - | - |
-| Phase 5: Backend Switching | Pending | - | - |
+| Phase 2: Backend Interface | **COMPLETE** | 2025-12-11 | ISplatSortBackend interface defined |
+| Phase 3: GPU Backend | **COMPLETE** | 2025-12-11 | GpuSplatSortBackend wrapping GpuSplatSorter |
+| Phase 4: CPU Backend | **COMPLETE** | 2025-12-11 | CpuSplatSortBackend using Scene's CPU sorter |
+| Phase 5: Backend Switching | **COMPLETE** | 2025-12-11 | Runtime switching via ImGui combo and C key |
 | Phase 6: UI & Controls | Pending | - | - |
 | Phase 7: Polish | Pending | - | - |
 
@@ -94,20 +94,25 @@ CpuSplatSortBackend                 GpuSplatSortBackend
 
 ## 4. Backend Interface Specification
 
-### ISplatSortBackend Interface
+### ISplatSortBackend Interface - **IMPLEMENTED**
 
 ```cpp
-// include/msplat/engine/splat_sort_backend.h
+// include/msplat/engine/splat_sort_backend.h (actual implementation)
 
 #pragma once
 
-#include <msplat/core/math/types.h>
-#include <rhi/rhi_types.h>
+#include <cstdint>
+#include <msplat/app/camera.h>
+#include <msplat/core/containers/memory.h>
+#include <msplat/core/math/math.h>
+#include <msplat/core/timer.h>
+#include <rhi/rhi.h>
 
 namespace msplat::engine {
 
 // Forward declarations
 class Scene;
+class GpuSplatSorter;
 
 /// Performance metrics returned by backends
 struct SortMetrics {
@@ -122,11 +127,6 @@ public:
     virtual ~ISplatSortBackend() = default;
 
     /// Initialize the backend
-    /// @param device RHI device for GPU operations
-    /// @param scene Scene containing splat data (positions, etc.)
-    /// @param sortedIndicesBuffer App-owned buffer where sorted indices are written
-    /// @param totalSplatCount Number of splats to sort
-    /// @return true if initialization succeeded
     virtual bool Initialize(
         rhi::IRHIDevice* device,
         Scene* scene,
@@ -134,19 +134,13 @@ public:
         uint32_t totalSplatCount
     ) = 0;
 
-    /// Update sorting based on current view
+    /// Update sorting based on current camera view
     /// CPU backend: Triggers async sort, uploads when complete
     /// GPU backend: Records and submits compute dispatches
-    /// @param viewMatrix Current camera view matrix
-    /// @param cameraPos Current camera position in world space
-    virtual void Update(
-        const math::mat4& viewMatrix,
-        const math::vec3& cameraPos
-    ) = 0;
+    /// @param camera Camera providing view matrix and position
+    virtual void Update(const app::Camera& camera) = 0;
 
     /// Check if the most recent sort operation has completed
-    /// CPU backend: May return false while async sort is in progress
-    /// GPU backend: Always returns true (synchronous within frame)
     virtual bool IsSortComplete() const = 0;
 
     /// Get performance metrics from the last sort operation
@@ -156,27 +150,25 @@ public:
     virtual const char* GetName() const = 0;
 
     /// Trigger verification of sort correctness (optional)
-    /// @return true if sort order is correct, false otherwise
     virtual bool VerifySort() { return true; }
 
-    /// Set sorting method (GPU backend only: 0=Prescan, 1=IntegratedScan)
+    /// Set sorting method (GPU backend: 0=Prescan, 1=IntegratedScan)
     virtual void SetSortMethod(int method) { (void)method; }
-
-    /// Get current sorting method index
     virtual int GetSortMethod() const { return 0; }
-
-    /// Get human-readable method name (e.g., "Prescan", "Integrated Scan")
     virtual const char* GetMethodName() const { return "Default"; }
 
-    /// Check if comprehensive verification is available
+    /// Comprehensive verification (GPU backend only)
     virtual bool HasComprehensiveVerification() const { return false; }
-
-    /// Run comprehensive verification (GPU backend only)
     virtual bool RunComprehensiveVerification() { return true; }
 };
 
 } // namespace msplat::engine
 ```
+
+**Interface Design Notes:**
+- Uses `const app::Camera&` instead of `(mat4, vec3)` - cleaner, type-safe interface
+- GPU backend passes Camera directly to GpuSplatSorter
+- CPU backend extracts `GetViewMatrix()` from Camera
 
 ### API Mismatch Resolution
 
@@ -199,184 +191,112 @@ The `ISplatSortBackend` interface abstracts these differences:
 
 ## 5. Backend Implementation Details
 
-### CPU Backend (CpuSplatSortBackend)
+### CPU Backend (CpuSplatSortBackend) - **IMPLEMENTED**
+
+**Files:**
+- `include/msplat/engine/splat_sort_backend.h` (class declaration)
+- `src/engine/cpu_splat_sort_backend.cpp` (implementation)
+
+**Scene Helper Methods Added:**
+- `Scene::IsCpuSortComplete()` - delegates to cpuSplatSorter
+- `Scene::GetCpuSortedIndices()` - returns span from cpuSplatSorter
 
 ```cpp
-// src/engine/cpu_splat_sort_backend.cpp
+// Actual implementation in src/engine/cpu_splat_sort_backend.cpp
 
-class CpuSplatSortBackend : public ISplatSortBackend {
-private:
-    rhi::IRHIDevice* m_device = nullptr;
-    Scene* m_scene = nullptr;
-    rhi::BufferHandle m_targetBuffer;      // App-owned, we write here
-    uint32_t m_splatCount = 0;
-
-    // Timing
-    float m_lastSortDurationMs = 0.0f;
-    float m_lastUploadDurationMs = 0.0f;
-
-public:
-    bool Initialize(
-        rhi::IRHIDevice* device,
-        Scene* scene,
-        rhi::BufferHandle sortedIndicesBuffer,
-        uint32_t totalSplatCount
-    ) override {
-        m_device = device;
-        m_scene = scene;
-        m_targetBuffer = sortedIndicesBuffer;
-        m_splatCount = totalSplatCount;
-        return true;
+void CpuSplatSortBackend::Update(const app::Camera& camera)
+{
+    // Start timing if new sort
+    if (!m_sortInProgress)
+    {
+        m_sortTimer.reset();
+        m_sortTimer.start();
+        m_sortInProgress = true;
     }
 
-    void Update(const math::mat4& viewMatrix, const math::vec3& cameraPos) override {
-        // Trigger async sort via scene
-        m_scene->UpdateView(viewMatrix);
+    // Trigger async sort via Scene
+    m_scene->UpdateView(camera.GetViewMatrix());
 
-        // Check if sort completed and upload
-        if (m_scene->ConsumeAndUploadSortedIndices(m_device, m_targetBuffer)) {
-            // Update timing metrics from scene's sorter
-            m_lastSortDurationMs = m_scene->GetLastSortDuration();
-            m_lastUploadDurationMs = m_scene->GetLastUploadDuration();
+    // Check if sort completed and upload
+    if (m_scene->IsCpuSortComplete())
+    {
+        auto sortedIndices = m_scene->GetCpuSortedIndices();
+        if (!sortedIndices.empty())
+        {
+            m_sortTimer.stop();
+            m_lastSortDurationMs = static_cast<float>(m_sortTimer.elapsedMilliseconds());
+
+            timer::Timer uploadTimer;
+            uploadTimer.start();
+
+            // Upload to app-owned buffer
+            auto fence = m_device->UploadBufferAsync(
+                m_targetBuffer.Get(),
+                sortedIndices.data(),
+                sortedIndices.size() * sizeof(uint32_t));
+
+            if (fence) { fence->Wait(); }
+
+            uploadTimer.stop();
+            m_lastUploadDurationMs = static_cast<float>(uploadTimer.elapsedMilliseconds());
+            m_sortInProgress = false;
         }
     }
-
-    bool IsSortComplete() const override {
-        return m_scene->IsSortComplete();
-    }
-
-    SortMetrics GetMetrics() const override {
-        return {
-            .sortDurationMs = m_lastSortDurationMs,
-            .uploadDurationMs = m_lastUploadDurationMs,
-            .sortComplete = IsSortComplete()
-        };
-    }
-
-    const char* GetName() const override { return "CPU"; }
-};
+}
 ```
 
 **Key Implementation Notes:**
-- Scene's `UpdateView()` triggers `CpuSplatSorter::RequestSort()` internally
-- `ConsumeAndUploadSortedIndices()` polls for completion and uploads when ready
-- Must add `GetLastSortDuration()` and `GetLastUploadDuration()` to Scene if not present
-- The backend doesn't own the sorted indices buffer; it writes to the app-provided buffer
+- Uses Scene's existing `CpuSplatSorter` (no duplication)
+- Scene helper methods expose sorter state without breaking existing functionality
+- Backend handles upload to app-owned buffer using `UploadBufferAsync`
+- Timer-based profiling for sort and upload duration metrics
+- Interface uses `const app::Camera&` (consistent with GPU backend)
 
-### GPU Backend (GpuSplatSortBackend)
+### GPU Backend (GpuSplatSortBackend) - **IMPLEMENTED**
+
+**Files:**
+- `include/msplat/engine/splat_sort_backend.h` (class declaration)
+- `src/engine/gpu_splat_sort_backend.cpp` (implementation)
 
 ```cpp
-// src/engine/gpu_splat_sort_backend.cpp
+// Actual implementation in src/engine/gpu_splat_sort_backend.cpp
 
-class GpuSplatSortBackend : public ISplatSortBackend {
-private:
-    rhi::IRHIDevice* m_device = nullptr;
-    Scene* m_scene = nullptr;
-    rhi::BufferHandle m_targetBuffer;
-    uint32_t m_splatCount = 0;
+void GpuSplatSortBackend::Update(const app::Camera& camera)
+{
+    if (!m_sorter || m_splatCount == 0) return;
 
-    std::unique_ptr<GpuSplatSorter> m_sorter;
-    int m_currentMethod = 1;  // Default: IntegratedScan
+    // Create command list for compute work
+    auto cmdList = m_device->CreateCommandList(rhi::QueueType::COMPUTE);
+    cmdList->Begin();
 
-    // For verification
-    bool m_verificationPending = false;
+    // Execute GPU sort - pass camera directly
+    m_sorter->Sort(cmdList.Get(), *m_scene, camera);
 
-public:
-    bool Initialize(
-        rhi::IRHIDevice* device,
-        Scene* scene,
-        rhi::BufferHandle sortedIndicesBuffer,
-        uint32_t totalSplatCount
-    ) override {
-        m_device = device;
-        m_scene = scene;
-        m_targetBuffer = sortedIndicesBuffer;
-        m_splatCount = totalSplatCount;
+    // Copy result from sorter's internal buffer to app-owned target buffer
+    rhi::BufferHandle sorterOutput = m_sorter->GetSortedIndices();
+    rhi::BufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = static_cast<uint64_t>(m_splatCount) * sizeof(uint32_t);
 
-        // Create GPU sorter
-        m_sorter = std::make_unique<GpuSplatSorter>();
-        if (!m_sorter->Initialize(device, totalSplatCount)) {
-            LOG_ERROR("Failed to initialize GpuSplatSorter");
-            return false;
-        }
-        m_sorter->SetSortMethod(
-            static_cast<GpuSplatSorter::SortMethod>(m_currentMethod)
-        );
-        return true;
-    }
+    std::array<rhi::BufferCopy, 1> regions = {copyRegion};
+    cmdList->CopyBuffer(sorterOutput.Get(), m_targetBuffer.Get(), regions);
 
-    void Update(const math::mat4& viewMatrix, const math::vec3& cameraPos) override {
-        // Create command list for compute work
-        auto cmdList = m_device->CreateCommandList(rhi::CommandListType::COMPUTE);
-        cmdList->Begin();
+    cmdList->End();
 
-        // Execute GPU sort
-        m_sorter->Sort(cmdList.Get(), m_scene, viewMatrix, cameraPos);
-
-        // Copy result to app-owned buffer
-        rhi::BufferHandle sorterOutput = m_sorter->GetSortedIndices();
-        cmdList->CopyBuffer(sorterOutput.Get(), m_targetBuffer.Get(),
-                           m_splatCount * sizeof(uint32_t));
-
-        cmdList->End();
-
-        // Submit and wait (or use fence for async)
-        rhi::SubmitInfo submitInfo{};
-        submitInfo.commandLists = {cmdList.Get()};
-        m_device->SubmitCommandLists(rhi::QueueType::COMPUTE, submitInfo);
-        m_device->WaitIdle();  // Could be optimized with fences
-    }
-
-    bool IsSortComplete() const override {
-        return true;  // GPU sort is synchronous within Update()
-    }
-
-    SortMetrics GetMetrics() const override {
-        return {
-            .sortDurationMs = 0.0f,  // TODO: Add GPU timing queries
-            .uploadDurationMs = 0.0f,
-            .sortComplete = true
-        };
-    }
-
-    const char* GetName() const override { return "GPU"; }
-
-    void SetSortMethod(int method) override {
-        m_currentMethod = method;
-        if (m_sorter) {
-            m_sorter->SetSortMethod(
-                static_cast<GpuSplatSorter::SortMethod>(method)
-            );
-        }
-    }
-
-    int GetSortMethod() const override { return m_currentMethod; }
-
-    const char* GetMethodName() const override {
-        return m_currentMethod == 0 ? "Prescan" : "Integrated Scan";
-    }
-
-    bool HasComprehensiveVerification() const override { return true; }
-
-    bool VerifySort() override {
-        if (!m_sorter) return false;
-        return m_sorter->VerifySortOrder();
-    }
-
-    bool RunComprehensiveVerification() override {
-        if (!m_sorter) return false;
-        m_sorter->PrepareVerification();
-        // Results checked on next frame via CheckVerificationResults()
-        return true;
-    }
-};
+    // Submit and wait for completion
+    std::array<rhi::IRHICommandList*, 1> cmdLists = {cmdList.Get()};
+    m_device->SubmitCommandLists(cmdLists, rhi::QueueType::COMPUTE);
+    m_device->WaitIdle();
+}
 ```
 
 **Key Implementation Notes:**
 - Creates internal command list for compute dispatches
-- Copies sorter's internal result to app-owned buffer
-- Method switching delegates to underlying `GpuSplatSorter`
+- Copies sorter's internal result to app-owned buffer using `CopyBuffer` with `BufferCopy` struct
+- Method switching delegates to underlying `GpuSplatSorter` (0=Prescan, 1=IntegratedScan)
 - Verification uses existing `GpuSplatSorter` verification infrastructure
+- Interface uses `const app::Camera&` (GpuSplatSorter takes Camera directly)
 
 ---
 
@@ -587,16 +507,16 @@ if (!gpuBackend->Initialize(...)) {
 | `examples/hybrid-splat-renderer/main.cpp` | Application entry point | **DONE** |
 | `examples/hybrid-splat-renderer/hybrid_splat_renderer_app.h` | App class declaration | **DONE** |
 | `examples/hybrid-splat-renderer/hybrid_splat_renderer_app.cpp` | App implementation | **DONE** |
-| `include/msplat/engine/splat_sort_backend.h` | Backend interface | Phase 2 |
+| `include/msplat/engine/splat_sort_backend.h` | Backend interface + GpuSplatSortBackend | **DONE** |
 | `src/engine/cpu_splat_sort_backend.cpp` | CPU backend implementation | Phase 4 |
-| `src/engine/gpu_splat_sort_backend.cpp` | GPU backend implementation | Phase 3 |
+| `src/engine/gpu_splat_sort_backend.cpp` | GPU backend implementation | **DONE** |
 
 ### Files to Modify
 
 | File | Change | Status |
 |------|--------|--------|
 | `examples/CMakeLists.txt` | Add `add_subdirectory(hybrid-splat-renderer)` | **DONE** |
-| `cmake/engine.cmake` | Add backend source files to engine library | Phase 2-4 |
+| `cmake/engine.cmake` | Add backend source files to engine library | **DONE** (header), Phase 3-4 (implementations) |
 
 ### Reference Files (Copy Patterns From)
 
@@ -678,30 +598,36 @@ set_target_properties(hybrid-splat-renderer PROPERTIES
 
 **Verification**: Build succeeds, window opens, splats render correctly with GPU sorting
 
-### Phase 2: Backend Interface (~1 hour)
+### Phase 2: Backend Interface (~1 hour) - COMPLETE
 
 **Goal**: Define the abstraction layer.
 
-1. Create `include/msplat/engine/splat_sort_backend.h` with full interface
-2. Add `SortMetrics` struct
-3. Update `cmake/engine.cmake` to include new header
-4. Verify interface compiles correctly
+1. ✅ Create `include/msplat/engine/splat_sort_backend.h` with full interface
+2. ✅ Add `SortMetrics` struct
+3. ✅ Update `cmake/engine.cmake` to include new header
+4. ✅ Verify interface compiles correctly
 
-**Verification**: Project compiles with new interface header
+**Verification**: ✅ Project compiles with new interface header (hybrid-splat-renderer builds successfully)
 
-### Phase 3: GPU Backend (~2 hours)
+### Phase 3: GPU Backend (~2 hours) - COMPLETE
 
 **Goal**: Working GPU sorting through the abstraction.
 
-1. Create `src/engine/gpu_splat_sort_backend.cpp`
-2. Implement `Initialize()` - create `GpuSplatSorter` instance
-3. Implement `Update()` - record compute dispatches, copy to target buffer
-4. Implement method switching via `SetSortMethod()`
-5. Implement verification delegation
-6. Add to `cmake/engine.cmake`
-7. Integrate into app (GPU backend only initially)
+1. ✅ Create `src/engine/gpu_splat_sort_backend.cpp`
+2. ✅ Implement `Initialize()` - create `GpuSplatSorter` instance
+3. ✅ Implement `Update()` - record compute dispatches, copy to target buffer
+4. ✅ Implement method switching via `SetSortMethod()`
+5. ✅ Implement verification delegation
+6. ✅ Add to `cmake/engine.cmake`
+7. ✅ Integrate into app (GPU backend only initially)
 
-**Verification**: Renders correctly with GPU sorting, splats visible and properly ordered
+**Implementation Notes:**
+- Changed `ISplatSortBackend::Update()` signature to take `const Camera&` (Camera has no SetViewMatrix method)
+- Backend creates its own command list for compute work
+- Copies sorted indices from internal sorter buffer to app-owned buffer
+- App now owns the sorted indices buffer (bound once at init, no rebinding needed)
+
+**Verification**: ✅ Builds successfully, renders correctly with GPU sorting
 
 ### Phase 4: CPU Backend (~2 hours)
 
@@ -763,7 +689,7 @@ set_target_properties(hybrid-splat-renderer PROPERTIES
 ## 14. Testing Checklist
 
 ### Functional Tests
-- [x] GPU backend renders correctly with `flowers_1.ply` *(Phase 1)*
+- [x] GPU backend renders correctly with `flowers_1.ply` *(Phase 1, Phase 3)*
 - [ ] CPU backend renders correctly with `flowers_1.ply`
 - [ ] Visual parity between backends on same asset
 - [ ] Runtime switching works without crashes
