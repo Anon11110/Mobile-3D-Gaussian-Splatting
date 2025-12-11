@@ -1,0 +1,881 @@
+#include "hybrid_splat_renderer_app.h"
+#include "app/device_manager.h"
+#include "core/log.h"
+#include <GLFW/glfw3.h>
+#include <chrono>
+#include <msplat/engine/gpu_splat_sorter.h>
+#include <msplat/engine/scene.h>
+#include <msplat/engine/splat_loader.h>
+#include <vulkan/vulkan.h>
+
+HybridSplatRendererApp::HybridSplatRendererApp()
+{
+	m_fpsHistory.fill(0.0f);
+}
+HybridSplatRendererApp::~HybridSplatRendererApp()                                              = default;
+HybridSplatRendererApp::HybridSplatRendererApp(HybridSplatRendererApp &&) noexcept            = default;
+HybridSplatRendererApp &HybridSplatRendererApp::operator=(HybridSplatRendererApp &&) noexcept = default;
+
+bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
+{
+	m_deviceManager = deviceManager;
+
+	rhi::IRHIDevice *device = deviceManager->GetDevice();
+	if (!device)
+	{
+		LOG_ERROR("Failed to get RHI device");
+		return false;
+	}
+
+	rhi::IRHISwapchain *swapchain = deviceManager->GetSwapchain();
+
+	m_shaderFactory = container::make_unique<engine::ShaderFactory>(device);
+	m_scene         = container::make_unique<engine::Scene>(device);
+
+	m_camera.SetPosition(math::vec3(0.0f, 0.0f, 5.0f));
+	m_camera.SetTarget(math::vec3(0.0f, 0.0f, 0.0f));
+
+	int width, height;
+	glfwGetWindowSize(deviceManager->GetWindow(), &width, &height);
+	float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+
+	m_camera.SetPerspectiveProjection(45.0f, aspectRatio, 0.1f, 1000.0f);
+	m_camera.SetMovementSpeed(5.0f);
+	m_camera.SetMouseSensitivity(0.1f);
+
+	LoadSplatFile("assets/flowers_1.ply");
+
+	m_sorter = container::make_unique<engine::GpuSplatSorter>(device);
+	if (m_scene->GetTotalSplatCount() > 0)
+	{
+		m_sorter->Initialize(m_scene->GetTotalSplatCount());
+		LOG_INFO("Initialized sorter for {} splats", m_scene->GetTotalSplatCount());
+	}
+
+	// Create quad index buffer for instanced rendering
+	// Uses triangle strip topology: 0, 1, 2, 3 forms two triangles
+	if (m_scene->GetTotalSplatCount() > 0)
+	{
+		container::vector<uint32_t> quadIndices = {0, 1, 2, 3};
+
+		rhi::BufferDesc ibDesc{};
+		ibDesc.size          = quadIndices.size() * sizeof(uint32_t);
+		ibDesc.usage         = rhi::BufferUsage::INDEX;
+		ibDesc.indexType     = rhi::IndexType::UINT32;
+		ibDesc.initialData   = quadIndices.data();
+		m_quadIndexBuffer    = device->CreateBuffer(ibDesc);
+	}
+
+	// Load splat rendering shaders
+	m_vertexShader   = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster.vert.spv", rhi::ShaderStage::VERTEX);
+	m_fragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster.frag.spv", rhi::ShaderStage::FRAGMENT);
+
+	// Create UBO
+	rhi::BufferDesc uboDesc{};
+	uboDesc.size                      = sizeof(FrameUBO);
+	uboDesc.usage                     = rhi::BufferUsage::UNIFORM;
+	uboDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
+	uboDesc.hints.persistently_mapped = true;
+	m_frameUboBuffer                  = device->CreateBuffer(uboDesc);
+	m_frameUboDataPtr                 = m_frameUboBuffer->Map();
+
+	// Create descriptor set layout
+	rhi::DescriptorSetLayoutDesc layoutDesc{};
+	layoutDesc.bindings = {
+	    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::ALL_GRAPHICS},        // UBO
+	    {1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Positions
+	    {2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Covariances3D
+	    {3, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Colors
+	    {4, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // SH Rest
+	    {5, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Sorted Indices
+	};
+	m_descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
+
+	// Create descriptor set
+	m_descriptorSet = device->CreateDescriptorSet(m_descriptorSetLayout.Get());
+
+	// Binding 0: UBO
+	rhi::BufferBinding uboBinding{};
+	uboBinding.buffer = m_frameUboBuffer.Get();
+	uboBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
+	m_descriptorSet->BindBuffer(0, uboBinding);
+
+	// Binding 1: Positions
+	rhi::BufferBinding positionsBinding{};
+	positionsBinding.buffer = m_scene->GetGpuData().positions.Get();
+	positionsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(1, positionsBinding);
+
+	// Binding 2: Covariances3D
+	rhi::BufferBinding cov3DBinding{};
+	cov3DBinding.buffer = m_scene->GetGpuData().covariances3D.Get();
+	cov3DBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(2, cov3DBinding);
+
+	// Binding 3: Colors
+	rhi::BufferBinding colorsBinding{};
+	colorsBinding.buffer = m_scene->GetGpuData().colors.Get();
+	colorsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(3, colorsBinding);
+
+	// Binding 4: SH Rest
+	rhi::BufferBinding shBinding{};
+	shBinding.buffer = m_scene->GetGpuData().shRest.Get();
+	shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(4, shBinding);
+
+	// Binding 5 (sorted indices) will be updated after sorting
+
+	// Create graphics pipeline
+	rhi::GraphicsPipelineDesc pipelineDesc{};
+	pipelineDesc.vertexShader                = m_vertexShader.Get();
+	pipelineDesc.fragmentShader              = m_fragmentShader.Get();
+	pipelineDesc.topology                    = rhi::PrimitiveTopology::TRIANGLE_STRIP;
+	pipelineDesc.rasterizationState.cullMode = rhi::CullMode::NONE;
+	pipelineDesc.colorBlendAttachments.resize(1);
+	pipelineDesc.colorBlendAttachments[0].blendEnable         = true;
+	pipelineDesc.colorBlendAttachments[0].srcColorBlendFactor = rhi::BlendFactor::SRC_ALPHA;
+	pipelineDesc.colorBlendAttachments[0].dstColorBlendFactor = rhi::BlendFactor::ONE_MINUS_SRC_ALPHA;
+	pipelineDesc.colorBlendAttachments[0].srcAlphaBlendFactor = rhi::BlendFactor::ONE;
+	pipelineDesc.colorBlendAttachments[0].dstAlphaBlendFactor = rhi::BlendFactor::ONE;
+	pipelineDesc.targetSignature.colorFormats                 = {swapchain->GetBackBuffer(0)->GetFormat()};
+	pipelineDesc.descriptorSetLayouts                         = {m_descriptorSetLayout.Get()};
+	m_renderPipeline                                          = device->CreateGraphicsPipeline(pipelineDesc);
+
+	uint32_t imageCount = deviceManager->GetSwapchain()->GetImageCount();
+
+	m_imageAvailableSemaphores.resize(imageCount);
+	m_renderFinishedSemaphores.resize(imageCount);
+	for (uint32_t i = 0; i < imageCount; ++i)
+	{
+		m_imageAvailableSemaphores[i] = device->CreateSemaphore();
+		m_renderFinishedSemaphores[i] = device->CreateSemaphore();
+	}
+	m_inFlightFence = device->CreateFence(true);
+
+	m_commandLists.resize(imageCount);
+	for (uint32_t i = 0; i < imageCount; ++i)
+	{
+		m_commandLists[i] = device->CreateCommandList(rhi::QueueType::GRAPHICS);
+	}
+
+	m_applicationTimer.start();
+	m_fpsCounter.reset();
+
+	InitImGui();
+
+	return true;
+}
+
+void HybridSplatRendererApp::OnUpdate(float deltaTime)
+{
+	m_camera.Update(deltaTime, m_deviceManager->GetWindow());
+}
+
+void HybridSplatRendererApp::OnRender()
+{
+	if (!m_deviceManager || !m_scene || m_scene->GetTotalSplatCount() == 0)
+	{
+		return;
+	}
+
+	rhi::IRHIDevice    *device    = m_deviceManager->GetDevice();
+	rhi::IRHISwapchain *swapchain = m_deviceManager->GetSwapchain();
+
+	// Check if window is minimized before waiting on fence
+	int width, height;
+	glfwGetWindowSize(m_deviceManager->GetWindow(), &width, &height);
+	if (width == 0 || height == 0)
+	{
+		return;
+	}
+
+	// Wait for previous frame
+	m_inFlightFence->Wait(UINT64_MAX);
+	m_inFlightFence->Reset();
+
+	m_fpsCounter.frame();
+
+	// Acquire next image (skip in benchmark mode)
+	uint32_t acquireSemIndex = m_frameCount % m_imageAvailableSemaphores.size();
+	uint32_t imageIndex      = 0;
+
+	if (!m_benchmarkMode)
+	{
+		rhi::SwapchainStatus status = swapchain->AcquireNextImage(
+		    imageIndex,
+		    m_imageAvailableSemaphores[acquireSemIndex].Get());
+
+		if (status == rhi::SwapchainStatus::OUT_OF_DATE)
+		{
+			return;
+		}
+	}
+	else
+	{
+		imageIndex = 0;
+	}
+
+	FrameUBO ubo{};
+	ubo.view       = m_camera.GetViewMatrix();
+	ubo.projection = m_camera.GetProjectionMatrix();
+	ubo.projection[1][1] *= -1.0f;        // Flip the Y[1][1] component to match Vulkan's NDC
+	ubo.cameraPos          = math::vec4(m_camera.GetPosition(), 1.0f);
+	ubo.viewport           = {static_cast<float>(width), static_cast<float>(height)};
+	ubo.focal              = {ubo.projection[0][0] * width * 0.5f,
+	                          ubo.projection[1][1] * height * 0.5f};
+	ubo.splatScale         = 1.0f;                                 // Default scale factor
+	ubo.alphaCullThreshold = 1.0f / 255.0f;                        // Default alpha cutoff
+	ubo.maxSplatRadius     = 2048.0f;                              // Maximum splat radius in pixels
+	ubo.enableSplatFilter  = 1;                                    // Enable EWA filtering
+	ubo.basisViewport      = {1.0f / width, 1.0f / height};        // Resolution-aware scaling
+	ubo.inverseFocalAdj    = 1.0f;                                 // No FOV adjustment by default
+	memcpy(m_frameUboDataPtr, &ubo, sizeof(FrameUBO));
+
+	rhi::IRHICommandList *cmdList = m_commandLists[imageIndex].Get();
+	cmdList->Begin();
+
+	// Check verification results from previous frame if pending
+	if (m_checkVerificationResults && m_sorter)
+	{
+		LOG_INFO("Checking sorting verification results...");
+
+		bool sortingCorrect;
+		if (m_useSimpleVerification)
+		{
+			sortingCorrect = m_sorter->VerifySortOrder();
+		}
+		else
+		{
+			sortingCorrect = m_sorter->CheckVerificationResults(&m_testSplatPositions);
+		}
+
+		if (sortingCorrect)
+		{
+			LOG_INFO("Sorting verification completed successfully");
+		}
+		else
+		{
+			LOG_ERROR("Sorting verification failed - check logs for details");
+		}
+		m_checkVerificationResults = false;
+	}
+
+	// Perform GPU sorting if enabled
+	if (m_sorter && m_sortingEnabled)
+	{
+		m_sorter->Sort(cmdList, *m_scene, m_camera);
+
+		// Prepare verification if requested
+		if (m_verifyNextSort)
+		{
+			LOG_INFO("Preparing sorting verification...");
+			m_sorter->PrepareVerification(cmdList);
+			m_checkVerificationResults = true;
+			m_verifyNextSort           = false;
+		}
+
+		// Update sorted indices buffer (only when it changes)
+		rhi::BufferHandle newSortedIndices = m_sorter->GetSortedIndices();
+		if (newSortedIndices.Get() != m_sortedIndices.Get())
+		{
+			m_sortedIndices = newSortedIndices;
+
+			rhi::BufferBinding indicesBinding{};
+			indicesBinding.buffer = m_sortedIndices.Get();
+			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSet->BindBuffer(5, indicesBinding);
+		}
+	}
+
+	// Log FPS periodically
+	if (m_frameCount % 60 == 0 && m_fpsCounter.shouldUpdate())
+	{
+		LOG_INFO("Frame FPS: {:.2f} | Sort: {} | Splats: {}",
+		         m_fpsCounter.getFPS(),
+		         m_sortingEnabled ? (m_sorter ? m_sorter->GetSortMethodName() : "N/A") : "Disabled",
+		         m_scene->GetTotalSplatCount());
+		m_fpsCounter.reset();
+	}
+
+	rhi::IRHITexture *backBuffer = swapchain->GetBackBuffer(imageIndex);
+
+	// Transition to render target
+	rhi::TextureTransition renderTransition = {};
+	renderTransition.texture                = backBuffer;
+	renderTransition.before                 = rhi::ResourceState::Undefined;
+	renderTransition.after                  = rhi::ResourceState::RenderTarget;
+
+	cmdList->Barrier(
+	    rhi::PipelineScope::Graphics,
+	    rhi::PipelineScope::Graphics,
+	    {},
+	    {&renderTransition, 1},
+	    {});
+
+	// Begin rendering
+	rhi::RenderingInfo renderingInfo{};
+	renderingInfo.colorAttachments.resize(1);
+	renderingInfo.colorAttachments[0].view                = swapchain->GetBackBufferView(imageIndex);
+	renderingInfo.colorAttachments[0].loadOp              = rhi::LoadOp::CLEAR;
+	renderingInfo.colorAttachments[0].storeOp             = rhi::StoreOp::STORE;
+	renderingInfo.colorAttachments[0].clearValue.color[0] = 0.0f;
+	renderingInfo.colorAttachments[0].clearValue.color[1] = 0.0f;
+	renderingInfo.colorAttachments[0].clearValue.color[2] = 0.0f;
+	renderingInfo.colorAttachments[0].clearValue.color[3] = 1.0f;
+	renderingInfo.renderAreaWidth                         = width;
+	renderingInfo.renderAreaHeight                        = height;
+
+	cmdList->BeginRendering(renderingInfo);
+	cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
+	cmdList->SetScissor(0, 0, width, height);
+
+	// Draw the splats using indexed procedural vertex generation
+	cmdList->SetPipeline(m_renderPipeline.Get());
+	cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
+	cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
+
+	// Draw using instanced rendering: 4 indices per strip, one instance per splat
+	uint32_t indexCount    = 4;
+	uint32_t instanceCount = m_scene->GetTotalSplatCount();
+	cmdList->DrawIndexedInstanced(indexCount, instanceCount, 0, 0, 0);
+
+	if (m_showImGui)
+	{
+		UpdateFpsHistory();
+		RenderImGui();
+		RenderImGuiToCommandBuffer(cmdList);
+	}
+
+	cmdList->EndRendering();
+
+	// Transition to present
+	rhi::TextureTransition presentTransition = {};
+	presentTransition.texture                = backBuffer;
+	presentTransition.before                 = rhi::ResourceState::RenderTarget;
+	presentTransition.after                  = rhi::ResourceState::Present;
+
+	cmdList->Barrier(
+	    rhi::PipelineScope::Graphics,
+	    rhi::PipelineScope::Graphics,
+	    {},
+	    {&presentTransition, 1},
+	    {});
+
+	cmdList->End();
+
+	// Submit command list
+	rhi::SubmitInfo submitInfo = {};
+	submitInfo.signalFence     = m_inFlightFence.Get();
+
+	if (!m_benchmarkMode)
+	{
+		// Normal mode: wait for image available and signal when rendering is done
+		rhi::SemaphoreWaitInfo waitInfo = {};
+		waitInfo.semaphore              = m_imageAvailableSemaphores[acquireSemIndex].Get();
+		waitInfo.waitStage              = rhi::StageMask::RenderTarget;
+
+		submitInfo.waitSemaphores     = {&waitInfo, 1};
+		rhi::IRHISemaphore *signalSem = m_renderFinishedSemaphores[imageIndex].Get();
+		submitInfo.signalSemaphores   = {&signalSem, 1};
+	}
+
+	device->SubmitCommandLists({&cmdList, 1}, rhi::QueueType::GRAPHICS, submitInfo);
+
+	// Present (skip in benchmark mode to remove vsync bottleneck)
+	if (!m_benchmarkMode)
+	{
+		swapchain->Present(imageIndex, m_renderFinishedSemaphores[imageIndex].Get());
+	}
+
+	m_frameCount++;
+}
+
+void HybridSplatRendererApp::OnShutdown()
+{
+	if (m_deviceManager)
+	{
+		rhi::IRHIDevice *device = m_deviceManager->GetDevice();
+		device->WaitIdle();
+
+		ShutdownImGui();
+
+		if (m_frameUboDataPtr)
+		{
+			m_frameUboBuffer->Unmap();
+			m_frameUboDataPtr = nullptr;
+		}
+	}
+
+	m_renderPipeline      = nullptr;
+	m_descriptorSet       = nullptr;
+	m_descriptorSetLayout = nullptr;
+
+	m_vertexShader   = nullptr;
+	m_fragmentShader = nullptr;
+
+	m_frameUboBuffer  = nullptr;
+	m_quadIndexBuffer = nullptr;
+	m_sortedIndices   = nullptr;
+
+	m_sorter.reset();
+	m_scene.reset();
+	m_shaderFactory.reset();
+
+	m_imageAvailableSemaphores.clear();
+	m_renderFinishedSemaphores.clear();
+	m_inFlightFence = nullptr;
+	m_commandLists.clear();
+}
+
+void HybridSplatRendererApp::OnKey(int key, int action, int mods)
+{
+	m_camera.OnKey(key, action, mods);
+
+	if (action == GLFW_PRESS)
+	{
+		switch (key)
+		{
+			case GLFW_KEY_SPACE:
+				// Toggle sorting on/off for performance comparison
+				m_sortingEnabled = !m_sortingEnabled;
+				LOG_INFO("Sorting {}", m_sortingEnabled ? "enabled" : "disabled");
+				break;
+
+			case GLFW_KEY_V:
+				// Verify sorting on next frame
+				m_verifyNextSort = true;
+				LOG_INFO("Will verify sorting on next frame using {} verification",
+				         m_useSimpleVerification ? "SIMPLE" : "COMPREHENSIVE");
+				break;
+
+			case GLFW_KEY_M:
+				// Toggle sorting method between prescan and integrated scan
+				if (m_sorter)
+				{
+					if (m_sorter->GetSortMethod() == engine::GpuSplatSorter::SortMethod::IntegratedScan)
+					{
+						m_sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::Prescan);
+						LOG_INFO("Switched to Prescan radix sort method");
+					}
+					else
+					{
+						m_sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::IntegratedScan);
+						LOG_INFO("Switched to Integrated Scan radix sort method");
+					}
+				}
+				break;
+
+			case GLFW_KEY_T:
+				// Toggle verification mode
+				m_useSimpleVerification = !m_useSimpleVerification;
+				LOG_INFO("Verification mode switched to: {}",
+				         m_useSimpleVerification ? "SIMPLE (sort order only)" : "COMPREHENSIVE (all steps)");
+				break;
+
+			case GLFW_KEY_B:
+				// Toggle benchmark mode (skip present to remove vsync limit)
+				m_benchmarkMode = !m_benchmarkMode;
+				LOG_INFO("Benchmark mode {}", m_benchmarkMode ? "enabled (no vsync)" : "disabled (vsync on)");
+				m_fpsCounter.reset();
+				break;
+
+			case GLFW_KEY_H:
+				// Toggle ImGui visibility
+				m_showImGui = !m_showImGui;
+				LOG_INFO("ImGui {}", m_showImGui ? "shown" : "hidden");
+				break;
+
+			case GLFW_KEY_ESCAPE:
+				// Exit application
+				glfwSetWindowShouldClose(m_deviceManager->GetWindow(), GLFW_TRUE);
+				break;
+		}
+	}
+}
+
+void HybridSplatRendererApp::OnMouseButton(int button, int action, int mods)
+{
+	m_camera.OnMouseButton(button, action, mods);
+}
+
+void HybridSplatRendererApp::OnMouseMove(double xpos, double ypos)
+{
+	m_camera.OnMouseMove(xpos, ypos);
+}
+
+void HybridSplatRendererApp::LoadSplatFile(const char *filepath)
+{
+	engine::SplatLoader loader;
+	auto                futureData = loader.Load(filepath);
+
+	auto splatData = futureData.get();
+
+	if (splatData && !splatData->empty())
+	{
+		// Convert coordinate system by flipping Z axis
+		for (uint32_t i = 0; i < splatData->numSplats; ++i)
+		{
+			splatData->posZ[i] = -splatData->posZ[i];
+			// Negate X and Y components of quaternion to maintain correct rotations after Z flip
+			splatData->rotY[i] = -splatData->rotY[i];
+			splatData->rotZ[i] = -splatData->rotZ[i];
+		}
+
+		m_scene->AddMesh(splatData, math::Identity());
+		m_scene->AllocateGpuBuffers();
+		rhi::FenceHandle uploadFence = m_scene->UploadAttributeData();
+		uploadFence->Wait(UINT64_MAX);
+		LOG_INFO("Loaded {} splats from {}", splatData->numSplats, filepath);
+	}
+	else
+	{
+		LOG_WARNING("Failed to load splat file {}, creating test data", filepath);
+		CreateTestSplatData();
+	}
+}
+
+void HybridSplatRendererApp::CreateTestSplatData()
+{
+	// Camera is at (0, 0, 5) looking down -Z axis (towards origin)
+	const uint32_t testSplatCount = 10000000;
+	auto           testData       = container::make_shared<engine::SplatSoA>();
+	testData->Resize(testSplatCount, 0);
+
+	LOG_INFO("Creating {} random test splats for comprehensive sorting verification", testSplatCount);
+	LOG_INFO("Camera position: (0, 0, 5), looking towards origin (down -Z axis)");
+
+	std::srand(114514);
+
+	// Store positions for verification later
+	m_testSplatPositions.clear();
+	m_testSplatPositions.reserve(testSplatCount);
+
+	// Define the range for random Z positions
+	const float minZ   = -4995.0f;
+	const float maxZ   = 5004.0f;
+	const float zRange = maxZ - minZ;
+
+	uint32_t behindCamera    = 0;
+	uint32_t atCamera        = 0;
+	uint32_t inFrontOfCamera = 0;
+	float    nearestZ        = maxZ;
+	float    farthestZ       = minZ;
+	uint32_t nearestIdx      = 0;
+	uint32_t farthestIdx     = 0;
+
+	for (uint32_t i = 0; i < testSplatCount; ++i)
+	{
+		float randomValue = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
+		float z           = minZ + randomValue * zRange;
+
+		// Add some specific test cases to ensure edge cases are covered
+		if (i == 0)
+			z = minZ;        // Ensure we have the minimum Z
+		if (i == 1)
+			z = maxZ;        // Ensure we have the maximum Z
+		if (i == 2)
+			z = 5.0f;        // Ensure we have a splat at camera position
+		if (i == 3)
+			z = 4.99f;        // Very close behind camera
+		if (i == 4)
+			z = 5.01f;        // Very close in front of camera
+		if (i == 5)
+			z = -1000.0f;        // Moderately far behind camera
+		if (i == 6)
+			z = 1000.0f;        // Moderately far in front of camera
+
+		testData->posX[i] = 0.0f;
+		testData->posY[i] = 0.0f;
+		testData->posZ[i] = z;
+
+		// Store position for later verification
+		m_testSplatPositions.push_back({testData->posX[i], testData->posY[i], testData->posZ[i]});
+
+		// Calculate expected view space depth for statistics
+		float viewZ = z - 5.0f;        // Camera at Z=5
+		float depth = -viewZ;
+
+		if (z < 5.0f)
+			behindCamera++;
+		else if (z > 5.0f)
+			inFrontOfCamera++;
+		else
+			atCamera++;
+
+		if (z < nearestZ)
+		{
+			nearestZ   = z;
+			nearestIdx = i;
+		}
+		if (z > farthestZ)
+		{
+			farthestZ   = z;
+			farthestIdx = i;
+		}
+
+		// Log first few random positions
+		if (i < 10)
+		{
+			LOG_INFO("  Splat[{}]: World Z={:.2f}, View Z={:.2f}, Depth={:.2f}",
+			         i, z, viewZ, depth);
+		}
+		else if (i == 10)
+		{
+			LOG_INFO("  ... (omitting remaining entries) ...");
+		}
+
+		float scale         = 0.05f;
+		testData->scaleX[i] = scale;
+		testData->scaleY[i] = scale;
+		testData->scaleZ[i] = scale;
+
+		testData->rotX[i] = 0;
+		testData->rotY[i] = 0;
+		testData->rotZ[i] = 0;
+		testData->rotW[i] = 1;
+
+		testData->fDc0[i] = (i % 3 == 0) ? 1.0f : 0.0f;
+		testData->fDc1[i] = (i % 3 == 1) ? 1.0f : 0.0f;
+		testData->fDc2[i] = (i % 3 == 2) ? 1.0f : 0.0f;
+
+		testData->opacity[i] = 0.8f;
+	}
+
+	LOG_INFO("");
+	LOG_INFO("Random splat distribution statistics:");
+	LOG_INFO("  Total splats: {}", testSplatCount);
+	LOG_INFO("  Behind camera (Z < 5): {} splats", behindCamera);
+	LOG_INFO("  At camera (Z = 5): {} splats", atCamera);
+	LOG_INFO("  In front of camera (Z > 5): {} splats", inFrontOfCamera);
+	LOG_INFO("");
+	LOG_INFO("  Nearest splat: Splat[{}] at Z={:.2f} (depth={:.2f})",
+	         nearestIdx, nearestZ, -(nearestZ - 5.0f));
+	LOG_INFO("  Farthest splat: Splat[{}] at Z={:.2f} (depth={:.2f})",
+	         farthestIdx, farthestZ, -(farthestZ - 5.0f));
+
+	m_scene->AddMesh(testData, math::Identity());
+	m_scene->AllocateGpuBuffers();
+
+	rhi::FenceHandle uploadFence = m_scene->UploadAttributeData();
+	uploadFence->Wait(UINT64_MAX);
+
+	LOG_INFO("Created random test scene with {} splats", testSplatCount);
+}
+
+void HybridSplatRendererApp::InitImGui()
+{
+	// Setup Dear ImGui context
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO &io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+	ImGui::StyleColorsDark();
+
+	io.FontGlobalScale = 1.3f;
+
+	ImGui_ImplGlfw_InitForVulkan(m_deviceManager->GetWindow(), true);
+
+	// Get RHI device
+	rhi::IRHIDevice *device = m_deviceManager->GetDevice();
+
+	// Create ImGui descriptor pool
+	VkDescriptorPoolSize pool_sizes[] = {
+	    {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+	    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+	    {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+	    {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+	    {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+	    {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+	    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+	    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+	    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+	    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+	    {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+
+	VkDescriptorPoolCreateInfo pool_info = {};
+	pool_info.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	pool_info.flags                      = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	pool_info.maxSets                    = 1000;
+	pool_info.poolSizeCount              = std::size(pool_sizes);
+	pool_info.pPoolSizes                 = pool_sizes;
+
+	VkDescriptorPool imguiPool;
+	VkDevice         vkDevice = static_cast<VkDevice>(device->GetNativeDevice());
+	VkResult         result   = vkCreateDescriptorPool(vkDevice, &pool_info, nullptr, &imguiPool);
+	if (result != VK_SUCCESS)
+	{
+		LOG_ERROR("Failed to create ImGui descriptor pool");
+		return;
+	}
+
+	// Store the descriptor pool for cleanup
+	m_imguiDescriptorPool = static_cast<void *>(imguiPool);
+
+	// Setup ImGui Vulkan backend
+	ImGui_ImplVulkan_InitInfo init_info = {};
+	init_info.Instance                  = static_cast<VkInstance>(device->GetNativeInstance());
+	init_info.PhysicalDevice            = static_cast<VkPhysicalDevice>(device->GetNativePhysicalDevice());
+	init_info.Device                    = vkDevice;
+	init_info.QueueFamily               = device->GetGraphicsQueueFamily();
+	init_info.Queue                     = static_cast<VkQueue>(device->GetNativeGraphicsQueue());
+	init_info.DescriptorPool            = imguiPool;
+	init_info.MinImageCount             = 2;
+	init_info.ImageCount                = m_deviceManager->GetSwapchain()->GetImageCount();
+	init_info.UseDynamicRendering       = true;
+
+	// Set up color attachment format for dynamic rendering (new ImGui API: fields in PipelineInfoMain)
+	VkFormat colorFormat                                                      = VK_FORMAT_R8G8B8A8_UNORM;
+	init_info.PipelineInfoMain.MSAASamples                                    = VK_SAMPLE_COUNT_1_BIT;
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo                    = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount    = 1;
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFormat;
+
+	ImGui_ImplVulkan_Init(&init_info);
+
+	LOG_INFO("ImGui initialized successfully");
+}
+
+void HybridSplatRendererApp::ShutdownImGui()
+{
+	// Cleanup ImGui
+	ImGui_ImplVulkan_Shutdown();
+	ImGui_ImplGlfw_Shutdown();
+	ImGui::DestroyContext();
+
+	// Destroy descriptor pool
+	if (m_imguiDescriptorPool && m_deviceManager)
+	{
+		rhi::IRHIDevice *device   = m_deviceManager->GetDevice();
+		VkDevice         vkDevice = static_cast<VkDevice>(device->GetNativeDevice());
+		VkDescriptorPool pool     = static_cast<VkDescriptorPool>(m_imguiDescriptorPool);
+		vkDestroyDescriptorPool(vkDevice, pool, nullptr);
+		m_imguiDescriptorPool = nullptr;
+	}
+}
+
+void HybridSplatRendererApp::UpdateFpsHistory()
+{
+	float currentFps              = static_cast<float>(m_fpsCounter.getFPS());
+	m_fpsHistory[m_fpsHistoryIndex] = currentFps;
+	m_fpsHistoryIndex               = (m_fpsHistoryIndex + 1) % FPS_HISTORY_SIZE;
+}
+
+void HybridSplatRendererApp::RenderImGui()
+{
+	// Start the Dear ImGui frame
+	ImGui_ImplVulkan_NewFrame();
+	ImGui_ImplGlfw_NewFrame();
+	ImGui::NewFrame();
+
+	// Create main control window
+	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(400, 500), ImGuiCond_FirstUseEver);
+
+	if (ImGui::Begin("Hybrid Splat Renderer Controls", &m_showImGui))
+	{
+		ImGui::Text("Performance");
+		ImGui::Separator();
+
+		// FPS display with current value
+		float currentFps = static_cast<float>(m_fpsCounter.getFPS());
+		ImGui::Text("FPS: %.1f", currentFps);
+
+		// FPS graph
+		ImGui::PlotLines("FPS History",
+		                 m_fpsHistory.data(),
+		                 static_cast<int>(FPS_HISTORY_SIZE),
+		                 static_cast<int>(m_fpsHistoryIndex),
+		                 nullptr,
+		                 0.0f,
+		                 120.0f,
+		                 ImVec2(0, 80));
+
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Text("Rendering Controls");
+		ImGui::Separator();
+
+		// Sorting enabled toggle
+		if (ImGui::Checkbox("Enable Sorting", &m_sortingEnabled))
+		{
+			LOG_INFO("Sorting {}", m_sortingEnabled ? "enabled" : "disabled");
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("(?)");
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::SetTooltip("Toggle depth sorting of splats\nDisabling may improve performance but reduce quality");
+		}
+
+		// Sort method selection
+		if (m_sorter)
+		{
+			ImGui::Text("Sort Method:");
+			int         currentMethod = (m_sorter->GetSortMethod() == engine::GpuSplatSorter::SortMethod::Prescan) ? 0 : 1;
+			const char *methods[]     = {"Prescan Radix Sort", "Integrated Scan Radix Sort"};
+
+			if (ImGui::Combo("##SortMethod", &currentMethod, methods, 2))
+			{
+				if (currentMethod == 0)
+				{
+					m_sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::Prescan);
+					LOG_INFO("Switched to Prescan radix sort method");
+				}
+				else
+				{
+					m_sorter->SetSortMethod(engine::GpuSplatSorter::SortMethod::IntegratedScan);
+					LOG_INFO("Switched to Integrated Scan radix sort method");
+				}
+			}
+		}
+
+		ImGui::Spacing();
+
+		// Verification controls
+		ImGui::Text("Verification");
+		if (ImGui::Button("Verify Sorting Result"))
+		{
+			m_verifyNextSort = true;
+			LOG_INFO("Will verify sorting on next frame");
+		}
+
+		ImGui::Spacing();
+		ImGui::Separator();
+
+		ImGui::Text("Scene Information");
+		ImGui::Separator();
+
+		// Scene stats
+		if (m_scene)
+		{
+			ImGui::Text("Total Splats: %u", m_scene->GetTotalSplatCount());
+		}
+		ImGui::Text("Frame Count: %u", m_frameCount);
+
+		ImGui::Spacing();
+
+		// Application info
+		ImGui::Separator();
+		ImGui::Text("Controls Help");
+		ImGui::Separator();
+		ImGui::BulletText("WASD: Move camera");
+		ImGui::BulletText("Mouse: Look around");
+		ImGui::BulletText("ESC: Exit application");
+		ImGui::BulletText("H: Toggle this UI");
+		ImGui::BulletText("SPACE: Toggle sorting");
+		ImGui::BulletText("M: Switch sort method");
+		ImGui::BulletText("V: Verify sorting");
+		ImGui::BulletText("B: Toggle benchmark mode");
+	}
+	ImGui::End();
+
+	ImGui::Render();
+}
+
+void HybridSplatRendererApp::RenderImGuiToCommandBuffer(rhi::IRHICommandList *cmdList)
+{
+	VkCommandBuffer vkCmdBuf = static_cast<VkCommandBuffer>(cmdList->GetNativeCommandBuffer());
+	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkCmdBuf);
+}

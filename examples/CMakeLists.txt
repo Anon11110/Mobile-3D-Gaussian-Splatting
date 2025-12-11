@@ -23,3 +23,6 @@ add_subdirectory(perf-tests)
 
 # Add GPU sorting renderer example
 add_subdirectory(gpu-sorting-renderer)
+
+# Add hybrid splat renderer example (CPU + GPU sorting)
+add_subdirectory(hybrid-splat-renderer)
