@@ -3,9 +3,9 @@
 #include "core/log.h"
 #include <GLFW/glfw3.h>
 #include <chrono>
-#include <msplat/engine/gpu_splat_sorter.h>
-#include <msplat/engine/scene.h>
-#include <msplat/engine/splat_loader.h>
+#include <msplat/engine/scene/scene.h>
+#include <msplat/engine/sorting/gpu_splat_sorter.h>
+#include <msplat/engine/splat/splat_loader.h>
 #include <vulkan/vulkan.h>
 
 GpuSortingRendererApp::GpuSortingRendererApp()
@@ -729,9 +729,9 @@ void GpuSortingRendererApp::InitImGui()
 	init_info.UseDynamicRendering       = true;
 
 	// Set up color attachment format for dynamic rendering (new ImGui API: fields in PipelineInfoMain)
-	VkFormat colorFormat                                                      = VK_FORMAT_R8G8B8A8_UNORM;
-	init_info.PipelineInfoMain.MSAASamples                                    = VK_SAMPLE_COUNT_1_BIT;
-	init_info.PipelineInfoMain.PipelineRenderingCreateInfo                    = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
+	VkFormat colorFormat                                                           = VK_FORMAT_R8G8B8A8_UNORM;
+	init_info.PipelineInfoMain.MSAASamples                                         = VK_SAMPLE_COUNT_1_BIT;
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo                         = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
 	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount    = 1;
 	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFormat;
 

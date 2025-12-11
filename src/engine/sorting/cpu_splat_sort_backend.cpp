@@ -1,6 +1,6 @@
 #include <msplat/core/log.h>
-#include <msplat/engine/scene.h>
-#include <msplat/engine/splat_sort_backend.h>
+#include <msplat/engine/scene/scene.h>
+#include <msplat/engine/sorting/splat_sort_backend.h>
 
 namespace msplat::engine
 {

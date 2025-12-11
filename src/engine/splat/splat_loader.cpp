@@ -3,7 +3,7 @@
 #include <msplat/core/containers/string.h>
 #include <msplat/core/containers/vector.h>
 #include <msplat/core/log.h>
-#include <msplat/engine/splat_loader.h>
+#include <msplat/engine/splat/splat_loader.h>
 
 #include <miniply.h>
 

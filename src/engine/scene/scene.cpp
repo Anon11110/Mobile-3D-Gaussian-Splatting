@@ -1,8 +1,8 @@
 #include <msplat/core/log.h>
 #include <msplat/core/math/math.h>
-#include <msplat/engine/cpu_splat_sorter.h>
-#include <msplat/engine/scene.h>
-#include <msplat/engine/splat_math.h>
+#include <msplat/engine/scene/scene.h>
+#include <msplat/engine/sorting/cpu_splat_sorter.h>
+#include <msplat/engine/splat/splat_math.h>
 
 namespace msplat::engine
 {

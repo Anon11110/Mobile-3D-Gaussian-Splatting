@@ -2,8 +2,8 @@
 #include <cstring>
 #include <msplat/core/containers/vector.h>
 #include <msplat/core/log.h>
-#include <msplat/engine/gpu_splat_sorter.h>
-#include <msplat/engine/shader_factory.h>
+#include <msplat/engine/rendering/shader_factory.h>
+#include <msplat/engine/sorting/gpu_splat_sorter.h>
 
 namespace msplat::engine
 {

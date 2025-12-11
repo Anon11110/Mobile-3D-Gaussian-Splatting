@@ -6,7 +6,7 @@
 #include "core/containers/vector.h"
 #include "core/math/math.h"
 #include "core/timer.h"
-#include "engine/shader_factory.h"
+#include "engine/rendering/shader_factory.h"
 
 namespace rhi
 {

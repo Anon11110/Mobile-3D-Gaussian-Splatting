@@ -4,8 +4,8 @@
 #include "app/camera.h"
 #include "core/containers/memory.h"
 #include "core/timer.h"
-#include "engine/scene.h"
-#include "engine/shader_factory.h"
+#include "engine/rendering/shader_factory.h"
+#include "engine/scene/scene.h"
 #include "rhi/rhi.h"
 #include "shaders/shaderio.h"
 

@@ -5,9 +5,9 @@
 #include <msplat/core/containers/filesystem.h>
 #include <msplat/core/containers/memory.h>
 #include <msplat/core/containers/vector.h>
-#include <msplat/engine/cpu_splat_sorter.h>
-#include <msplat/engine/splat_loader.h>
-#include <msplat/engine/splat_mesh.h>
+#include <msplat/engine/sorting/cpu_splat_sorter.h>
+#include <msplat/engine/splat/splat_loader.h>
+#include <msplat/engine/splat/splat_mesh.h>
 #include <mutex>
 #include <rhi/rhi.h>
 

@@ -3,9 +3,10 @@
 #include "core/log.h"
 #include <GLFW/glfw3.h>
 #include <chrono>
-#include <msplat/engine/scene.h>
-#include <msplat/engine/splat_loader.h>
-#include <msplat/engine/splat_sort_backend.h>
+#include <msplat/engine/scene/scene.h>
+#include <msplat/engine/sorting/splat_sort_backend.h>
+#include <msplat/engine/splat/splat_loader.h>
+#include <thread>
 #include <vulkan/vulkan.h>
 
 HybridSplatRendererApp::HybridSplatRendererApp()
@@ -18,6 +19,8 @@ HybridSplatRendererApp &HybridSplatRendererApp::operator=(HybridSplatRendererApp
 
 bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 {
+	LOG_INFO("=== HybridSplatRendererApp Initialization ===");
+
 	m_deviceManager = deviceManager;
 
 	rhi::IRHIDevice *device = deviceManager->GetDevice();
@@ -53,11 +56,26 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 		indicesDesc.usage = rhi::BufferUsage::STORAGE;
 		m_sortedIndices   = device->CreateBuffer(indicesDesc);
 
-		// Create and initialize GPU backend
-		m_backend = container::make_unique<engine::GpuSplatSortBackend>();
+		// Create and initialize GPU backend with CPU fallback
+		m_backend            = container::make_unique<engine::GpuSplatSortBackend>();
+		m_currentBackendType = BackendType::GPU;
+
 		if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount()))
 		{
-			LOG_ERROR("Failed to initialize GPU sort backend");
+			LOG_WARNING("GPU backend failed to initialize, attempting CPU fallback");
+
+			// Try CPU backend as fallback
+			m_backend = container::make_unique<engine::CpuSplatSortBackend>();
+			if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount()))
+			{
+				LOG_ERROR("CPU backend also failed to initialize - sorting unavailable");
+				m_backend.reset();
+			}
+			else
+			{
+				m_currentBackendType = BackendType::CPU;
+				LOG_INFO("Fell back to CPU backend for {} splats", m_scene->GetTotalSplatCount());
+			}
 		}
 		else
 		{
@@ -184,6 +202,14 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 
 	InitImGui();
 
+	// Log initialization summary
+	LOG_INFO("Window size: {}x{}", width, height);
+	LOG_INFO("Backend: {} ({})",
+	         m_backend ? m_backend->GetName() : "None",
+	         m_backend ? m_backend->GetMethodName() : "N/A");
+	LOG_INFO("Splats loaded: {}", m_scene ? m_scene->GetTotalSplatCount() : 0);
+	LOG_INFO("=== Initialization Complete ===");
+
 	return true;
 }
 
@@ -264,18 +290,28 @@ void HybridSplatRendererApp::OnRender()
 
 	m_fpsCounter.frame();
 
-	// Acquire next image (skip in benchmark mode)
+	// Handle framebuffer resize
+	if (m_framebufferResized)
+	{
+		m_framebufferResized = false;
+		RecreateSwapchain();
+		return;
+	}
+
+	// Acquire next image (skip in vsync bypass mode)
 	uint32_t acquireSemIndex = m_frameCount % m_imageAvailableSemaphores.size();
 	uint32_t imageIndex      = 0;
 
-	if (!m_benchmarkMode)
+	if (!m_vsyncBypassMode)
 	{
 		rhi::SwapchainStatus status = swapchain->AcquireNextImage(
 		    imageIndex,
 		    m_imageAvailableSemaphores[acquireSemIndex].Get());
 
-		if (status == rhi::SwapchainStatus::OUT_OF_DATE)
+		if (status == rhi::SwapchainStatus::OUT_OF_DATE ||
+		    status == rhi::SwapchainStatus::SUBOPTIMAL)
 		{
+			RecreateSwapchain();
 			return;
 		}
 	}
@@ -323,6 +359,13 @@ void HybridSplatRendererApp::OnRender()
 				LOG_ERROR("Sorting verification failed - check logs for details");
 			}
 			m_verifyNextSort = false;
+		}
+
+		// Handle cross-backend verification if requested
+		if (m_crossBackendVerifyRequested && m_crossBackendVerifyEnabled)
+		{
+			PerformCrossBackendVerification();
+			m_crossBackendVerifyRequested = false;
 		}
 	}
 
@@ -406,7 +449,7 @@ void HybridSplatRendererApp::OnRender()
 	rhi::SubmitInfo submitInfo = {};
 	submitInfo.signalFence     = m_inFlightFence.Get();
 
-	if (!m_benchmarkMode)
+	if (!m_vsyncBypassMode)
 	{
 		// Normal mode: wait for image available and signal when rendering is done
 		rhi::SemaphoreWaitInfo waitInfo = {};
@@ -420,8 +463,8 @@ void HybridSplatRendererApp::OnRender()
 
 	device->SubmitCommandLists({&cmdList, 1}, rhi::QueueType::GRAPHICS, submitInfo);
 
-	// Present (skip in benchmark mode to remove vsync bottleneck)
-	if (!m_benchmarkMode)
+	// Present (skip in vsync bypass mode)
+	if (!m_vsyncBypassMode)
 	{
 		swapchain->Present(imageIndex, m_renderFinishedSemaphores[imageIndex].Get());
 	}
@@ -431,6 +474,9 @@ void HybridSplatRendererApp::OnRender()
 
 void HybridSplatRendererApp::OnShutdown()
 {
+	LOG_INFO("=== HybridSplatRendererApp Shutdown ===");
+	LOG_INFO("Total frames rendered: {}", m_frameCount);
+
 	if (m_deviceManager)
 	{
 		rhi::IRHIDevice *device = m_deviceManager->GetDevice();
@@ -464,6 +510,8 @@ void HybridSplatRendererApp::OnShutdown()
 	m_renderFinishedSemaphores.clear();
 	m_inFlightFence = nullptr;
 	m_commandLists.clear();
+
+	LOG_INFO("=== Shutdown Complete ===");
 }
 
 void HybridSplatRendererApp::OnKey(int key, int action, int mods)
@@ -513,9 +561,9 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 				break;
 
 			case GLFW_KEY_B:
-				// Toggle benchmark mode (skip present to remove vsync limit)
-				m_benchmarkMode = !m_benchmarkMode;
-				LOG_INFO("Benchmark mode {}", m_benchmarkMode ? "enabled (no vsync)" : "disabled (vsync on)");
+				// Toggle vsync bypass mode (skip present to remove vsync limit)
+				m_vsyncBypassMode = !m_vsyncBypassMode;
+				LOG_INFO("Vsync bypass {}", m_vsyncBypassMode ? "enabled" : "disabled");
 				m_fpsCounter.reset();
 				break;
 
@@ -537,6 +585,23 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 				LOG_INFO("ImGui {}", m_showImGui ? "shown" : "hidden");
 				break;
 
+			case GLFW_KEY_X:
+				// Toggle cross-backend verification mode
+				if (m_currentBackendType == BackendType::GPU)
+				{
+					m_crossBackendVerifyEnabled = !m_crossBackendVerifyEnabled;
+					LOG_INFO("Cross-backend verification {}", m_crossBackendVerifyEnabled ? "enabled" : "disabled");
+					if (m_crossBackendVerifyEnabled)
+					{
+						m_crossBackendVerifyRequested = true;
+					}
+				}
+				else
+				{
+					LOG_WARNING("Cross-backend verification only available when GPU backend is active");
+				}
+				break;
+
 			case GLFW_KEY_ESCAPE:
 				// Exit application
 				glfwSetWindowShouldClose(m_deviceManager->GetWindow(), GLFW_TRUE);
@@ -553,6 +618,13 @@ void HybridSplatRendererApp::OnMouseButton(int button, int action, int mods)
 void HybridSplatRendererApp::OnMouseMove(double xpos, double ypos)
 {
 	m_camera.OnMouseMove(xpos, ypos);
+}
+
+void HybridSplatRendererApp::OnFramebufferResize(int width, int height)
+{
+	(void) width;
+	(void) height;
+	m_framebufferResized = true;
 }
 
 void HybridSplatRendererApp::LoadSplatFile(const char *filepath)
@@ -712,6 +784,156 @@ void HybridSplatRendererApp::CreateTestSplatData()
 	uploadFence->Wait(UINT64_MAX);
 
 	LOG_INFO("Created random test scene with {} splats", testSplatCount);
+}
+
+void HybridSplatRendererApp::RecreateSwapchain()
+{
+	rhi::IRHIDevice    *device    = m_deviceManager->GetDevice();
+	rhi::IRHISwapchain *swapchain = m_deviceManager->GetSwapchain();
+
+	// Wait for all GPU work to complete
+	device->WaitIdle();
+
+	// Get new window dimensions
+	int width, height;
+	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+
+	// Wait if window is minimized
+	while (width == 0 || height == 0)
+	{
+		glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+		glfwWaitEvents();
+	}
+
+	// Resize swapchain
+	swapchain->Resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+
+	// Update camera aspect ratio
+	float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+	m_camera.SetPerspectiveProjection(45.0f, aspectRatio, 0.1f, 1000.0f);
+
+	LOG_INFO("Swapchain resized: {}x{}", width, height);
+}
+
+void HybridSplatRendererApp::PerformCrossBackendVerification()
+{
+	if (m_currentBackendType != BackendType::GPU || !m_backend || !m_scene)
+	{
+		m_crossBackendVerifyResult = "Verification requires GPU backend";
+		return;
+	}
+
+	rhi::IRHIDevice *device     = m_deviceManager->GetDevice();
+	uint32_t         splatCount = m_scene->GetTotalSplatCount();
+
+	LOG_INFO("=== Cross-Backend Verification ===");
+	LOG_INFO("Comparing GPU sort with CPU reference for {} splats", splatCount);
+
+	// Step 1: Create staging buffer and copy GPU sorted indices
+	rhi::BufferDesc stagingDesc{};
+	stagingDesc.size          = splatCount * sizeof(uint32_t);
+	stagingDesc.usage         = rhi::BufferUsage::TRANSFER_DST;        // Buffer receives data via copy
+	stagingDesc.resourceUsage = rhi::ResourceUsage::Readback;
+	auto stagingBuffer        = device->CreateBuffer(stagingDesc);
+
+	// Copy GPU buffer to staging
+	auto cmdList = device->CreateCommandList(rhi::QueueType::GRAPHICS);
+	cmdList->Begin();
+
+	rhi::BufferCopy copyRegion{};
+	copyRegion.srcOffset = 0;
+	copyRegion.dstOffset = 0;
+	copyRegion.size      = splatCount * sizeof(uint32_t);
+
+	std::array<rhi::BufferCopy, 1> regions = {copyRegion};
+	cmdList->CopyBuffer(m_sortedIndices.Get(), stagingBuffer.Get(), regions);
+
+	cmdList->End();
+
+	std::array<rhi::IRHICommandList *, 1> cmdLists = {cmdList.Get()};
+	device->SubmitCommandLists(cmdLists, rhi::QueueType::GRAPHICS);
+	device->WaitIdle();
+
+	// Map and read GPU indices
+	container::vector<uint32_t> gpuIndices(splatCount);
+	void                       *mappedData = stagingBuffer->Map();
+	if (mappedData)
+	{
+		memcpy(gpuIndices.data(), mappedData, splatCount * sizeof(uint32_t));
+		stagingBuffer->Unmap();
+	}
+	else
+	{
+		m_crossBackendVerifyResult = "Failed to map staging buffer";
+		LOG_ERROR("{}", m_crossBackendVerifyResult);
+		return;
+	}
+
+	// Step 2: Run CPU sort with same camera
+	auto cpuBackend = container::make_unique<engine::CpuSplatSortBackend>();
+	if (!cpuBackend->Initialize(device, m_scene.get(), m_sortedIndices, splatCount))
+	{
+		m_crossBackendVerifyResult = "Failed to initialize CPU backend for verification";
+		LOG_ERROR("{}", m_crossBackendVerifyResult);
+		return;
+	}
+
+	// Trigger CPU sort
+	cpuBackend->Update(m_camera);
+
+	// Wait for CPU sort to complete (poll until done)
+	int maxWaitMs = 5000;
+	int waitedMs  = 0;
+	while (!cpuBackend->IsSortComplete() && waitedMs < maxWaitMs)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		waitedMs += 10;
+	}
+
+	if (!cpuBackend->IsSortComplete())
+	{
+		m_crossBackendVerifyResult = "CPU sort timed out";
+		LOG_ERROR("{}", m_crossBackendVerifyResult);
+		return;
+	}
+
+	// Get CPU sorted indices from Scene's CPU sorter
+	auto cpuSortedIndices = m_scene->GetCpuSortedIndices();
+
+	// Step 3: Compare results
+	uint32_t mismatches    = 0;
+	uint32_t firstMismatch = UINT32_MAX;
+	for (uint32_t i = 0; i < splatCount && i < cpuSortedIndices.size(); ++i)
+	{
+		if (gpuIndices[i] != cpuSortedIndices[i])
+		{
+			if (mismatches < 10)
+			{
+				LOG_WARNING("  Mismatch at [{}]: GPU={}, CPU={}", i, gpuIndices[i], cpuSortedIndices[i]);
+			}
+			if (firstMismatch == UINT32_MAX)
+			{
+				firstMismatch = i;
+			}
+			mismatches++;
+		}
+	}
+
+	// Report results
+	if (mismatches == 0)
+	{
+		m_crossBackendVerifyResult = "PASSED - GPU and CPU results match";
+		LOG_INFO("Cross-backend verification PASSED");
+	}
+	else
+	{
+		m_crossBackendVerifyResult =
+		    "FAILED - " + std::to_string(mismatches) + " mismatches (first at " + std::to_string(firstMismatch) + ")";
+		// Use LOG_WARNING instead of LOG_ERROR to avoid aborting - mismatches may be due to sort stability differences
+		LOG_WARNING("Cross-backend verification FAILED: {} mismatches out of {} indices", mismatches, splatCount);
+	}
+
+	LOG_INFO("=== Verification Complete ===");
 }
 
 void HybridSplatRendererApp::InitImGui()
@@ -906,6 +1128,27 @@ void HybridSplatRendererApp::RenderImGui()
 			LOG_INFO("Will verify sorting on next frame");
 		}
 
+		// Cross-backend verification (only available with GPU backend)
+		if (m_currentBackendType == BackendType::GPU)
+		{
+			ImGui::SameLine();
+			if (ImGui::Checkbox("Cross-Backend", &m_crossBackendVerifyEnabled))
+			{
+				if (m_crossBackendVerifyEnabled)
+				{
+					m_crossBackendVerifyRequested = true;
+				}
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Compare GPU sort results with CPU reference");
+			}
+			if (!m_crossBackendVerifyResult.empty())
+			{
+				ImGui::Text("Result: %s", m_crossBackendVerifyResult.c_str());
+			}
+		}
+
 		ImGui::Spacing();
 		ImGui::Separator();
 
@@ -933,7 +1176,8 @@ void HybridSplatRendererApp::RenderImGui()
 		ImGui::BulletText("C: Switch backend (CPU/GPU)");
 		ImGui::BulletText("M: Switch GPU sort method");
 		ImGui::BulletText("V: Verify sorting");
-		ImGui::BulletText("B: Toggle benchmark mode");
+		ImGui::BulletText("X: Toggle cross-backend verify");
+		ImGui::BulletText("B: Toggle vsync bypass");
 	}
 	ImGui::End();
 

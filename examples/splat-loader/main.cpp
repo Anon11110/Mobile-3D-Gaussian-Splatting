@@ -1,7 +1,7 @@
 #include <filesystem>
 #include <msplat/core/log.h>
 #include <msplat/core/timer.h>
-#include <msplat/engine/splat_loader.h>
+#include <msplat/engine/splat/splat_loader.h>
 
 void LoadAndDisplaySplatFile(const std::filesystem::path &plyPath)
 {

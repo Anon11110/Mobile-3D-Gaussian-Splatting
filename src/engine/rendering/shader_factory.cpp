@@ -1,5 +1,5 @@
 #include <msplat/core/log.h>
-#include <msplat/engine/shader_factory.h>
+#include <msplat/engine/rendering/shader_factory.h>
 #include <sstream>
 
 namespace msplat::engine

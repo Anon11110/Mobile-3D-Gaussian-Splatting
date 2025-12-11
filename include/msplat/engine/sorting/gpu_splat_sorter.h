@@ -2,7 +2,7 @@
 
 #include <msplat/app/camera.h>
 #include <msplat/core/containers/vector.h>
-#include <msplat/engine/scene.h>
+#include <msplat/engine/scene/scene.h>
 #include <rhi/rhi.h>
 
 namespace msplat::engine

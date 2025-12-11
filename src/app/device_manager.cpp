@@ -135,10 +135,13 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
 
 static void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 	auto* manager = static_cast<DeviceManager*>(glfwGetWindowUserPointer(window));
-	if (manager && manager->GetSwapchain()) {
-		if (width > 0 && height > 0) {
+	if (manager) {
+		if (manager->GetSwapchain() && width > 0 && height > 0) {
 			manager->GetDevice()->WaitIdle();
 			manager->GetSwapchain()->Resize(width, height);
+		}
+		if (manager->m_app) {
+			manager->m_app->OnFramebufferResize(width, height);
 		}
 	}
 }

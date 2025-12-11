@@ -12,7 +12,7 @@
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
-#include <msplat/engine/shader_factory.h>
+#include <msplat/engine/rendering/shader_factory.h>
 
 namespace rhi
 {

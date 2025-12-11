@@ -60,6 +60,19 @@ public:
 	 * @param ypos The new y-coordinate of the mouse cursor.
 	 */
 	virtual void OnMouseMove(double xpos, double ypos) = 0;
+
+	/**
+	 * @brief Handles framebuffer resize events.
+	 * @param width The new framebuffer width.
+	 * @param height The new framebuffer height.
+	 *
+	 * Default implementation does nothing. Override to handle resize events.
+	 */
+	virtual void OnFramebufferResize(int width, int height)
+	{
+		(void) width;
+		(void) height;
+	}
 };
 
 } // namespace msplat::app

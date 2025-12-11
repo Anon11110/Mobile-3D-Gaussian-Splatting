@@ -1,4 +1,4 @@
-#include <msplat/engine/splat_mesh.h>
+#include <msplat/engine/splat/splat_mesh.h>
 
 namespace msplat::engine
 {

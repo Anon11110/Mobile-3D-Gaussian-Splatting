@@ -4,7 +4,7 @@
 #include <memory>
 #include <msplat/core/containers/filesystem.h>
 #include <msplat/core/containers/memory.h>
-#include <msplat/engine/splat_soa.h>
+#include <msplat/engine/splat/splat_soa.h>
 
 namespace msplat::engine
 {

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <msplat/core/containers/memory.h>
 #include <msplat/core/math/matrix.h>
-#include <msplat/engine/splat_soa.h>
+#include <msplat/engine/splat/splat_soa.h>
 
 namespace msplat::engine
 {

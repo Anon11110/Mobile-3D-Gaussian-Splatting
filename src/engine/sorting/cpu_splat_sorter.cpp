@@ -1,7 +1,7 @@
-#include "engine/cpu_splat_sorter.h"
+#include "engine/sorting/cpu_splat_sorter.h"
 #include "core/log.h"
 #include "core/parallel.h"
-#include "engine/splat_math.h"
+#include "engine/splat/splat_math.h"
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>

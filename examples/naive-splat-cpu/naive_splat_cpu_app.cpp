@@ -1,7 +1,7 @@
 #include "naive_splat_cpu_app.h"
 #include "app/device_manager.h"
 #include "core/log.h"
-#include "engine/splat_loader.h"
+#include "engine/splat/splat_loader.h"
 #include <stdexcept>
 
 #include <GLFW/glfw3.h>
@@ -20,7 +20,7 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 	m_scene = msplat::container::make_unique<engine::Scene>(device);
 	engine::SplatLoader loader;
 	// auto future = loader.Load("assets/flowers_1.ply");
-	auto future = loader.Load("assets/train_7000.ply");
+	auto future    = loader.Load("assets/train_7000.ply");
 	auto splatData = future.get();
 	if (!splatData || splatData->empty())
 	{

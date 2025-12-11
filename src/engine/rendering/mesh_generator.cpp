@@ -2,7 +2,7 @@
 #include <msplat/core/containers/unordered_map.h>
 #include <msplat/core/containers/unordered_set.h>
 #include <msplat/core/containers/vector.h>
-#include <msplat/engine/mesh_generator.h>
+#include <msplat/engine/rendering/mesh_generator.h>
 
 namespace msplat::engine
 {

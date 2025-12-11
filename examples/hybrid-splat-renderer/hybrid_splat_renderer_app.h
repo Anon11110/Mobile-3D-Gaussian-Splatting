@@ -12,7 +12,7 @@
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
-#include <msplat/engine/shader_factory.h>
+#include <msplat/engine/rendering/shader_factory.h>
 
 namespace rhi
 {
@@ -69,6 +69,7 @@ class HybridSplatRendererApp : public app::IApplication
 	void OnKey(int key, int action, int mods) override;
 	void OnMouseButton(int button, int action, int mods) override;
 	void OnMouseMove(double xpos, double ypos) override;
+	void OnFramebufferResize(int width, int height) override;
 
   private:
 	void LoadSplatFile(const char *filepath);
@@ -106,12 +107,16 @@ class HybridSplatRendererApp : public app::IApplication
 
 	timer::Timer      m_applicationTimer;
 	timer::FPSCounter m_fpsCounter;
-	bool              m_sortingEnabled           = true;
-	bool              m_verifyNextSort           = false;
-	bool              m_checkVerificationResults = false;
-	bool              m_useSimpleVerification    = true;
-	bool              m_benchmarkMode            = false;        // Skip present for benchmarking
-	uint32_t          m_frameCount               = 0;
+	bool              m_sortingEnabled              = true;
+	bool              m_verifyNextSort              = false;
+	bool              m_checkVerificationResults    = false;
+	bool              m_useSimpleVerification       = true;
+	bool              m_vsyncBypassMode             = false;        // Skip present (no vsync)
+	bool              m_framebufferResized          = false;        // Window resize detected
+	bool              m_crossBackendVerifyEnabled   = false;        // Cross-backend verification mode
+	bool              m_crossBackendVerifyRequested = false;        // Run verification on next frame
+	container::string m_crossBackendVerifyResult;                   // Last verification result
+	uint32_t          m_frameCount = 0;
 
 	container::vector<math::vec3> m_testSplatPositions;
 
@@ -129,4 +134,6 @@ class HybridSplatRendererApp : public app::IApplication
 	void RenderImGui();
 	void RenderImGuiToCommandBuffer(rhi::IRHICommandList *cmdList);
 	void UpdateFpsHistory();
+	void RecreateSwapchain();
+	void PerformCrossBackendVerification();
 };

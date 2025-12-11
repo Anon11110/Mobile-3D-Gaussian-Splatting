@@ -1,8 +1,8 @@
 #include <filesystem>
 #include <msplat/core/log.h>
 #include <msplat/core/timer.h>
-#include <msplat/engine/splat_loader.h>
-#include <msplat/engine/scene.h>
+#include <msplat/engine/splat/splat_loader.h>
+#include <msplat/engine/scene/scene.h>
 #include <msplat/core/math/matrix.h>
 #include <rhi/rhi.h>
 #include <thread>

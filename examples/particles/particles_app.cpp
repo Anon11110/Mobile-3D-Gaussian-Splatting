@@ -5,8 +5,8 @@
 #include "app/device_manager.h"
 #include "core/containers/array.h"
 #include "core/log.h"
-#include "engine/mesh_generator.h"
-#include "engine/shader_factory.h"
+#include "engine/rendering/mesh_generator.h"
+#include "engine/rendering/shader_factory.h"
 #include "particles_app.h"
 #include "rhi/rhi.h"
 

@@ -1,7 +1,7 @@
 #include <array>
 #include <msplat/core/log.h>
-#include <msplat/engine/gpu_splat_sorter.h>
-#include <msplat/engine/splat_sort_backend.h>
+#include <msplat/engine/sorting/gpu_splat_sorter.h>
+#include <msplat/engine/sorting/splat_sort_backend.h>
 
 namespace msplat::engine
 {

@@ -3,7 +3,7 @@
 
 #include "app/device_manager.h"
 #include "core/log.h"
-#include "engine/shader_factory.h"
+#include "engine/rendering/shader_factory.h"
 #include "rhi/rhi.h"
 #include "triangle_app.h"
 
