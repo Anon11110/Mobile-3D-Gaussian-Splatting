@@ -726,14 +726,14 @@ void GpuSortingRendererApp::InitImGui()
 	init_info.DescriptorPool            = imguiPool;
 	init_info.MinImageCount             = 2;
 	init_info.ImageCount                = deviceManager->GetSwapchain()->GetImageCount();
-	init_info.MSAASamples               = VK_SAMPLE_COUNT_1_BIT;
 	init_info.UseDynamicRendering       = true;
 
-	// Set up color attachment format for dynamic rendering
-	VkFormat colorFormat                                          = VK_FORMAT_R8G8B8A8_UNORM;
-	init_info.PipelineRenderingCreateInfo                         = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
-	init_info.PipelineRenderingCreateInfo.colorAttachmentCount    = 1;
-	init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFormat;
+	// Set up color attachment format for dynamic rendering (new ImGui API: fields in PipelineInfoMain)
+	VkFormat colorFormat                                                      = VK_FORMAT_R8G8B8A8_UNORM;
+	init_info.PipelineInfoMain.MSAASamples                                    = VK_SAMPLE_COUNT_1_BIT;
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo                    = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount    = 1;
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFormat;
 
 	ImGui_ImplVulkan_Init(&init_info);
 
