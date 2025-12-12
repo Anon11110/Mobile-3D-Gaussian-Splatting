@@ -59,6 +59,8 @@ class Scene
 	bool                            IsCpuSortComplete() const;
 	container::span<const uint32_t> GetCpuSortedIndices();
 
+	bool VerifyCpuSortOrder(const math::mat4 &viewMatrix) const;
+
 	template <typename Func>
 	void ForEachMesh(Func &&f) const;
 
@@ -79,6 +81,9 @@ class Scene
 	// CPU-side data for sorting
 	container::vector<math::vec3>         splatPositions;
 	container::unique_ptr<CpuSplatSorter> cpuSplatSorter;
+
+	// Store last sorted indices for verification
+	mutable container::vector<uint32_t> lastSortedIndices;
 
 	uint32_t CalculateMaxShCoeffsPerSplat() const;
 	void     UpdateSplatPositions();

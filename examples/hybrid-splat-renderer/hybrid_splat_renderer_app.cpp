@@ -53,7 +53,7 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	{
 		rhi::BufferDesc indicesDesc{};
 		indicesDesc.size  = m_scene->GetTotalSplatCount() * sizeof(uint32_t);
-		indicesDesc.usage = rhi::BufferUsage::STORAGE;
+		indicesDesc.usage = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST | rhi::BufferUsage::TRANSFER_SRC;
 		m_sortedIndices   = device->CreateBuffer(indicesDesc);
 
 		// Create and initialize GPU backend with CPU fallback
@@ -342,13 +342,10 @@ void HybridSplatRendererApp::OnRender()
 	// Perform GPU sorting if enabled
 	if (m_backend && m_sortingEnabled)
 	{
-		// Update sort via backend (handles compute dispatches and buffer copy internally)
-		m_backend->Update(m_camera);
-
-		// Handle verification if requested
-		if (m_verifyNextSort)
+		// Check verification results from previous frame if pending
+		if (m_checkVerificationResults)
 		{
-			LOG_INFO("Verifying sorting...");
+			LOG_INFO("Checking sorting verification results...");
 			bool sortingCorrect = m_backend->VerifySort();
 			if (sortingCorrect)
 			{
@@ -357,6 +354,35 @@ void HybridSplatRendererApp::OnRender()
 			else
 			{
 				LOG_ERROR("Sorting verification failed - check logs for details");
+			}
+			m_checkVerificationResults = false;
+		}
+
+		m_backend->Update(m_camera);
+
+		// Prepare verification if requested
+		if (m_verifyNextSort)
+		{
+			if (auto *gpuBackend = dynamic_cast<engine::GpuSplatSortBackend *>(m_backend.get()))
+			{
+				// GPU backend: PrepareVerification on graphics command list, check results next frame
+				LOG_INFO("Preparing GPU sorting verification...");
+				gpuBackend->PrepareVerification(cmdList);
+				m_checkVerificationResults = true;
+			}
+			else
+			{
+				// CPU backend: Verify directly (no GPU preparation needed)
+				LOG_INFO("Verifying CPU sorting...");
+				bool sortingCorrect = m_backend->VerifySort();
+				if (sortingCorrect)
+				{
+					LOG_INFO("CPU sorting verification completed successfully");
+				}
+				else
+				{
+					LOG_ERROR("CPU sorting verification failed - check logs for details");
+				}
 			}
 			m_verifyNextSort = false;
 		}

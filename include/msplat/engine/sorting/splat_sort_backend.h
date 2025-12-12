@@ -121,6 +121,16 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	bool        HasComprehensiveVerification() const override;
 	bool        RunComprehensiveVerification() override;
 
+	void RequestVerification();
+
+	// Prepare verification within an external command list
+	void PrepareVerification(rhi::IRHICommandList *cmdList);
+
+	GpuSplatSorter *GetSorter() const
+	{
+		return m_sorter.get();
+	}
+
   private:
 	rhi::IRHIDevice  *m_device = nullptr;
 	Scene            *m_scene  = nullptr;
@@ -129,6 +139,10 @@ class GpuSplatSortBackend : public ISplatSortBackend
 
 	container::unique_ptr<GpuSplatSorter> m_sorter;
 	int                                   m_currentMethod = 1;        // Default: IntegratedScan
+
+	// Verification state
+	bool m_prepareVerification  = false;
+	bool m_verificationPrepared = false;
 };
 
 /// CPU backend implementation using Scene's CpuSplatSorter
@@ -151,6 +165,8 @@ class CpuSplatSortBackend : public ISplatSortBackend
 	const char *GetName() const override;
 	const char *GetMethodName() const override;
 
+	bool VerifySort() override;
+
   private:
 	rhi::IRHIDevice  *m_device = nullptr;
 	Scene            *m_scene  = nullptr;
@@ -162,6 +178,9 @@ class CpuSplatSortBackend : public ISplatSortBackend
 	float        m_lastSortDurationMs   = 0.0f;
 	float        m_lastUploadDurationMs = 0.0f;
 	bool         m_sortInProgress       = false;
+
+	// Store last view matrix for verification
+	math::mat4 m_lastViewMatrix{math::Identity()};
 };
 
 }        // namespace msplat::engine

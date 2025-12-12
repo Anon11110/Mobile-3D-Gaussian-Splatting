@@ -90,7 +90,29 @@ bool GpuSplatSortBackend::VerifySort()
 	{
 		return false;
 	}
+
+	if (!m_verificationPrepared)
+	{
+		LOG_WARNING("Verification not prepared - call RequestVerification() first, then Update()");
+		return false;
+	}
+
+	m_verificationPrepared = false;
 	return m_sorter->VerifySortOrder();
+}
+
+void GpuSplatSortBackend::RequestVerification()
+{
+	m_prepareVerification = true;
+}
+
+void GpuSplatSortBackend::PrepareVerification(rhi::IRHICommandList *cmdList)
+{
+	if (m_sorter)
+	{
+		m_sorter->PrepareVerification(cmdList);
+		m_verificationPrepared = true;
+	}
 }
 
 void GpuSplatSortBackend::SetSortMethod(int method)
@@ -124,9 +146,7 @@ bool GpuSplatSortBackend::RunComprehensiveVerification()
 	{
 		return false;
 	}
-	// Note: PrepareVerification requires a command list, which would need
-	// to be called from within a command buffer recording context.
-	// For now, just use simple verification.
+
 	return m_sorter->VerifySortOrder();
 }
 

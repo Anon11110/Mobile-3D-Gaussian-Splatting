@@ -433,7 +433,80 @@ container::span<const uint32_t> Scene::GetCpuSortedIndices()
 	{
 		return {};
 	}
-	return cpuSplatSorter->GetSortedIndices();
+	auto indices = cpuSplatSorter->GetSortedIndices();
+	if (!indices.empty())
+	{
+		// Store a copy for verification
+		lastSortedIndices.assign(indices.begin(), indices.end());
+	}
+	return indices;
+}
+
+bool Scene::VerifyCpuSortOrder(const math::mat4 &viewMatrix) const
+{
+	LOG_INFO("=== CPU Sort Order Verification ===");
+
+	if (splatPositions.empty())
+	{
+		LOG_WARNING("Cannot verify CPU sort - no positions");
+		return false;
+	}
+
+	if (lastSortedIndices.empty())
+	{
+		LOG_WARNING("Cannot verify CPU sort - no sorted indices available (sort may not have completed yet)");
+		return false;
+	}
+
+	const auto &sortedIndices = lastSortedIndices;
+
+	LOG_INFO("Checking if {} depths are sorted in ascending order...", sortedIndices.size());
+
+	// Compute depths and verify they are non-decreasing
+	float prevDepth      = -std::numeric_limits<float>::max();
+	bool  allCorrect     = true;
+	int   errorCount     = 0;
+	int   firstErrorPos  = -1;
+	float firstErrorPrev = 0.0f;
+	float firstErrorCurr = 0.0f;
+
+	for (size_t i = 0; i < sortedIndices.size(); ++i)
+	{
+		uint32_t idx = sortedIndices[i];
+		if (idx >= splatPositions.size())
+		{
+			LOG_ERROR("Invalid index {} at position {} (max: {})", idx, i, splatPositions.size() - 1);
+			return false;
+		}
+
+		float depth = ComputeViewSpaceDepth(splatPositions[idx], viewMatrix);
+
+		if (depth < prevDepth)
+		{
+			if (firstErrorPos < 0)
+			{
+				firstErrorPos  = static_cast<int>(i);
+				firstErrorPrev = prevDepth;
+				firstErrorCurr = depth;
+			}
+			errorCount++;
+			allCorrect = false;
+		}
+		prevDepth = depth;
+	}
+
+	if (allCorrect)
+	{
+		LOG_INFO("CPU sort verification PASSED - {} indices in correct order", sortedIndices.size());
+	}
+	else
+	{
+		LOG_ERROR("  Out of order at position {}: depth[{}]={:.6f} > depth[{}]={:.6f}",
+		          firstErrorPos, firstErrorPos - 1, firstErrorPrev, firstErrorPos, firstErrorCurr);
+		LOG_ERROR("CPU sort verification FAILED - {} total errors", errorCount);
+	}
+
+	return allCorrect;
 }
 
 }        // namespace msplat::engine

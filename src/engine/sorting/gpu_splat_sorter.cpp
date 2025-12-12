@@ -1020,7 +1020,7 @@ void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
 
 	cmdList->Barrier(
 	    rhi::PipelineScope::Copy,
-	    rhi::PipelineScope::All,
+	    rhi::PipelineScope::Copy,
 	    {transitions, 4},
 	    {},
 	    {});

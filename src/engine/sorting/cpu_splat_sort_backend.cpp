@@ -30,6 +30,8 @@ void CpuSplatSortBackend::Update(const app::Camera &camera)
 		return;
 	}
 
+	math::mat4 currentViewMatrix = camera.GetViewMatrix();
+
 	// Start timing if new sort
 	if (!m_sortInProgress)
 	{
@@ -39,7 +41,7 @@ void CpuSplatSortBackend::Update(const app::Camera &camera)
 	}
 
 	// Trigger async sort via Scene
-	m_scene->UpdateView(camera.GetViewMatrix());
+	m_scene->UpdateView(currentViewMatrix);
 
 	// Check if sort completed and upload
 	if (m_scene->IsCpuSortComplete())
@@ -49,6 +51,7 @@ void CpuSplatSortBackend::Update(const app::Camera &camera)
 		{
 			m_sortTimer.stop();
 			m_lastSortDurationMs = static_cast<float>(m_sortTimer.elapsedMilliseconds());
+			m_lastViewMatrix     = currentViewMatrix;
 
 			timer::Timer uploadTimer;
 			uploadTimer.start();
@@ -96,6 +99,16 @@ const char *CpuSplatSortBackend::GetName() const
 const char *CpuSplatSortBackend::GetMethodName() const
 {
 	return "Async Radix";
+}
+
+bool CpuSplatSortBackend::VerifySort()
+{
+	if (!m_scene)
+	{
+		LOG_WARNING("Cannot verify CPU sort - no scene");
+		return false;
+	}
+	return m_scene->VerifyCpuSortOrder(m_lastViewMatrix);
 }
 
 }        // namespace msplat::engine
