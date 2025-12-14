@@ -1,15 +1,16 @@
 #pragma once
 
-// Main include for the msplat Virtual File System
-// This is a single, consolidated header for convenience.
-
-#include <cstddef>        // for std::byte
-#include <cstdio>         // For FILE*
+#include <cstddef>
+#include <cstdio>
 #include <msplat/core/containers/filesystem.h>
 #include <msplat/core/containers/functional.h>
 #include <msplat/core/containers/memory.h>
 #include <msplat/core/containers/string.h>
 #include <msplat/core/containers/vector.h>
+
+#if defined(__ANDROID__)
+#	include <android/asset_manager.h>
+#endif
 
 namespace msplat::vfs
 {
@@ -22,7 +23,6 @@ class IStream;
 class IFileSystem;
 
 /// @brief Callback type for file/directory enumeration, using the project's custom function wrapper.
-/// Note: Uses std::filesystem::path for ABI stability across translation units
 using enumerate_callback_t = container::function<void(const std::filesystem::path &)>;
 
 //=========================================================================
@@ -268,5 +268,70 @@ class RootFileSystem final : public IFileSystem
 	// "/assets/textures/diffuse.png" should resolve to the latter.
 	container::vector<std::pair<container::string, container::shared_ptr<IFileSystem>>> m_mountPoints;
 };
+
+#if defined(__ANDROID__)
+/**
+ * @class AndroidAssetFileSystem
+ * @brief An IFileSystem implementation that reads from Android APK assets.
+ *
+ * This file system provides read-only access to files packaged in the
+ * APK's assets folder using Android's AAssetManager API.
+ */
+class AndroidAssetFileSystem final : public IFileSystem
+{
+  public:
+	/// @brief Constructs an Android asset file system.
+	/// @param assetManager The AAssetManager from the Android app. Must not be null.
+	/// @param basePath Optional base path prefix within assets (e.g., "shaders").
+	explicit AndroidAssetFileSystem(AAssetManager *assetManager, const std::string &basePath = "");
+
+	/// @brief IFileSystem interface implementation.
+	container::unique_ptr<IStream> openStream(const std::filesystem::path &path) override;
+	container::unique_ptr<IBlob>   readFile(const std::filesystem::path &path) override;
+	bool                           fileExists(const std::filesystem::path &path) override;
+	bool                           folderExists(const std::filesystem::path &path) override;
+	void                           enumerateFiles(const std::filesystem::path &path, enumerate_callback_t callback) override;
+	void                           enumerateDirectories(const std::filesystem::path &path, enumerate_callback_t callback) override;
+
+  private:
+	/// @brief Resolves a virtual path to an asset path.
+	std::string resolveAssetPath(const std::filesystem::path &path) const;
+
+	AAssetManager *m_assetManager;
+	std::string    m_basePath;
+};
+
+/**
+ * @class AndroidAssetStream
+ * @brief An IStream implementation for reading from an Android asset.
+ */
+class AndroidAssetStream final : public IStream
+{
+  public:
+	/// @brief Constructs a stream from an AAsset.
+	/// @param asset The AAsset to read from. Takes ownership.
+	explicit AndroidAssetStream(AAsset *asset);
+
+	/// @brief Closes the asset upon destruction.
+	~AndroidAssetStream() override;
+
+	// Rule of 5: Forbid copy/move
+	AndroidAssetStream(const AndroidAssetStream &)            = delete;
+	AndroidAssetStream &operator=(const AndroidAssetStream &) = delete;
+	AndroidAssetStream(AndroidAssetStream &&)                 = delete;
+	AndroidAssetStream &operator=(AndroidAssetStream &&)      = delete;
+
+	/// @brief IStream interface implementation.
+	size_t               read(container::span<std::byte> dst) override;
+	void                 seek(size_t pos) override;
+	[[nodiscard]] size_t pos() const override;
+	[[nodiscard]] size_t length() const override;
+
+  private:
+	AAsset *m_asset;
+	size_t  m_length;
+	size_t  m_pos;
+};
+#endif        // __ANDROID__
 
 }        // namespace msplat::vfs

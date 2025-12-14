@@ -484,6 +484,16 @@ enum class ResolveMode
 	AVERAGE
 };
 
+// Surface transform flags for pre-rotation handling
+enum class SurfaceTransform : uint32_t
+{
+	IDENTITY          = 0x00000001,        // No rotation
+	ROTATE_90         = 0x00000002,        // 90 degree clockwise rotation
+	ROTATE_180        = 0x00000004,        // 180 degree rotation
+	ROTATE_270        = 0x00000008,        // 270 degree clockwise (90 CCW)
+	HORIZONTAL_MIRROR = 0x00000010,        // Horizontal mirror
+};
+
 enum class LoadOp
 {
 	LOAD,
@@ -753,14 +763,24 @@ struct ComputePipelineDesc
 	std::vector<PushConstantRange>         pushConstantRanges;
 };
 
+// Window handle types for cross-platform surface creation
+enum class WindowHandleType : uint32_t
+{
+	Unknown       = 0,
+	GLFW          = 1,        // Desktop: GLFWwindow*
+	AndroidNative = 2,        // Android: ANativeWindow*
+	MetalLayer    = 3,        // iOS/macOS: CAMetalLayer*
+};
+
 struct SwapchainDesc
 {
-	void         *windowHandle;        // HWND on Windows, NSWindow* on macOS
-	uint32_t      width;
-	uint32_t      height;
-	TextureFormat format      = TextureFormat::B8G8R8A8_UNORM;
-	uint32_t      bufferCount = 2;
-	bool          vsync       = true;
+	void            *windowHandle;
+	WindowHandleType windowHandleType = WindowHandleType::GLFW;
+	uint32_t         width;
+	uint32_t         height;
+	TextureFormat    format      = TextureFormat::B8G8R8A8_UNORM;
+	uint32_t         bufferCount = 2;
+	bool             vsync       = true;
 };
 
 struct ClearValue

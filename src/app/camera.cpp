@@ -1,21 +1,24 @@
 #include "app/camera.h"
 #include <cstring>
 
-#include <GLFW/glfw3.h>
+#if !defined(__ANDROID__)
+#	include <GLFW/glfw3.h>
+#endif
 
-namespace msplat::app {
+namespace msplat::app
+{
 
-Camera::Camera()
-    : m_position(0.0f, 0.0f, 6.0f),
-      m_worldUp(0.0f, 1.0f, 0.0f),
-      m_yaw(-90.0f),
-      m_pitch(0.0f),
-      m_movementSpeed(5.0f),
-      m_mouseSensitivity(0.1f),
-      m_lastMouseX(0.0),
-      m_lastMouseY(0.0),
-      m_mouseButtonPressed(false),
-      m_firstMouse(true)
+Camera::Camera() :
+    m_position(0.0f, 0.0f, 6.0f),
+    m_worldUp(0.0f, 1.0f, 0.0f),
+    m_yaw(-90.0f),
+    m_pitch(0.0f),
+    m_movementSpeed(5.0f),
+    m_mouseSensitivity(0.1f),
+    m_lastMouseX(0.0),
+    m_lastMouseY(0.0),
+    m_mouseButtonPressed(false),
+    m_firstMouse(true)
 {
 	// Initialize key states
 	std::memset(m_keysPressed, 0, sizeof(m_keysPressed));
@@ -28,7 +31,8 @@ Camera::Camera()
 	SetPerspectiveProjection(45.0f, 1.0f, 0.1f, 100.0f);
 }
 
-void Camera::Update(float deltaTime, GLFWwindow* window)
+#if !defined(__ANDROID__)
+void Camera::Update(float deltaTime, GLFWwindow *window)
 {
 	float velocity = m_movementSpeed * deltaTime;
 
@@ -48,20 +52,43 @@ void Camera::Update(float deltaTime, GLFWwindow* window)
 
 	UpdateViewMatrix();
 }
+#else
+void Camera::Update(float deltaTime, void *window)
+{
+	// Android input handling is done via touch events through OnMouseMove/OnKey
+	// The key states are tracked internally, so just update based on those
+	float velocity = m_movementSpeed * deltaTime;
 
-void Camera::SetPosition(const math::vec3& position)
+	if (m_keysPressed['W'] || m_keysPressed['w'])
+		m_position += m_front * velocity;
+	if (m_keysPressed['S'] || m_keysPressed['s'])
+		m_position -= m_front * velocity;
+	if (m_keysPressed['A'] || m_keysPressed['a'])
+		m_position -= m_right * velocity;
+	if (m_keysPressed['D'] || m_keysPressed['d'])
+		m_position += m_right * velocity;
+	if (m_keysPressed['Q'] || m_keysPressed['q'])
+		m_position -= m_worldUp * velocity;
+	if (m_keysPressed['E'] || m_keysPressed['e'])
+		m_position += m_worldUp * velocity;
+
+	UpdateViewMatrix();
+}
+#endif
+
+void Camera::SetPosition(const math::vec3 &position)
 {
 	m_position = position;
 	UpdateViewMatrix();
 }
 
-void Camera::SetTarget(const math::vec3& target)
+void Camera::SetTarget(const math::vec3 &target)
 {
 	m_front = math::Normalize(target - m_position);
 
 	// Calculate yaw and pitch from the front vector
 	m_pitch = math::Degrees(math::Asin(m_front.y));
-	m_yaw = math::Degrees(math::Atan2(m_front.z, m_front.x));
+	m_yaw   = math::Degrees(math::Atan2(m_front.z, m_front.x));
 
 	UpdateCameraVectors();
 	UpdateViewMatrix();
@@ -75,7 +102,7 @@ void Camera::SetPerspectiveProjection(float fov, float aspect, float nearPlane, 
 }
 
 void Camera::SetOrthographicProjection(float left, float right, float bottom, float top,
-                                        float nearPlane, float farPlane)
+                                       float nearPlane, float farPlane)
 {
 	m_projectionMatrix = math::Ortho(left, right, bottom, top, nearPlane, farPlane);
 	// Flip Y for Vulkan's coordinate system
@@ -99,7 +126,7 @@ void Camera::OnMouseMove(double xpos, double ypos)
 	}
 
 	float xoffset = static_cast<float>(xpos - m_lastMouseX);
-	float yoffset = static_cast<float>(m_lastMouseY - ypos); // Reversed since y-coordinates go from bottom to top
+	float yoffset = static_cast<float>(m_lastMouseY - ypos);        // Reversed since y-coordinates go from bottom to top
 
 	m_lastMouseX = xpos;
 	m_lastMouseY = ypos;
@@ -120,14 +147,19 @@ void Camera::OnMouseMove(double xpos, double ypos)
 void Camera::OnMouseButton(int button, int action, int mods)
 {
 	// Use right mouse button for camera control
-	if (button == GLFW_MOUSE_BUTTON_RIGHT)
+	// GLFW_MOUSE_BUTTON_RIGHT = 1, GLFW_PRESS = 1, GLFW_RELEASE = 0
+	constexpr int MOUSE_BUTTON_RIGHT = 1;
+	constexpr int ACTION_PRESS       = 1;
+	constexpr int ACTION_RELEASE     = 0;
+
+	if (button == MOUSE_BUTTON_RIGHT)
 	{
-		if (action == GLFW_PRESS)
+		if (action == ACTION_PRESS)
 		{
 			m_mouseButtonPressed = true;
-			m_firstMouse = true;
+			m_firstMouse         = true;
 		}
-		else if (action == GLFW_RELEASE)
+		else if (action == ACTION_RELEASE)
 		{
 			m_mouseButtonPressed = false;
 		}
@@ -137,11 +169,15 @@ void Camera::OnMouseButton(int button, int action, int mods)
 void Camera::OnKey(int key, int action, int mods)
 {
 	// Track key states for smooth movement
+	// GLFW_PRESS = 1, GLFW_RELEASE = 0
+	constexpr int ACTION_PRESS   = 1;
+	constexpr int ACTION_RELEASE = 0;
+
 	if (key >= 0 && key < 512)
 	{
-		if (action == GLFW_PRESS)
+		if (action == ACTION_PRESS)
 			m_keysPressed[key] = true;
-		else if (action == GLFW_RELEASE)
+		else if (action == ACTION_RELEASE)
 			m_keysPressed[key] = false;
 	}
 }
@@ -157,7 +193,7 @@ void Camera::UpdateCameraVectors()
 
 	// Re-calculate the right and up vectors
 	m_right = math::Normalize(math::Cross(m_front, m_worldUp));
-	m_up = math::Normalize(math::Cross(m_right, m_front));
+	m_up    = math::Normalize(math::Cross(m_right, m_front));
 }
 
 void Camera::UpdateViewMatrix()
@@ -165,4 +201,4 @@ void Camera::UpdateViewMatrix()
 	m_viewMatrix = math::LookAt(m_position, m_position + m_front, m_up);
 }
 
-} // namespace msplat::app
+}        // namespace msplat::app

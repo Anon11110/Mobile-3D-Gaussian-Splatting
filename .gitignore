@@ -45,6 +45,7 @@ __pycache__/
 
 # build directory
 build/
+android/
 
 # AI/IDE generated directories/files
 .claude/

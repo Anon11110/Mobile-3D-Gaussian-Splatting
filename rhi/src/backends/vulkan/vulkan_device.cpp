@@ -6,7 +6,11 @@
 
 #include "vulkan_backend.h"
 
-#include <GLFW/glfw3.h>
+#if defined(__ANDROID__)
+#	include <android/native_window.h>
+#else
+#	include <GLFW/glfw3.h>
+#endif
 
 namespace rhi::vulkan
 {
@@ -60,10 +64,12 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
   public:
 	VulkanDevice()
 	{
+#if !defined(__ANDROID__)
 		if (!glfwInit())
 		{
 			throw std::runtime_error("Failed to initialize GLFW");
 		}
+#endif
 
 		CreateInstance();
 		SetupDebugMessenger();
@@ -141,7 +147,9 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 			vkDestroyInstance(instance, nullptr);
 		}
 
+#if !defined(__ANDROID__)
 		glfwTerminate();
+#endif
 	}
 
 	// IRHIDevice implementation
@@ -242,11 +250,49 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 	SwapchainHandle CreateSwapchain(const SwapchainDesc &desc) override
 	{
 		// Create surface from window handle
-		VkSurfaceKHR surface;
-		if (glfwCreateWindowSurface(instance, (GLFWwindow *) desc.windowHandle, nullptr, &surface) != VK_SUCCESS)
+		VkSurfaceKHR surface = VK_NULL_HANDLE;
+
+		switch (desc.windowHandleType)
 		{
-			throw std::runtime_error("Failed to create window surface");
+#if defined(__ANDROID__)
+			case WindowHandleType::AndroidNative:
+			{
+				VkAndroidSurfaceCreateInfoKHR createInfo = {};
+				createInfo.sType                         = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+				createInfo.window                        = static_cast<ANativeWindow *>(desc.windowHandle);
+				if (vkCreateAndroidSurfaceKHR(instance, &createInfo, nullptr, &surface) != VK_SUCCESS)
+				{
+					throw std::runtime_error("Failed to create Android window surface");
+				}
+				break;
+			}
+#else
+			case WindowHandleType::GLFW:
+			{
+				if (glfwCreateWindowSurface(instance, static_cast<GLFWwindow *>(desc.windowHandle), nullptr, &surface) != VK_SUCCESS)
+				{
+					throw std::runtime_error("Failed to create GLFW window surface");
+				}
+				break;
+			}
+#endif
+#if defined(__APPLE__)
+			case WindowHandleType::MetalLayer:
+			{
+				VkMetalSurfaceCreateInfoEXT createInfo = {};
+				createInfo.sType                       = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
+				createInfo.pLayer                      = desc.windowHandle;        // CAMetalLayer*
+				if (vkCreateMetalSurfaceEXT(instance, &createInfo, nullptr, &surface) != VK_SUCCESS)
+				{
+					throw std::runtime_error("Failed to create Metal window surface");
+				}
+				break;
+			}
+#endif
+			default:
+				throw std::runtime_error("Unsupported window handle type for surface creation");
 		}
+
 		VulkanSwapchain *swapchain = new VulkanSwapchain(instance, device, physicalDevice, allocator, surface, graphicsQueue, desc);
 		return RefCntPtr<IRHISwapchain>::Create(swapchain);
 	}
@@ -601,6 +647,13 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 #endif
 
 		// Get required extensions
+		std::vector<const char *> extensions;
+
+#if defined(__ANDROID__)
+		// Android requires these extensions for surface creation
+		extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+		extensions.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
+#else
 		uint32_t     glfwExtensionCount = 0;
 		const char **glfwExtensions     = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
@@ -609,7 +662,8 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 			throw std::runtime_error("GLFW failed to get required Vulkan extensions");
 		}
 
-		std::vector<const char *> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+		extensions.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
+#endif
 
 // Add MoltenVK required extension for macOS
 #ifdef __APPLE__
@@ -1040,6 +1094,15 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		allocatorInfo.physicalDevice   = physicalDevice;
 		allocatorInfo.device           = device;
 		allocatorInfo.instance         = instance;
+
+#if defined(VMA_DYNAMIC_VULKAN_FUNCTIONS) && VMA_DYNAMIC_VULKAN_FUNCTIONS
+		// When using dynamic function loading, VMA requires vkGetInstanceProcAddr
+		// and vkGetDeviceProcAddr to be provided. VMA will load all other functions dynamically.
+		VmaVulkanFunctions vulkanFunctions{};
+		vulkanFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+		vulkanFunctions.vkGetDeviceProcAddr   = vkGetDeviceProcAddr;
+		allocatorInfo.pVulkanFunctions        = &vulkanFunctions;
+#endif
 
 		// Check if extensions are available before enabling them
 		uint32_t deviceExtensionCount = 0;

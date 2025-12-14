@@ -239,6 +239,9 @@ class IRHISwapchain : public IRefCounted
 	virtual IRHITextureView *GetBackBufferView(uint32_t index)                                                = 0;
 	virtual uint32_t         GetImageCount() const                                                            = 0;
 	virtual void             Resize(uint32_t width, uint32_t height)                                          = 0;
+
+	// Get the pre-transform applied to the swapchain surface.
+	virtual SurfaceTransform GetPreTransform() const = 0;
 };
 
 typedef RefCntPtr<IRHISwapchain> SwapchainHandle;

@@ -3,73 +3,73 @@
 # Core library headers
 set(CORE_HEADERS
     # Math headers
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/math.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/basics.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/vector.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/matrix.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/quaternion.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/affine.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/aabb.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/sphere.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/frustum.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/math/color.h
+    ${MSPLAT_ROOT}/include/msplat/core/math/math.h
+    ${MSPLAT_ROOT}/include/msplat/core/math/basics.h
+    ${MSPLAT_ROOT}/include/msplat/core/math/vector.h
+    ${MSPLAT_ROOT}/include/msplat/core/math/matrix.h
+    ${MSPLAT_ROOT}/include/msplat/core/math/quaternion.h
+    ${MSPLAT_ROOT}/include/msplat/core/math/affine.h
+    ${MSPLAT_ROOT}/include/msplat/core/math/aabb.h
+    ${MSPLAT_ROOT}/include/msplat/core/math/sphere.h
+    ${MSPLAT_ROOT}/include/msplat/core/math/frustum.h
+    ${MSPLAT_ROOT}/include/msplat/core/math/color.h
 
     # Logging headers
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/log.h
+    ${MSPLAT_ROOT}/include/msplat/core/log.h
 
     # Timer headers
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/timer.h
+    ${MSPLAT_ROOT}/include/msplat/core/timer.h
 
     # VFS headers
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/vfs.h
+    ${MSPLAT_ROOT}/include/msplat/core/vfs.h
 
     # Platform headers
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/platform.h
+    ${MSPLAT_ROOT}/include/msplat/core/platform.h
 
     # Parallel headers
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/parallel.h
+    ${MSPLAT_ROOT}/include/msplat/core/parallel.h
 
     # Container headers
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/array.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/filesystem.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/functional.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/hash.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/memory.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/queue.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/string.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/unordered_map.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/unordered_set.h
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/containers/vector.h
+    ${MSPLAT_ROOT}/include/msplat/core/containers/array.h
+    ${MSPLAT_ROOT}/include/msplat/core/containers/filesystem.h
+    ${MSPLAT_ROOT}/include/msplat/core/containers/functional.h
+    ${MSPLAT_ROOT}/include/msplat/core/containers/hash.h
+    ${MSPLAT_ROOT}/include/msplat/core/containers/memory.h
+    ${MSPLAT_ROOT}/include/msplat/core/containers/queue.h
+    ${MSPLAT_ROOT}/include/msplat/core/containers/string.h
+    ${MSPLAT_ROOT}/include/msplat/core/containers/unordered_map.h
+    ${MSPLAT_ROOT}/include/msplat/core/containers/unordered_set.h
+    ${MSPLAT_ROOT}/include/msplat/core/containers/vector.h
 
     # Memory headers
-    ${CMAKE_SOURCE_DIR}/include/msplat/core/memory/frame_arena.h
+    ${MSPLAT_ROOT}/include/msplat/core/memory/frame_arena.h
 )
 
 set(CORE_SOURCES
     # Math sources (header-only for now)
     # Logging sources
-    ${CMAKE_SOURCE_DIR}/src/core/log.cpp
+    ${MSPLAT_ROOT}/src/core/log.cpp
 
     # Timer sources
-    ${CMAKE_SOURCE_DIR}/src/core/timer.cpp
+    ${MSPLAT_ROOT}/src/core/timer.cpp
 
     # VFS sources
-    ${CMAKE_SOURCE_DIR}/src/core/vfs.cpp
+    ${MSPLAT_ROOT}/src/core/vfs.cpp
 
     # Platform sources
-    ${CMAKE_SOURCE_DIR}/src/core/platform.cpp
+    ${MSPLAT_ROOT}/src/core/platform.cpp
 
     # Parallel sources
-    ${CMAKE_SOURCE_DIR}/src/core/parallel.cpp
+    ${MSPLAT_ROOT}/src/core/parallel.cpp
 
     # Container sources
-    ${CMAKE_SOURCE_DIR}/src/core/containers/filesystem.cpp
+    ${MSPLAT_ROOT}/src/core/containers/filesystem.cpp
 
     # Third-party sources
-    ${CMAKE_SOURCE_DIR}/third-party/mimalloc/src/static.c
+    ${MSPLAT_ROOT}/third-party/mimalloc/src/static.c
 
     # Add a dummy source file to create the library
-    ${CMAKE_SOURCE_DIR}/src/core/core.cpp
+    ${MSPLAT_ROOT}/src/core/core.cpp
 )
 
 # Create core static library
@@ -77,12 +77,12 @@ add_library(core STATIC ${CORE_SOURCES} ${CORE_HEADERS})
 
 # Public include directories
 target_include_directories(core PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/include/msplat
-    ${CMAKE_SOURCE_DIR}  # For third-party includes
-    ${CMAKE_SOURCE_DIR}/third-party/glm
-    ${CMAKE_SOURCE_DIR}/third-party/spdlog/include
-    ${CMAKE_SOURCE_DIR}/third-party/mimalloc/include
+    ${MSPLAT_ROOT}/include
+    ${MSPLAT_ROOT}/include/msplat
+    ${MSPLAT_ROOT}  # For third-party includes
+    ${MSPLAT_ROOT}/third-party/glm
+    ${MSPLAT_ROOT}/third-party/spdlog/include
+    ${MSPLAT_ROOT}/third-party/mimalloc/include
 )
 
 # Require C++20 for C++ files and C11 for C files

@@ -7,7 +7,9 @@
 #include "rhi/rhi.h"
 #include "triangle_app.h"
 
-#include <GLFW/glfw3.h>
+#if !defined(__ANDROID__)
+#	include <GLFW/glfw3.h>
+#endif
 
 using namespace msplat;
 
@@ -43,7 +45,9 @@ bool TriangleApp::OnInit(app::DeviceManager *deviceManager)
 	m_uniformDataPtr                 = m_uniformBuffer->Map();
 
 	// Create shader factory and load shaders
-	m_shaderFactory = container::make_unique<engine::ShaderFactory>(device);
+	// Use VFS from DeviceManager if available (e.g., Android assets)
+	auto vfs        = m_deviceManager->GetVFS();
+	m_shaderFactory = container::make_unique<engine::ShaderFactory>(device, vfs);
 
 	m_vertexShader = m_shaderFactory->getOrCreateShader(
 	    "shaders/compiled/triangle.vert.spv",
@@ -130,7 +134,7 @@ bool TriangleApp::OnInit(app::DeviceManager *deviceManager)
 
 	// Initialize camera
 	int width, height;
-	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+	m_deviceManager->GetPlatformAdapter()->GetFramebufferSize(&width, &height);
 	float aspect = static_cast<float>(width) / static_cast<float>(height);
 	m_camera.SetPerspectiveProjection(45.0f, aspect, 0.1f, 100.0f);
 	m_camera.SetPosition(math::vec3(0.0f, 0.0f, 3.0f));
@@ -143,14 +147,22 @@ bool TriangleApp::OnInit(app::DeviceManager *deviceManager)
 void TriangleApp::OnUpdate(float deltaTime)
 {
 	// Update camera
+#if !defined(__ANDROID__)
 	m_camera.Update(deltaTime, m_deviceManager->GetWindow());
+#else
+	m_camera.Update(deltaTime, nullptr);
+#endif
 
 	// Update uniform buffer with animation
 	float time = static_cast<float>(m_applicationTimer.elapsedSeconds());
 
-	// Update aspect ratio
+	// Query pre-transform from swapchain for mobile rotation handling
+	auto                 *swapchain    = m_deviceManager->GetSwapchain();
+	rhi::SurfaceTransform preTransform = swapchain->GetPreTransform();
+
+	// Update aspect ratio and swap width/height for 90/270 degree rotations
 	int width, height;
-	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+	m_deviceManager->GetPlatformAdapter()->GetFramebufferSize(&width, &height);
 	if (width > 0 && height > 0)
 	{
 		float aspect = static_cast<float>(width) / static_cast<float>(height);
@@ -158,8 +170,26 @@ void TriangleApp::OnUpdate(float deltaTime)
 	}
 
 	UniformBufferObject ubo{};
-	// Use camera's view-projection matrix
-	ubo.mvp  = m_camera.GetViewProjectionMatrix();
+	math::mat4          viewProj = m_camera.GetViewProjectionMatrix();
+
+	// Apply pre-rotation compensation matrix
+	math::mat4 preRotationMatrix = math::Identity();
+	switch (preTransform)
+	{
+		case rhi::SurfaceTransform::ROTATE_90:
+			preRotationMatrix = math::RotateZ(math::HALF_PI);
+			break;
+		case rhi::SurfaceTransform::ROTATE_180:
+			preRotationMatrix = math::RotateZ(math::PI);
+			break;
+		case rhi::SurfaceTransform::ROTATE_270:
+			preRotationMatrix = math::RotateZ(-math::HALF_PI);
+			break;
+		default:
+			break;
+	}
+
+	ubo.mvp  = preRotationMatrix * viewProj;
 	ubo.time = time;
 
 	// Update uniform buffer
@@ -193,17 +223,25 @@ void TriangleApp::OnRender()
 		// Swapchain is out of date, need to recreate it
 		LOG_WARNING("Swapchain out of date, recreating");
 		int width, height;
-		glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+		m_deviceManager->GetPlatformAdapter()->GetFramebufferSize(&width, &height);
+#if !defined(__ANDROID__)
 		while (width == 0 || height == 0)
 		{
 			glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 			glfwWaitEvents();
 		}
+#else
+		// On Android, we skip the wait loop as the system handles window lifecycle
+		if (width == 0 || height == 0)
+		{
+			return;
+		}
+#endif
 		swapchain->Resize(width, height);
 
-		for (auto &firstUse : m_imageFirstUse)
+		for (size_t i = 0; i < m_imageFirstUse.size(); ++i)
 		{
-			firstUse = true;
+			m_imageFirstUse[i] = true;
 		}
 		return;
 	}
@@ -292,7 +330,13 @@ void TriangleApp::OnRender()
 	// Average NDC = true screen-space centroid under perspective
 	math::vec2 center_ndc = ndc_sum / 3.0f;
 
-	float aspect = static_cast<float>(backBufferWidth) / static_cast<float>(backBufferHeight);
+	float                 aspect       = static_cast<float>(backBufferWidth) / static_cast<float>(backBufferHeight);
+	rhi::SurfaceTransform preTransform = swapchain->GetPreTransform();
+	if (preTransform == rhi::SurfaceTransform::ROTATE_90 ||
+	    preTransform == rhi::SurfaceTransform::ROTATE_270)
+	{
+		aspect = static_cast<float>(backBufferHeight) / static_cast<float>(backBufferWidth);
+	}
 
 	float pushData[4] = {
 	    center_ndc.x,            // centerNdc.x
@@ -335,16 +379,24 @@ void TriangleApp::OnRender()
 		// Swapchain needs recreation on next frame
 		LOG_WARNING("Swapchain needs recreation (out of date or suboptimal)");
 		int width, height;
-		glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
+		m_deviceManager->GetPlatformAdapter()->GetFramebufferSize(&width, &height);
+#if !defined(__ANDROID__)
 		while (width == 0 || height == 0)
 		{
 			glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
 			glfwWaitEvents();
 		}
-		swapchain->Resize(width, height);
-		for (auto &firstUse : m_imageFirstUse)
+#else
+		// On Android, we skip the wait loop as the system handles window lifecycle
+		if (width == 0 || height == 0)
 		{
-			firstUse = true;
+			return;
+		}
+#endif
+		swapchain->Resize(width, height);
+		for (size_t i = 0; i < m_imageFirstUse.size(); ++i)
+		{
+			m_imageFirstUse[i] = true;
 		}
 	}
 	else if (presentStatus == rhi::SwapchainStatus::ERROR_OCCURRED)
@@ -390,11 +442,13 @@ void TriangleApp::OnKey(int key, int action, int mods)
 	// Forward to camera
 	m_camera.OnKey(key, action, mods);
 
-	// Handle application-specific keys
+#if !defined(__ANDROID__)
+	// Handle application-specific keys (desktop only)
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
 	{
 		glfwSetWindowShouldClose(m_deviceManager->GetWindow(), GLFW_TRUE);
 	}
+#endif
 }
 
 void TriangleApp::OnMouseButton(int button, int action, int mods)

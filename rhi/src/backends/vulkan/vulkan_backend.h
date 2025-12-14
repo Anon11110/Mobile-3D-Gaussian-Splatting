@@ -365,6 +365,7 @@ class VulkanSwapchain final : public RefCounter<IRHISwapchain>
 	VkSurfaceFormatKHR             chosenSurfaceFormat;
 	VkPresentModeKHR               chosenPresentMode;
 	uint32_t                       requestedBufferCount;
+	VkSurfaceTransformFlagBitsKHR  currentPreTransform;
 
   public:
 	VulkanSwapchain(VkInstance instance, VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator, VkSurfaceKHR surface,
@@ -382,6 +383,7 @@ class VulkanSwapchain final : public RefCounter<IRHISwapchain>
 	IRHITextureView *GetBackBufferView(uint32_t index) override;
 	uint32_t         GetImageCount() const override;
 	void             Resize(uint32_t width, uint32_t height) override;
+	SurfaceTransform GetPreTransform() const override;
 
 	VkFramebuffer GetFramebuffer(uint32_t index, VkRenderPass renderPass);
 };

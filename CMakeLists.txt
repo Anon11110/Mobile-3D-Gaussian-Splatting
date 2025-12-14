@@ -5,6 +5,11 @@ project(Mobile-3D-Gaussian-Splatting VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Set MSPLAT_ROOT for cmake includes (can be overridden for Android builds)
+if(NOT DEFINED MSPLAT_ROOT)
+    set(MSPLAT_ROOT "${CMAKE_SOURCE_DIR}")
+endif()
+
 # Build configuration
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)

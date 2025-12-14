@@ -72,7 +72,7 @@ class FrameArenaResource
 	/// Get the memory resource for the current frame's allocations.
 	/// The returned resource is safe for concurrent allocations from multiple threads.
 	/// However, this method itself is NOT thread-safe with BeginFrame().
-	std::pmr::memory_resource *Resource()
+	std::pmr::memory_resource *Resource() noexcept
 	{
 		return ArenaAt(&mArenaStorage[mFrameIndex]);
 	}

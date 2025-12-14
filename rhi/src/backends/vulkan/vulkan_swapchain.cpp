@@ -4,7 +4,9 @@
 
 #include "vulkan_backend.h"
 
-#include <GLFW/glfw3.h>
+#if !defined(__ANDROID__)
+#	include <GLFW/glfw3.h>
+#endif
 
 namespace rhi::vulkan
 {
@@ -148,6 +150,9 @@ VulkanSwapchain::VulkanSwapchain(VkInstance instance, VkDevice device, VkPhysica
 	createInfo.presentMode      = chosenPresentMode;
 	createInfo.clipped          = VK_TRUE;
 	createInfo.oldSwapchain     = VK_NULL_HANDLE;
+
+	// Store pre-transform for application to query
+	currentPreTransform = capabilities.currentTransform;
 
 	if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain) != VK_SUCCESS)
 	{
@@ -326,6 +331,9 @@ void VulkanSwapchain::Resize(uint32_t width, uint32_t height)
 	createInfo.clipped          = VK_TRUE;
 	createInfo.oldSwapchain     = oldSwapchain;
 
+	// Update pre-transform for application to query
+	currentPreTransform = capabilities.currentTransform;
+
 	if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain) != VK_SUCCESS)
 	{
 		throw std::runtime_error("Failed to recreate Vulkan swapchain");
@@ -405,6 +413,24 @@ VkFramebuffer VulkanSwapchain::GetFramebuffer(uint32_t index, VkRenderPass rende
 	}
 
 	return framebuffers[index];
+}
+
+SurfaceTransform VulkanSwapchain::GetPreTransform() const
+{
+	switch (currentPreTransform)
+	{
+		case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR:
+			return SurfaceTransform::ROTATE_90;
+		case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR:
+			return SurfaceTransform::ROTATE_180;
+		case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR:
+			return SurfaceTransform::ROTATE_270;
+		case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_BIT_KHR:
+			return SurfaceTransform::HORIZONTAL_MIRROR;
+		case VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR:
+		default:
+			return SurfaceTransform::IDENTITY;
+	}
 }
 
 }        // namespace rhi::vulkan

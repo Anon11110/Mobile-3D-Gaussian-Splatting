@@ -476,6 +476,50 @@ Examples:
         help="Show detailed output during build operations",
     )
 
+    # Android subcommand
+    android_parser = subparsers.add_parser("android", help="Build for Android")
+    android_parser.add_argument(
+        "--build-type",
+        choices=["debug", "release"],
+        default="debug",
+        help="Android build type (default: debug)",
+    )
+    android_parser.add_argument(
+        "--sdk-path",
+        type=str,
+        help="Path to Android SDK (overrides ANDROID_HOME environment variable)",
+    )
+    android_parser.add_argument(
+        "--jdk-path",
+        type=str,
+        help="Path to JDK (overrides JAVA_HOME and auto-detection)",
+    )
+    android_parser.add_argument(
+        "--install",
+        action="store_true",
+        help="Install APK to connected device after build",
+    )
+    android_parser.add_argument(
+        "--run",
+        action="store_true",
+        help="Run app after installation",
+    )
+    android_parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Clean before building",
+    )
+    android_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed build output",
+    )
+    android_parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="List connected Android devices",
+    )
+
     return parser
 
 
@@ -485,6 +529,10 @@ def main() -> int:
         # Parse arguments
         parser = create_argument_parser()
         args = parser.parse_args()
+
+        # Handle Android command separately
+        if args.command == "android":
+            return handle_android_command(args)
 
         # Enable debug logging if requested
         if hasattr(args, "debug_mode") and args.debug_mode:
@@ -526,6 +574,39 @@ def main() -> int:
         except:
             pass  # Don't let debug logging cause additional errors
         return handle_error(error)
+
+
+def handle_android_command(args) -> int:
+    """Handle Android-specific commands."""
+    from platforms.android import AndroidConfig
+
+    sdk_path = getattr(args, "sdk_path", None)
+    jdk_path = getattr(args, "jdk_path", None)
+    config = AndroidConfig(sdk_path=sdk_path, jdk_path=jdk_path)
+
+    # List devices if requested
+    if args.list_devices:
+        config.list_devices()
+        return 0
+
+    # Clean if requested
+    if args.clean:
+        if not config.clean():
+            return 1
+
+    # Check SDK
+    if not config.configure():
+        return 1
+
+    # Build APK
+    verbose = getattr(args, "verbose", False)
+    install = getattr(args, "install", False)
+    run = getattr(args, "run", False)
+    build_type = getattr(args, "build_type", "debug")
+
+    if config.build_apk(build_type, install, run, verbose):
+        return 0
+    return 1
 
 
 if __name__ == "__main__":

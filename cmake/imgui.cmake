@@ -2,17 +2,17 @@
 
 # ImGui core sources
 set(IMGUI_SOURCES
-    ${CMAKE_SOURCE_DIR}/third-party/imgui/imgui.cpp
-    ${CMAKE_SOURCE_DIR}/third-party/imgui/imgui_demo.cpp
-    ${CMAKE_SOURCE_DIR}/third-party/imgui/imgui_draw.cpp
-    ${CMAKE_SOURCE_DIR}/third-party/imgui/imgui_tables.cpp
-    ${CMAKE_SOURCE_DIR}/third-party/imgui/imgui_widgets.cpp
+    ${MSPLAT_ROOT}/third-party/imgui/imgui.cpp
+    ${MSPLAT_ROOT}/third-party/imgui/imgui_demo.cpp
+    ${MSPLAT_ROOT}/third-party/imgui/imgui_draw.cpp
+    ${MSPLAT_ROOT}/third-party/imgui/imgui_tables.cpp
+    ${MSPLAT_ROOT}/third-party/imgui/imgui_widgets.cpp
 )
 
 # ImGui backend sources (GLFW + Vulkan)
 set(IMGUI_BACKEND_SOURCES
-    ${CMAKE_SOURCE_DIR}/third-party/imgui/backends/imgui_impl_glfw.cpp
-    ${CMAKE_SOURCE_DIR}/third-party/imgui/backends/imgui_impl_vulkan.cpp
+    ${MSPLAT_ROOT}/third-party/imgui/backends/imgui_impl_glfw.cpp
+    ${MSPLAT_ROOT}/third-party/imgui/backends/imgui_impl_vulkan.cpp
 )
 
 # Create imgui static library
@@ -20,8 +20,8 @@ add_library(imgui STATIC ${IMGUI_SOURCES} ${IMGUI_BACKEND_SOURCES})
 
 # Public include directories
 target_include_directories(imgui PUBLIC
-    ${CMAKE_SOURCE_DIR}/third-party/imgui
-    ${CMAKE_SOURCE_DIR}/third-party/imgui/backends
+    ${MSPLAT_ROOT}/third-party/imgui
+    ${MSPLAT_ROOT}/third-party/imgui/backends
 )
 
 # Require C++20

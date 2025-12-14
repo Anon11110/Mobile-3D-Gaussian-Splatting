@@ -235,8 +235,12 @@ container::unique_ptr<IBlob> NativeFileSystem::readFile(const std::filesystem::p
 	}
 
 	// Allocate buffer for entire file
-	size_t                       fileSize = stream->length();
+	size_t fileSize = stream->length();
+#if defined(MSPLAT_USE_SYSTEM_STL) || defined(__ANDROID__)
+	container::vector<std::byte> buffer;
+#else
 	container::vector<std::byte> buffer(container::pmr::GetUpstreamAllocator());
+#endif
 	buffer.resize(fileSize);
 
 	// Read entire file
@@ -328,8 +332,11 @@ void NativeFileSystem::enumerateDirectories(const std::filesystem::path &path, e
 // RootFileSystem Implementation
 //=========================================================================
 
-RootFileSystem::RootFileSystem() :
+RootFileSystem::RootFileSystem()
+#if !defined(MSPLAT_USE_SYSTEM_STL) && !defined(__ANDROID__)
+    :
     m_mountPoints(container::pmr::GetUpstreamAllocator())
+#endif
 {
 }
 
@@ -344,7 +351,11 @@ void RootFileSystem::mount(const std::filesystem::path &path, std::shared_ptr<IF
 	container::string pathStr = container::to_string(path);
 
 	// Remove existing mount at this path if any
+#if defined(MSPLAT_USE_SYSTEM_STL) || defined(__ANDROID__)
+	container::vector<std::pair<container::string, container::shared_ptr<IFileSystem>>> newMounts;
+#else
 	container::vector<std::pair<container::string, container::shared_ptr<IFileSystem>>> newMounts(container::pmr::GetUpstreamAllocator());
+#endif
 	for (const auto &mp : m_mountPoints)
 	{
 		if (mp.first != pathStr)
@@ -355,7 +366,11 @@ void RootFileSystem::mount(const std::filesystem::path &path, std::shared_ptr<IF
 	m_mountPoints = std::move(newMounts);
 
 	// Add new mount point
+#if defined(MSPLAT_USE_SYSTEM_STL) || defined(__ANDROID__)
+	m_mountPoints.emplace_back(container::string(pathStr), fs);
+#else
 	m_mountPoints.emplace_back(container::string(pathStr, container::pmr::GetUpstreamAllocator()), fs);
+#endif
 
 	// Sort by path length (descending) to handle nested mounts correctly
 	std::sort(m_mountPoints.begin(), m_mountPoints.end(),
@@ -368,8 +383,12 @@ bool RootFileSystem::unmount(const std::filesystem::path &path)
 {
 	container::string pathStr = container::to_string(path);
 
-	size_t                                                                              originalSize = m_mountPoints.size();
+	size_t originalSize = m_mountPoints.size();
+#if defined(MSPLAT_USE_SYSTEM_STL) || defined(__ANDROID__)
+	container::vector<std::pair<container::string, container::shared_ptr<IFileSystem>>> newMounts;
+#else
 	container::vector<std::pair<container::string, container::shared_ptr<IFileSystem>>> newMounts(container::pmr::GetUpstreamAllocator());
+#endif
 
 	for (const auto &mp : m_mountPoints)
 	{
@@ -532,5 +551,206 @@ void RootFileSystem::enumerateDirectories(const std::filesystem::path &path, enu
 		callback(std::filesystem::path(container::to_std_string(mountPrefix)) / p);
 	});
 }
+
+//=========================================================================
+// Android Asset FileSystem Implementation
+//=========================================================================
+
+#if defined(__ANDROID__)
+
+AndroidAssetStream::AndroidAssetStream(AAsset *asset) :
+    m_asset(asset), m_pos(0)
+{
+	m_length = static_cast<size_t>(AAsset_getLength(asset));
+}
+
+AndroidAssetStream::~AndroidAssetStream()
+{
+	if (m_asset)
+	{
+		AAsset_close(m_asset);
+	}
+}
+
+size_t AndroidAssetStream::read(container::span<std::byte> dst)
+{
+	if (!m_asset)
+	{
+		return 0;
+	}
+
+	int bytesRead = AAsset_read(m_asset, dst.data(), dst.size());
+	if (bytesRead > 0)
+	{
+		m_pos += static_cast<size_t>(bytesRead);
+		return static_cast<size_t>(bytesRead);
+	}
+	return 0;
+}
+
+void AndroidAssetStream::seek(size_t pos)
+{
+	if (m_asset)
+	{
+		AAsset_seek(m_asset, static_cast<off_t>(pos), SEEK_SET);
+		m_pos = pos;
+	}
+}
+
+size_t AndroidAssetStream::pos() const
+{
+	return m_pos;
+}
+
+size_t AndroidAssetStream::length() const
+{
+	return m_length;
+}
+
+AndroidAssetFileSystem::AndroidAssetFileSystem(AAssetManager *assetManager, const std::string &basePath) :
+    m_assetManager(assetManager), m_basePath(basePath)
+{
+	// Normalize base path by removing leading/trailing slashes
+	while (!m_basePath.empty() && m_basePath.front() == '/')
+	{
+		m_basePath.erase(0, 1);
+	}
+	while (!m_basePath.empty() && m_basePath.back() == '/')
+	{
+		m_basePath.pop_back();
+	}
+
+	LOG_DEBUG("AndroidAssetFileSystem initialized with base path: {}", m_basePath.empty() ? "(root)" : m_basePath);
+}
+
+std::string AndroidAssetFileSystem::resolveAssetPath(const std::filesystem::path &path) const
+{
+	std::string pathStr = path.string();
+
+	// Normalize base path by removing leading/trailing slashes
+	while (!pathStr.empty() && pathStr.front() == '/')
+	{
+		pathStr.erase(0, 1);
+	}
+
+	// Replace backslashes with forward slashes
+	std::replace(pathStr.begin(), pathStr.end(), '\\', '/');
+
+	if (!m_basePath.empty())
+	{
+		return m_basePath + "/" + pathStr;
+	}
+	return pathStr;
+}
+
+container::unique_ptr<IStream> AndroidAssetFileSystem::openStream(const std::filesystem::path &path)
+{
+	std::string assetPath = resolveAssetPath(path);
+
+	AAsset *asset = AAssetManager_open(m_assetManager, assetPath.c_str(), AASSET_MODE_STREAMING);
+	if (!asset)
+	{
+		LOG_WARNING("Failed to open Android asset: {}", assetPath);
+		return nullptr;
+	}
+
+	return container::make_unique<AndroidAssetStream>(asset);
+}
+
+container::unique_ptr<IBlob> AndroidAssetFileSystem::readFile(const std::filesystem::path &path)
+{
+	std::string assetPath = resolveAssetPath(path);
+
+	AAsset *asset = AAssetManager_open(m_assetManager, assetPath.c_str(), AASSET_MODE_BUFFER);
+	if (!asset)
+	{
+		LOG_WARNING("Failed to open Android asset for reading: {}", assetPath);
+		return nullptr;
+	}
+
+	size_t                       size = static_cast<size_t>(AAsset_getLength(asset));
+	container::vector<std::byte> buffer;
+	buffer.resize(size);
+
+	const void *data = AAsset_getBuffer(asset);
+	if (data)
+	{
+		std::memcpy(buffer.data(), data, size);
+	}
+	else
+	{
+		// Fallback to read if getBuffer fails
+		int bytesRead = AAsset_read(asset, buffer.data(), size);
+		if (bytesRead < 0 || static_cast<size_t>(bytesRead) != size)
+		{
+			LOG_WARNING("Failed to read Android asset: {}", assetPath);
+			AAsset_close(asset);
+			return nullptr;
+		}
+	}
+
+	AAsset_close(asset);
+	LOG_DEBUG("Read Android asset: {} ({} bytes)", assetPath, size);
+	return container::make_unique<Blob>(std::move(buffer));
+}
+
+bool AndroidAssetFileSystem::fileExists(const std::filesystem::path &path)
+{
+	std::string assetPath = resolveAssetPath(path);
+
+	AAsset *asset = AAssetManager_open(m_assetManager, assetPath.c_str(), AASSET_MODE_UNKNOWN);
+	if (asset)
+	{
+		AAsset_close(asset);
+		return true;
+	}
+	return false;
+}
+
+bool AndroidAssetFileSystem::folderExists(const std::filesystem::path &path)
+{
+	std::string assetPath = resolveAssetPath(path);
+
+	AAssetDir *dir = AAssetManager_openDir(m_assetManager, assetPath.c_str());
+	if (dir)
+	{
+		// Check if directory has any content
+		const char *filename = AAssetDir_getNextFileName(dir);
+		AAssetDir_close(dir);
+		return (filename != nullptr);
+	}
+	return false;
+}
+
+void AndroidAssetFileSystem::enumerateFiles(const std::filesystem::path &path, enumerate_callback_t callback)
+{
+	std::string assetPath = resolveAssetPath(path);
+
+	AAssetDir *dir = AAssetManager_openDir(m_assetManager, assetPath.c_str());
+	if (!dir)
+	{
+		return;
+	}
+
+	const char *filename;
+	while ((filename = AAssetDir_getNextFileName(dir)) != nullptr)
+	{
+		std::filesystem::path filePath = path / filename;
+		callback(filePath);
+	}
+
+	AAssetDir_close(dir);
+}
+
+void AndroidAssetFileSystem::enumerateDirectories(const std::filesystem::path &path, enumerate_callback_t callback)
+{
+	// Android's AAssetManager doesn't distinguish between files and directories easily
+	// Subdirectories are not directly enumerable
+	(void) path;
+	(void) callback;
+	LOG_WARNING("enumerateDirectories is not fully supported on Android assets");
+}
+
+#endif        // __ANDROID__
 
 }        // namespace msplat::vfs

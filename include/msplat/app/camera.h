@@ -2,9 +2,12 @@
 
 #include "core/math/math.h"
 
+#if !defined(__ANDROID__)
 struct GLFWwindow;
+#endif
 
-namespace msplat::app {
+namespace msplat::app
+{
 
 /**
  * @class Camera
@@ -13,8 +16,9 @@ namespace msplat::app {
  * Provides WASD keyboard movement and mouse-look controls for navigating 3D scenes.
  * Supports both perspective and orthographic projections.
  */
-class Camera {
-public:
+class Camera
+{
+  public:
 	/**
 	 * @brief Constructs a camera with default settings
 	 */
@@ -23,21 +27,25 @@ public:
 	/**
 	 * @brief Updates camera position based on keyboard input
 	 * @param deltaTime Time elapsed since last update
-	 * @param window GLFW window for input polling
+	 * @param window Platform window handle for input polling
 	 */
-	void Update(float deltaTime, GLFWwindow* window);
+#if !defined(__ANDROID__)
+	void Update(float deltaTime, GLFWwindow *window);
+#else
+	void Update(float deltaTime, void *window);
+#endif
 
 	/**
 	 * @brief Sets the camera position
 	 * @param position New camera position
 	 */
-	void SetPosition(const math::vec3& position);
+	void SetPosition(const math::vec3 &position);
 
 	/**
 	 * @brief Sets the camera target (look-at point)
 	 * @param target Point to look at
 	 */
-	void SetTarget(const math::vec3& target);
+	void SetTarget(const math::vec3 &target);
 
 	/**
 	 * @brief Configures perspective projection
@@ -58,49 +66,70 @@ public:
 	 * @param farPlane Far clipping plane
 	 */
 	void SetOrthographicProjection(float left, float right, float bottom, float top,
-	                                float nearPlane, float farPlane);
+	                               float nearPlane, float farPlane);
 
 	/**
 	 * @brief Gets the view matrix
 	 * @return Current view matrix
 	 */
-	const math::mat4& GetViewMatrix() const { return m_viewMatrix; }
+	const math::mat4 &GetViewMatrix() const
+	{
+		return m_viewMatrix;
+	}
 
 	/**
 	 * @brief Gets the projection matrix
 	 * @return Current projection matrix
 	 */
-	const math::mat4& GetProjectionMatrix() const { return m_projectionMatrix; }
+	const math::mat4 &GetProjectionMatrix() const
+	{
+		return m_projectionMatrix;
+	}
 
 	/**
 	 * @brief Gets the combined view-projection matrix
 	 * @return View * Projection matrix
 	 */
-	math::mat4 GetViewProjectionMatrix() const { return m_projectionMatrix * m_viewMatrix; }
+	math::mat4 GetViewProjectionMatrix() const
+	{
+		return m_projectionMatrix * m_viewMatrix;
+	}
 
 	/**
 	 * @brief Gets the camera position
 	 * @return Current camera position
 	 */
-	const math::vec3& GetPosition() const { return m_position; }
+	const math::vec3 &GetPosition() const
+	{
+		return m_position;
+	}
 
 	/**
 	 * @brief Gets the camera forward direction
 	 * @return Normalized forward vector
 	 */
-	const math::vec3& GetFront() const { return m_front; }
+	const math::vec3 &GetFront() const
+	{
+		return m_front;
+	}
 
 	/**
 	 * @brief Gets the camera up direction
 	 * @return Normalized up vector
 	 */
-	const math::vec3& GetUp() const { return m_up; }
+	const math::vec3 &GetUp() const
+	{
+		return m_up;
+	}
 
 	/**
 	 * @brief Gets the camera right direction
 	 * @return Normalized right vector
 	 */
-	const math::vec3& GetRight() const { return m_right; }
+	const math::vec3 &GetRight() const
+	{
+		return m_right;
+	}
 
 	/**
 	 * @brief Handles mouse movement events
@@ -129,27 +158,39 @@ public:
 	 * @brief Sets the camera movement speed
 	 * @param speed Units per second
 	 */
-	void SetMovementSpeed(float speed) { m_movementSpeed = speed; }
+	void SetMovementSpeed(float speed)
+	{
+		m_movementSpeed = speed;
+	}
 
 	/**
 	 * @brief Sets the mouse sensitivity
 	 * @param sensitivity Mouse rotation multiplier
 	 */
-	void SetMouseSensitivity(float sensitivity) { m_mouseSensitivity = sensitivity; }
+	void SetMouseSensitivity(float sensitivity)
+	{
+		m_mouseSensitivity = sensitivity;
+	}
 
 	/**
 	 * @brief Gets the camera movement speed
 	 * @return Current movement speed
 	 */
-	float GetMovementSpeed() const { return m_movementSpeed; }
+	float GetMovementSpeed() const
+	{
+		return m_movementSpeed;
+	}
 
 	/**
 	 * @brief Gets the mouse sensitivity
 	 * @return Current mouse sensitivity
 	 */
-	float GetMouseSensitivity() const { return m_mouseSensitivity; }
+	float GetMouseSensitivity() const
+	{
+		return m_mouseSensitivity;
+	}
 
-private:
+  private:
 	/**
 	 * @brief Updates internal direction vectors based on yaw/pitch
 	 */
@@ -182,11 +223,11 @@ private:
 	// Mouse state
 	double m_lastMouseX;
 	double m_lastMouseY;
-	bool m_mouseButtonPressed;
-	bool m_firstMouse;
+	bool   m_mouseButtonPressed;
+	bool   m_firstMouse;
 
 	// Keyboard state (for smooth movement)
-	bool m_keysPressed[512];  // Track key states for smooth movement
+	bool m_keysPressed[512];        // Track key states for smooth movement
 };
 
-} // namespace msplat::app
+}        // namespace msplat::app

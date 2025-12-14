@@ -1,6 +1,7 @@
 #pragma once
 
-namespace msplat::app {
+namespace msplat::app
+{
 
 class DeviceManager;
 
@@ -11,8 +12,9 @@ class DeviceManager;
  * This abstract base class defines the structure of a demo application.
  * Each demo in the examples/ directory will implement this interface.
  */
-class IApplication {
-public:
+class IApplication
+{
+  public:
 	virtual ~IApplication() = default;
 
 	/**
@@ -20,7 +22,7 @@ public:
 	 * @param deviceManager A pointer to the DeviceManager instance.
 	 * @return True if initialization is successful, false otherwise.
 	 */
-	virtual bool OnInit(DeviceManager* deviceManager) = 0;
+	virtual bool OnInit(DeviceManager *deviceManager) = 0;
 
 	/**
 	 * @brief Called every frame to update the application logic.
@@ -75,4 +77,4 @@ public:
 	}
 };
 
-} // namespace msplat::app
+}        // namespace msplat::app

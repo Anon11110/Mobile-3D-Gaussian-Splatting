@@ -43,10 +43,15 @@ struct SplatSoA
 	uint32_t shDegree         = 0;
 	uint32_t shCoeffsPerSplat = 0;
 
+#if defined(MSPLAT_USE_SYSTEM_STL) || defined(__ANDROID__)
+	// System STL uses std::vector which doesn't support custom allocators in this way
+	SplatSoA() = default;
+#else
 	explicit SplatSoA(std::pmr::memory_resource *memres = nullptr) :
 	    posX(memres), posY(memres), posZ(memres), scaleX(memres), scaleY(memres), scaleZ(memres), rotX(memres), rotY(memres), rotZ(memres), rotW(memres), cov3D_M11(memres), cov3D_M12(memres), cov3D_M13(memres), cov3D_M22(memres), cov3D_M23(memres), cov3D_M33(memres), opacity(memres), fDc0(memres), fDc1(memres), fDc2(memres), fRest(memres)
 	{
 	}
+#endif
 
 	void Resize(uint32_t count, uint32_t coeffsPerSplat)
 	{

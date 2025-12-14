@@ -35,7 +35,9 @@ class SplatLoader::Impl
 {
   private:
 	container::queue<LoadTask> taskQueue;
+#if !defined(MSPLAT_USE_SYSTEM_STL) && !defined(__ANDROID__)
 	std::pmr::memory_resource *memoryResource;
+#endif
 
 	std::thread             workerThread;
 	std::atomic<bool>       shouldStop{false};
@@ -126,7 +128,11 @@ class SplatLoader::Impl
 			shCoeffsPerSplat = 0;
 		}
 
+#if defined(MSPLAT_USE_SYSTEM_STL) || defined(__ANDROID__)
+		auto data = std::make_shared<SplatSoA>();
+#else
 		auto data = std::make_shared<SplatSoA>(memoryResource);
+#endif
 		data->Resize(numSplats, shCoeffsPerSplat);
 
 		// Move to vertex element and load it
@@ -240,12 +246,20 @@ class SplatLoader::Impl
 	}
 
   public:
+#if defined(MSPLAT_USE_SYSTEM_STL) || defined(__ANDROID__)
+	explicit Impl()
+	{
+		// Start worker thread after all members are initialized
+		workerThread = std::thread(&Impl::WorkerLoop, this);
+	}
+#else
 	explicit Impl() :
 	    memoryResource(container::pmr::GetUpstreamAllocator())
 	{
 		// Start worker thread after all members are initialized
 		workerThread = std::thread(&Impl::WorkerLoop, this);
 	}
+#endif
 
 	~Impl()
 	{

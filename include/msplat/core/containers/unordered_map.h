@@ -10,7 +10,22 @@ namespace msplat::container
 template <typename K, typename V, typename Hash = std::hash<K>, typename Pred = std::equal_to<K>>
 using unordered_map = std::unordered_map<K, V, Hash, Pred>;
 
+// Factory functions for system STL compatibility
+template <typename K, typename V, typename Hash = std::hash<K>>
+inline auto make_unordered_map_default()
+    -> unordered_map<K, V, Hash>
+{
+	return unordered_map<K, V, Hash>{};
 }
+
+template <typename K, typename V, typename Hash = std::hash<K>>
+inline auto make_unordered_map()
+    -> unordered_map<K, V, Hash>
+{
+	return unordered_map<K, V, Hash>{};
+}
+
+}        // namespace msplat::container
 #else
 #	include "hash.h"
 #	include "memory.h"

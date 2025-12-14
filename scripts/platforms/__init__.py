@@ -10,6 +10,7 @@ from .platformBase import PlatformConfig
 from .windows import WindowsConfig
 from .macos import MacOSConfig
 from .linux import LinuxConfig
+from .android import AndroidConfig
 
 
 def get_platform_config() -> Optional[PlatformConfig]:
@@ -23,5 +24,10 @@ def get_platform_config() -> Optional[PlatformConfig]:
     elif system == "linux":
         return LinuxConfig()
     else:
-        print(f"❌ Unsupported platform: {system}")
+        print(f"Unsupported platform: {system}")
         return None
+
+
+def get_android_config() -> AndroidConfig:
+    """Get Android platform configuration for cross-compilation."""
+    return AndroidConfig()
