@@ -12,7 +12,8 @@ bool CpuSplatSortBackend::Initialize(
     rhi::IRHIDevice  *device,
     Scene            *scene,
     rhi::BufferHandle sortedIndicesBuffer,
-    uint32_t          totalSplatCount)
+    uint32_t          totalSplatCount,
+    container::shared_ptr<vfs::IFileSystem> /*vfs*/)
 {
 	m_device       = device;
 	m_scene        = scene;

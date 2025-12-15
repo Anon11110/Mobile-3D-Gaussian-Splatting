@@ -14,6 +14,10 @@
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "spdlog/spdlog.h"
 
+#ifdef __ANDROID__
+#	include "spdlog/sinks/android_sink.h"
+#endif
+
 namespace msplat::log
 {
 
@@ -41,8 +45,12 @@ class Logger
 	{
 		// Initialize with lambda for RAII
 		static auto init = []() {
+#ifdef __ANDROID__
+			auto console_sink = std::make_shared<spdlog::sinks::android_sink_mt>("MSplat");
+#else
 			auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
 			console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v");        // Skip logger name
+#endif
 			auto logger = std::make_shared<spdlog::logger>("default", console_sink);
 
 			// Auto-flush on error

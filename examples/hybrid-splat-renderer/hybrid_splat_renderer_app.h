@@ -9,9 +9,11 @@
 #include "shaders/shaderio.h"
 #include <array>
 #include <cstdlib>
-#include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_vulkan.h>
+#if !defined(__ANDROID__)
+#	include <imgui.h>
+#	include <imgui_impl_glfw.h>
+#	include <imgui_impl_vulkan.h>
+#endif
 #include <msplat/engine/rendering/shader_factory.h>
 
 namespace rhi
@@ -69,7 +71,15 @@ class HybridSplatRendererApp : public app::IApplication
 	void OnKey(int key, int action, int mods) override;
 	void OnMouseButton(int button, int action, int mods) override;
 	void OnMouseMove(double xpos, double ypos) override;
+	void OnScroll(double xoffset, double yoffset) override;
 	void OnFramebufferResize(int width, int height) override;
+
+#if defined(__ANDROID__)
+	void SetAndroidSplatPath(const char *path)
+	{
+		m_androidSplatPath = path;
+	}
+#endif
 
   private:
 	void LoadSplatFile(const char *filepath);
@@ -120,6 +130,26 @@ class HybridSplatRendererApp : public app::IApplication
 
 	container::vector<math::vec3> m_testSplatPositions;
 
+#if defined(__ANDROID__)
+	container::string m_androidSplatPath;
+
+	// Touch UI state for Android
+	double m_lastTouchX = 0.0;
+	double m_lastTouchY = 0.0;
+	bool   m_touchDown  = false;
+
+	// Orbit camera state for Android
+	math::vec3 m_orbitTarget   = {0.0f, 0.0f, 0.0f};        // Point to orbit around
+	float      m_orbitDistance = 5.0f;                      // Distance from target
+	float      m_orbitYaw      = 0.0f;                      // Horizontal angle (degrees)
+	float      m_orbitPitch    = 0.0f;                      // Vertical angle (degrees)
+	float      m_orbitMinDist  = 0.5f;                      // Minimum zoom distance
+	float      m_orbitMaxDist  = 100.0f;                    // Maximum zoom distance
+
+	void UpdateOrbitCamera();
+#endif
+
+#if !defined(__ANDROID__)
 	// ImGui state
 	void *m_imguiDescriptorPool = nullptr;
 	bool  m_showImGui           = true;
@@ -134,6 +164,7 @@ class HybridSplatRendererApp : public app::IApplication
 	void RenderImGui();
 	void RenderImGuiToCommandBuffer(rhi::IRHICommandList *cmdList);
 	void UpdateFpsHistory();
+#endif
 	void RecreateSwapchain();
 	void PerformCrossBackendVerification();
 };

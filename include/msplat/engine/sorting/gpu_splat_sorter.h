@@ -1,7 +1,9 @@
 #pragma once
 
 #include <msplat/app/camera.h>
+#include <msplat/core/containers/memory.h>
 #include <msplat/core/containers/vector.h>
+#include <msplat/core/vfs.h>
 #include <msplat/engine/scene/scene.h>
 #include <rhi/rhi.h>
 
@@ -17,7 +19,7 @@ class GpuSplatSorter
 		IntegratedScan        // Integrated prefix sum in scatter (2 dispatches per pass)
 	};
 
-	GpuSplatSorter(rhi::IRHIDevice *device);
+	GpuSplatSorter(rhi::IRHIDevice *device, container::shared_ptr<vfs::IFileSystem> vfs = nullptr);
 	~GpuSplatSorter() = default;
 
 	void Initialize(uint32_t totalSplatCount);
@@ -76,9 +78,10 @@ class GpuSplatSorter
 		uint32_t passType;        // 0 = scan blocks, 1 = scan block sums, 2 = add offsets
 	};
 
-	rhi::IRHIDevice *device;
-	uint32_t         totalSplatCount;
-	bool             isInitialized;
+	rhi::IRHIDevice                        *device;
+	container::shared_ptr<vfs::IFileSystem> vfs;
+	uint32_t                                totalSplatCount;
+	bool                                    isInitialized;
 
 	rhi::BufferHandle splatDepths;
 	rhi::BufferHandle splatIndicesOriginal;

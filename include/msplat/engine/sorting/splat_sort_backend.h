@@ -5,6 +5,7 @@
 #include <msplat/core/containers/memory.h>
 #include <msplat/core/math/math.h>
 #include <msplat/core/timer.h>
+#include <msplat/core/vfs.h>
 #include <rhi/rhi.h>
 
 namespace msplat::engine
@@ -33,12 +34,14 @@ class ISplatSortBackend
 	/// @param scene Scene containing splat data (positions, etc.)
 	/// @param sortedIndicesBuffer App-owned buffer where sorted indices are written
 	/// @param totalSplatCount Number of splats to sort
+	/// @param vfs Optional VFS for shader loading
 	/// @return true if initialization succeeded
 	virtual bool Initialize(
-	    rhi::IRHIDevice  *device,
-	    Scene            *scene,
-	    rhi::BufferHandle sortedIndicesBuffer,
-	    uint32_t          totalSplatCount) = 0;
+	    rhi::IRHIDevice                        *device,
+	    Scene                                  *scene,
+	    rhi::BufferHandle                       sortedIndicesBuffer,
+	    uint32_t                                totalSplatCount,
+	    container::shared_ptr<vfs::IFileSystem> vfs = nullptr) = 0;
 
 	/// Update sorting based on current camera view
 	/// CPU backend: Triggers async sort, uploads when complete
@@ -103,10 +106,11 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	~GpuSplatSortBackend() override;
 
 	bool Initialize(
-	    rhi::IRHIDevice  *device,
-	    Scene            *scene,
-	    rhi::BufferHandle sortedIndicesBuffer,
-	    uint32_t          totalSplatCount) override;
+	    rhi::IRHIDevice                        *device,
+	    Scene                                  *scene,
+	    rhi::BufferHandle                       sortedIndicesBuffer,
+	    uint32_t                                totalSplatCount,
+	    container::shared_ptr<vfs::IFileSystem> vfs = nullptr) override;
 
 	void Update(const app::Camera &camera) override;
 
@@ -153,10 +157,11 @@ class CpuSplatSortBackend : public ISplatSortBackend
 	~CpuSplatSortBackend() override;
 
 	bool Initialize(
-	    rhi::IRHIDevice  *device,
-	    Scene            *scene,
-	    rhi::BufferHandle sortedIndicesBuffer,
-	    uint32_t          totalSplatCount) override;
+	    rhi::IRHIDevice                        *device,
+	    Scene                                  *scene,
+	    rhi::BufferHandle                       sortedIndicesBuffer,
+	    uint32_t                                totalSplatCount,
+	    container::shared_ptr<vfs::IFileSystem> vfs = nullptr) override;
 
 	void Update(const app::Camera &camera) override;
 

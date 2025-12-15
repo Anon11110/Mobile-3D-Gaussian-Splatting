@@ -351,8 +351,13 @@ void main()
 
 	vec2 screenOffset = cornerUnit.x * basis1 + cornerUnit.y * basis2;
 
+	// Rotate screen offset to match pre-rotated clip space
+	// screenRotation is stored as vec4(col0.x, col0.y, col1.x, col1.y)
+	mat2 rotMat = mat2(ubo.screenRotation.xy, ubo.screenRotation.zw);
+	vec2 rotatedOffset = rotMat * screenOffset;
+
 	// Convert pixels to NDC with adjustable knobs
-	vec2 ndcOffset = screenOffset * ubo.basisViewport * 2.0 * ubo.inverseFocalAdj;
+	vec2 ndcOffset = rotatedOffset * ubo.basisViewport * 2.0 * ubo.inverseFocalAdj;
 
 	// Convert NDC offset to clip-space offset
 	vec2 offsetClip = ndcOffset * centerClip.w;

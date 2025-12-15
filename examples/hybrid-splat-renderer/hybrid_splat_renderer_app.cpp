@@ -1,7 +1,9 @@
 #include "hybrid_splat_renderer_app.h"
 #include "app/device_manager.h"
 #include "core/log.h"
-#include <GLFW/glfw3.h>
+#if !defined(__ANDROID__)
+#	include <GLFW/glfw3.h>
+#endif
 #include <chrono>
 #include <msplat/engine/scene/scene.h>
 #include <msplat/engine/sorting/splat_sort_backend.h>
@@ -11,7 +13,9 @@
 
 HybridSplatRendererApp::HybridSplatRendererApp()
 {
+#if !defined(__ANDROID__)
 	m_fpsHistory.fill(0.0f);
+#endif
 }
 HybridSplatRendererApp::~HybridSplatRendererApp()                                             = default;
 HybridSplatRendererApp::HybridSplatRendererApp(HybridSplatRendererApp &&) noexcept            = default;
@@ -32,21 +36,36 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 
 	rhi::IRHISwapchain *swapchain = deviceManager->GetSwapchain();
 
-	m_shaderFactory = container::make_unique<engine::ShaderFactory>(device);
+	const auto &vfs = deviceManager->GetVFS();
+	m_shaderFactory = container::make_unique<engine::ShaderFactory>(device, vfs);
 	m_scene         = container::make_unique<engine::Scene>(device);
 
 	m_camera.SetPosition(math::vec3(0.0f, 0.0f, 5.0f));
 	m_camera.SetTarget(math::vec3(0.0f, 0.0f, 0.0f));
 
 	int width, height;
-	glfwGetWindowSize(deviceManager->GetWindow(), &width, &height);
+	deviceManager->GetPlatformAdapter()->GetFramebufferSize(&width, &height);
 	float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 
 	m_camera.SetPerspectiveProjection(45.0f, aspectRatio, 0.1f, 1000.0f);
 	m_camera.SetMovementSpeed(5.0f);
 	m_camera.SetMouseSensitivity(0.1f);
 
+#if defined(__ANDROID__)
+	if (!m_androidSplatPath.empty())
+	{
+		LOG_INFO("Loading splat file from Android path: {}", m_androidSplatPath);
+		LoadSplatFile(m_androidSplatPath.c_str());
+	}
+	else
+	{
+		LOG_INFO("No Android splat path set, creating test data...");
+		CreateTestSplatData();
+	}
+#else
 	LoadSplatFile("assets/flowers_1.ply");
+	// LoadSplatFile("assets/train_7000.ply");
+#endif
 
 	// Create app-owned sorted indices buffer
 	if (m_scene->GetTotalSplatCount() > 0)
@@ -60,13 +79,13 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 		m_backend            = container::make_unique<engine::GpuSplatSortBackend>();
 		m_currentBackendType = BackendType::GPU;
 
-		if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount()))
+		if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount(), vfs))
 		{
 			LOG_WARNING("GPU backend failed to initialize, attempting CPU fallback");
 
 			// Try CPU backend as fallback
 			m_backend = container::make_unique<engine::CpuSplatSortBackend>();
-			if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount()))
+			if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount(), vfs))
 			{
 				LOG_ERROR("CPU backend also failed to initialize - sorting unavailable");
 				m_backend.reset();
@@ -100,6 +119,7 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	// Load splat rendering shaders
 	m_vertexShader   = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster.vert.spv", rhi::ShaderStage::VERTEX);
 	m_fragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster.frag.spv", rhi::ShaderStage::FRAGMENT);
+	LOG_INFO("Render shaders loaded: vertex={}, fragment={}", m_vertexShader != nullptr, m_fragmentShader != nullptr);
 
 	// Create UBO
 	rhi::BufferDesc uboDesc{};
@@ -150,10 +170,17 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_descriptorSet->BindBuffer(3, colorsBinding);
 
 	// Binding 4: SH Rest
-	rhi::BufferBinding shBinding{};
-	shBinding.buffer = m_scene->GetGpuData().shRest.Get();
-	shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(4, shBinding);
+	if (m_scene->GetGpuData().shRest)
+	{
+		rhi::BufferBinding shBinding{};
+		shBinding.buffer = m_scene->GetGpuData().shRest.Get();
+		shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(4, shBinding);
+	}
+	else
+	{
+		LOG_INFO("Skipping SH rest buffer binding (no SH data in scene)");
+	}
 
 	// Binding 5: Sorted indices (app-owned buffer, written to by backend)
 	if (m_sortedIndices)
@@ -181,6 +208,7 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_renderPipeline                                          = device->CreateGraphicsPipeline(pipelineDesc);
 
 	uint32_t imageCount = deviceManager->GetSwapchain()->GetImageCount();
+	LOG_INFO("Swapchain image count: {}", imageCount);
 
 	m_imageAvailableSemaphores.resize(imageCount);
 	m_renderFinishedSemaphores.resize(imageCount);
@@ -189,6 +217,7 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 		m_imageAvailableSemaphores[i] = device->CreateSemaphore();
 		m_renderFinishedSemaphores[i] = device->CreateSemaphore();
 	}
+
 	m_inFlightFence = device->CreateFence(true);
 
 	m_commandLists.resize(imageCount);
@@ -200,10 +229,14 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_applicationTimer.start();
 	m_fpsCounter.reset();
 
+#if !defined(__ANDROID__)
 	InitImGui();
+#endif
 
 	// Log initialization summary
-	LOG_INFO("Window size: {}x{}", width, height);
+	int initWidth, initHeight;
+	deviceManager->GetPlatformAdapter()->GetFramebufferSize(&initWidth, &initHeight);
+	LOG_INFO("Window size: {}x{}", initWidth, initHeight);
 	LOG_INFO("Backend: {} ({})",
 	         m_backend ? m_backend->GetName() : "None",
 	         m_backend ? m_backend->GetMethodName() : "N/A");
@@ -238,8 +271,8 @@ void HybridSplatRendererApp::SwitchBackend(BackendType newType)
 		m_backend = container::make_unique<engine::CpuSplatSortBackend>();
 	}
 
-	// Initialize with existing resources
-	if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount()))
+	const auto &vfs = m_deviceManager->GetVFS();
+	if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount(), vfs))
 	{
 		LOG_ERROR("Failed to initialize {} backend, reverting to previous",
 		          newType == BackendType::GPU ? "GPU" : "CPU");
@@ -253,7 +286,7 @@ void HybridSplatRendererApp::SwitchBackend(BackendType newType)
 		{
 			m_backend = container::make_unique<engine::GpuSplatSortBackend>();
 		}
-		m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount());
+		m_backend->Initialize(device, m_scene.get(), m_sortedIndices, m_scene->GetTotalSplatCount(), vfs);
 		return;
 	}
 
@@ -277,8 +310,9 @@ void HybridSplatRendererApp::OnRender()
 	rhi::IRHISwapchain *swapchain = m_deviceManager->GetSwapchain();
 
 	// Check if window is minimized before waiting on fence
-	int width, height;
-	glfwGetWindowSize(m_deviceManager->GetWindow(), &width, &height);
+	rhi::IRHITextureView *renderBackbufferView = swapchain->GetBackBufferView(0);
+	uint32_t              width                = renderBackbufferView->GetWidth();
+	uint32_t              height               = renderBackbufferView->GetHeight();
 	if (width == 0 || height == 0)
 	{
 		return;
@@ -286,7 +320,6 @@ void HybridSplatRendererApp::OnRender()
 
 	// Wait for previous frame
 	m_inFlightFence->Wait(UINT64_MAX);
-	m_inFlightFence->Reset();
 
 	m_fpsCounter.frame();
 
@@ -320,20 +353,72 @@ void HybridSplatRendererApp::OnRender()
 		imageIndex = 0;
 	}
 
+	// Reset fence AFTER all early returns to prevents blocking forever
+	// if we return early above without submitting any commands
+	m_inFlightFence->Reset();
+
+	// Query pre-transform from swapchain and build pre-rotation matrix for mobile rotation handling
+	rhi::SurfaceTransform preTransform = swapchain->GetPreTransform();
+
+	math::mat4 preRotationMatrix = math::Identity();
+	switch (preTransform)
+	{
+		case rhi::SurfaceTransform::ROTATE_90:
+			preRotationMatrix = math::RotateZ(math::HALF_PI);
+			break;
+		case rhi::SurfaceTransform::ROTATE_180:
+			preRotationMatrix = math::RotateZ(math::PI);
+			break;
+		case rhi::SurfaceTransform::ROTATE_270:
+			preRotationMatrix = math::RotateZ(-math::HALF_PI);
+			break;
+		default:
+			break;
+	}
+
 	FrameUBO ubo{};
 	ubo.view       = m_camera.GetViewMatrix();
 	ubo.projection = m_camera.GetProjectionMatrix();
 	ubo.projection[1][1] *= -1.0f;        // Flip the Y[1][1] component to match Vulkan's NDC
+	ubo.focal = {ubo.projection[0][0] * width * 0.5f,
+	             ubo.projection[1][1] * height * 0.5f};
+
+	ubo.projection = preRotationMatrix * ubo.projection;
+
 	ubo.cameraPos          = math::vec4(m_camera.GetPosition(), 1.0f);
 	ubo.viewport           = {static_cast<float>(width), static_cast<float>(height)};
-	ubo.focal              = {ubo.projection[0][0] * width * 0.5f,
-	                          ubo.projection[1][1] * height * 0.5f};
-	ubo.splatScale         = 1.0f;                                 // Default scale factor
-	ubo.alphaCullThreshold = 1.0f / 255.0f;                        // Default alpha cutoff
-	ubo.maxSplatRadius     = 2048.0f;                              // Maximum splat radius in pixels
-	ubo.enableSplatFilter  = 1;                                    // Enable EWA filtering
-	ubo.basisViewport      = {1.0f / width, 1.0f / height};        // Resolution-aware scaling
-	ubo.inverseFocalAdj    = 1.0f;                                 // No FOV adjustment by default
+	ubo.splatScale         = 1.0f;                 // Default scale factor
+	ubo.alphaCullThreshold = 1.0f / 255.0f;        // Default alpha cutoff
+	ubo.maxSplatRadius     = 2048.0f;              // Maximum splat radius in pixels
+	ubo.enableSplatFilter  = 1;                    // Enable EWA filtering
+	ubo.inverseFocalAdj    = 1.0f;                 // No FOV adjustment by default
+
+	// Screen rotation handling
+	// basisViewport and screenRotation must match the rotated clip space
+	// screenRotation stores mat2 as vec4: (col0.x, col0.y, col1.x, col1.y)
+	switch (preTransform)
+	{
+		case rhi::SurfaceTransform::ROTATE_90:
+			// 90° CCW: basisViewport swapped, rotation applied
+			ubo.basisViewport  = {1.0f / height, 1.0f / width};
+			ubo.screenRotation = {0.0f, 1.0f, -1.0f, 0.0f};        // mat2(0, 1, -1, 0)
+			break;
+		case rhi::SurfaceTransform::ROTATE_180:
+			// 180°: basisViewport unchanged, negate both axes
+			ubo.basisViewport  = {1.0f / width, 1.0f / height};
+			ubo.screenRotation = {-1.0f, 0.0f, 0.0f, -1.0f};        // mat2(-1, 0, 0, -1)
+			break;
+		case rhi::SurfaceTransform::ROTATE_270:
+			// 270° CCW (90° CW): basisViewport swapped, rotation applied
+			ubo.basisViewport  = {1.0f / height, 1.0f / width};
+			ubo.screenRotation = {0.0f, -1.0f, 1.0f, 0.0f};        // mat2(0, -1, 1, 0)
+			break;
+		default:
+			// No rotation
+			ubo.basisViewport  = {1.0f / width, 1.0f / height};
+			ubo.screenRotation = {1.0f, 0.0f, 0.0f, 1.0f};        // Identity matrix
+			break;
+	}
 	memcpy(m_frameUboDataPtr, &ubo, sizeof(FrameUBO));
 
 	rhi::IRHICommandList *cmdList = m_commandLists[imageIndex].Get();
@@ -447,12 +532,14 @@ void HybridSplatRendererApp::OnRender()
 	uint32_t instanceCount = m_scene->GetTotalSplatCount();
 	cmdList->DrawIndexedInstanced(indexCount, instanceCount, 0, 0, 0);
 
+#if !defined(__ANDROID__)
 	if (m_showImGui)
 	{
 		UpdateFpsHistory();
 		RenderImGui();
 		RenderImGuiToCommandBuffer(cmdList);
 	}
+#endif
 
 	cmdList->EndRendering();
 
@@ -508,7 +595,9 @@ void HybridSplatRendererApp::OnShutdown()
 		rhi::IRHIDevice *device = m_deviceManager->GetDevice();
 		device->WaitIdle();
 
+#if !defined(__ANDROID__)
 		ShutdownImGui();
+#endif
 
 		if (m_frameUboDataPtr)
 		{
@@ -544,6 +633,7 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 {
 	m_camera.OnKey(key, action, mods);
 
+#if !defined(__ANDROID__)
 	if (action == GLFW_PRESS)
 	{
 		switch (key)
@@ -634,17 +724,101 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 				break;
 		}
 	}
+#endif
 }
 
 void HybridSplatRendererApp::OnMouseButton(int button, int action, int mods)
 {
+#if defined(__ANDROID__)
+	// On Android, orbit camera is handled directly in OnMouseMove
+	if (button == 0)        // Primary touch
+	{
+		if (action == 1)        // Touch down
+		{
+			m_touchDown = true;
+		}
+		else if (action == 0)        // Touch up
+		{
+			m_touchDown = false;
+		}
+	}
+#else
 	m_camera.OnMouseButton(button, action, mods);
+#endif
 }
 
 void HybridSplatRendererApp::OnMouseMove(double xpos, double ypos)
 {
+#if defined(__ANDROID__)
+	// Android orbit camera: single finger drag rotates around target
+	if (m_touchDown)
+	{
+		// Calculate delta from last position
+		float deltaX = static_cast<float>(xpos - m_lastTouchX);
+		float deltaY = static_cast<float>(ypos - m_lastTouchY);
+
+		// Update orbit angles (sensitivity adjusted for touch)
+		const float sensitivity = 0.2f;
+		m_orbitYaw -= deltaX * sensitivity;          // Horizontal drag changes yaw
+		m_orbitPitch -= deltaY * sensitivity;        // Vertical drag changes pitch
+
+		// Clamp pitch to avoid flipping
+		m_orbitPitch = math::Clamp(m_orbitPitch, -89.0f, 89.0f);
+
+		// Update camera position
+		UpdateOrbitCamera();
+	}
+
+	m_lastTouchX = xpos;
+	m_lastTouchY = ypos;
+#else
 	m_camera.OnMouseMove(xpos, ypos);
+#endif
 }
+
+void HybridSplatRendererApp::OnScroll(double xoffset, double yoffset)
+{
+#if defined(__ANDROID__)
+	// Android pinch zoom: change orbit distance
+	// yoffset > 0 means zoom in (pinch out), yoffset < 0 means zoom out (pinch in)
+	const float zoomSpeed = m_orbitDistance * 0.5f;        // Relative zoom speed
+	m_orbitDistance -= static_cast<float>(yoffset) * zoomSpeed;
+
+	// Clamp distance
+	m_orbitDistance = math::Clamp(m_orbitDistance, m_orbitMinDist, m_orbitMaxDist);
+
+	UpdateOrbitCamera();
+#else
+	// Desktop use scroll for zoom
+	(void) xoffset;
+	(void) yoffset;
+#endif
+}
+
+#if defined(__ANDROID__)
+void HybridSplatRendererApp::UpdateOrbitCamera()
+{
+	// Convert spherical coordinates to Cartesian
+	// yaw = 0 means looking from +Z, pitch = 0 means horizontal
+	float yawRad   = math::Radians(m_orbitYaw);
+	float pitchRad = math::Radians(m_orbitPitch);
+
+	// Calculate camera position relative to target
+	float cosP = std::cos(pitchRad);
+	float sinP = std::sin(pitchRad);
+	float cosY = std::cos(yawRad);
+	float sinY = std::sin(yawRad);
+
+	math::vec3 offset;
+	offset.x = m_orbitDistance * cosP * sinY;
+	offset.y = m_orbitDistance * sinP;
+	offset.z = m_orbitDistance * cosP * cosY;
+
+	// Set camera position and look at target
+	m_camera.SetPosition(m_orbitTarget + offset);
+	m_camera.SetTarget(m_orbitTarget);
+}
+#endif
 
 void HybridSplatRendererApp::OnFramebufferResize(int width, int height)
 {
@@ -687,7 +861,7 @@ void HybridSplatRendererApp::LoadSplatFile(const char *filepath)
 void HybridSplatRendererApp::CreateTestSplatData()
 {
 	// Camera is at (0, 0, 5) looking down -Z axis (towards origin)
-	const uint32_t testSplatCount = 10000000;
+	const uint32_t testSplatCount = 100000;
 	auto           testData       = container::make_shared<engine::SplatSoA>();
 	testData->Resize(testSplatCount, 0);
 
@@ -820,6 +994,7 @@ void HybridSplatRendererApp::RecreateSwapchain()
 	// Wait for all GPU work to complete
 	device->WaitIdle();
 
+#if !defined(__ANDROID__)
 	// Get new window dimensions
 	int width, height;
 	glfwGetFramebufferSize(m_deviceManager->GetWindow(), &width, &height);
@@ -833,6 +1008,12 @@ void HybridSplatRendererApp::RecreateSwapchain()
 
 	// Resize swapchain
 	swapchain->Resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+#else
+	// On Android, swapchain is already resized by the platform
+	rhi::IRHITextureView *resizeBackbufferView = swapchain->GetBackBufferView(0);
+	uint32_t              width                = resizeBackbufferView->GetWidth();
+	uint32_t              height               = resizeBackbufferView->GetHeight();
+#endif
 
 	// Update camera aspect ratio
 	float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
@@ -962,6 +1143,7 @@ void HybridSplatRendererApp::PerformCrossBackendVerification()
 	LOG_INFO("=== Verification Complete ===");
 }
 
+#if !defined(__ANDROID__)
 void HybridSplatRendererApp::InitImGui()
 {
 	// Setup Dear ImGui context
@@ -1215,3 +1397,4 @@ void HybridSplatRendererApp::RenderImGuiToCommandBuffer(rhi::IRHICommandList *cm
 	VkCommandBuffer vkCmdBuf = static_cast<VkCommandBuffer>(cmdList->GetNativeCommandBuffer());
 	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkCmdBuf);
 }
+#endif        // !defined(__ANDROID__)

@@ -8,8 +8,8 @@
 namespace msplat::engine
 {
 
-GpuSplatSorter::GpuSplatSorter(rhi::IRHIDevice *device) :
-    device(device), totalSplatCount(0), isInitialized(false)
+GpuSplatSorter::GpuSplatSorter(rhi::IRHIDevice *device, container::shared_ptr<vfs::IFileSystem> vfs) :
+    device(device), vfs(vfs), totalSplatCount(0), isInitialized(false)
 {
 }
 
@@ -118,7 +118,7 @@ void GpuSplatSorter::CreateInitialIndicesBuffer(uint32_t totalSplatCount)
 
 void GpuSplatSorter::CreateComputePipelines()
 {
-	ShaderFactory shaderFactory(device);
+	ShaderFactory shaderFactory(device, vfs);
 
 	rhi::ShaderHandle depthCalcShader = shaderFactory.getOrCreateShader(
 	    "shaders/compiled/depth_calc.comp.spv",

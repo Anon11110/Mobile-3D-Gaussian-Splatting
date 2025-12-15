@@ -20,6 +20,7 @@ using namespace msplat::math;
 	                    	  \
 	float maxSplatRadius;     \
 	int   enableSplatFilter;  \
+	vec4  screenRotation;     \
 	vec2  basisViewport;      \
 	float inverseFocalAdj;    \
 

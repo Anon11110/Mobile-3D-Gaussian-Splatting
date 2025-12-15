@@ -10,10 +10,11 @@ GpuSplatSortBackend::GpuSplatSortBackend()  = default;
 GpuSplatSortBackend::~GpuSplatSortBackend() = default;
 
 bool GpuSplatSortBackend::Initialize(
-    rhi::IRHIDevice  *device,
-    Scene            *scene,
-    rhi::BufferHandle sortedIndicesBuffer,
-    uint32_t          totalSplatCount)
+    rhi::IRHIDevice                        *device,
+    Scene                                  *scene,
+    rhi::BufferHandle                       sortedIndicesBuffer,
+    uint32_t                                totalSplatCount,
+    container::shared_ptr<vfs::IFileSystem> vfs)
 {
 	m_device       = device;
 	m_scene        = scene;
@@ -21,7 +22,7 @@ bool GpuSplatSortBackend::Initialize(
 	m_splatCount   = totalSplatCount;
 
 	// Create GPU sorter
-	m_sorter = container::make_unique<GpuSplatSorter>(device);
+	m_sorter = container::make_unique<GpuSplatSorter>(device, vfs);
 	m_sorter->Initialize(totalSplatCount);
 
 	// Set default sort method

@@ -87,7 +87,7 @@ void Camera::SetTarget(const math::vec3 &target)
 	m_front = math::Normalize(target - m_position);
 
 	// Calculate yaw and pitch from the front vector
-	m_pitch = math::Degrees(math::Asin(m_front.y));
+	m_pitch = -math::Degrees(math::Asin(m_front.y));
 	m_yaw   = math::Degrees(math::Atan2(m_front.z, m_front.x));
 
 	UpdateCameraVectors();
@@ -146,13 +146,22 @@ void Camera::OnMouseMove(double xpos, double ypos)
 
 void Camera::OnMouseButton(int button, int action, int mods)
 {
-	// Use right mouse button for camera control
-	// GLFW_MOUSE_BUTTON_RIGHT = 1, GLFW_PRESS = 1, GLFW_RELEASE = 0
+	// Use right mouse button for camera control on desktop
+	// On Android, use left mouse button for camera control
+	// GLFW_MOUSE_BUTTON_LEFT = 0, GLFW_MOUSE_BUTTON_RIGHT = 1
+	// GLFW_PRESS = 1, GLFW_RELEASE = 0
+	constexpr int MOUSE_BUTTON_LEFT  = 0;
 	constexpr int MOUSE_BUTTON_RIGHT = 1;
 	constexpr int ACTION_PRESS       = 1;
 	constexpr int ACTION_RELEASE     = 0;
 
+#if defined(__ANDROID__)
+	// On Android, use left mouse button for camera rotation
+	if (button == MOUSE_BUTTON_LEFT)
+#else
+	// On desktop, use right mouse button for camera rotation
 	if (button == MOUSE_BUTTON_RIGHT)
+#endif
 	{
 		if (action == ACTION_PRESS)
 		{
