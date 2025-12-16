@@ -258,16 +258,12 @@ class AndroidConfig(PlatformConfig):
     def build_apk(
         self,
         build_type: str = "debug",
-        install: bool = False,
-        run: bool = False,
         verbose: bool = False
     ) -> bool:
         """Build Android APK using Gradle.
 
         Args:
             build_type: 'debug' or 'release'
-            install: Install APK to connected device after build
-            run: Run app after install
             verbose: Show detailed build output
 
         Returns:
@@ -327,20 +323,11 @@ class AndroidConfig(PlatformConfig):
                 term.error(f"APK not found at expected path: {apk_path}")
                 return False
 
-            full_apk_path = apk_path.absolute()
-
         finally:
             os.chdir(original_dir)
 
         relative_apk_path = android_dir / "app/build/outputs/apk" / apk_subpath
         term.success(f"APK built successfully: {relative_apk_path}")
-
-        if install:
-            if not self.install_apk(str(relative_apk_path)):
-                return False
-
-        if run:
-            self.run_app()
 
         return True
 

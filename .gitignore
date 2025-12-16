@@ -45,7 +45,38 @@ __pycache__/
 
 # build directory
 build/
-android/
+
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/.cxx/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/
+
+# Android Studio/IntelliJ IDE files
+android/*.iml
+android/app/*.iml
+android/.idea/
+
+# Android package files
+android/*.apk
+android/*.aab
+android/*.ap_
+android/*.dex
+
+# Security-critical files
+android/*.keystore
+android/*.jks
+android/google-services.json
+
+# Other Android build artifacts
+android/.externalNativeBuild/
+android/captures/
+android/.navigation/
+android/output-metadata.json
+android/*.hprof
+android/*.log
 
 # AI/IDE generated directories/files
 .claude/
@@ -62,8 +93,7 @@ shaders/compiled/*.spv
 examples/naive-splat-cpu/shaders/compiled/*.spv
 examples/particles/shaders/compiled/*.spv
 
-# Large asset files - downloaded automatically by scripts/download_assets.py
-# All PLY files and asset subdirectories are downloaded on-demand
+# Large asset files, downloaded automatically by scripts/download_assets.py
 assets/splats/
 
 # References

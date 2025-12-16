@@ -212,7 +212,81 @@ open build/Mobile-3D-Gaussian-Splatting.xcodeproj
 
 ## Android
 
-*Coming Soon* - Android support is planned for future releases.
+### Dependencies
+
+- **Android SDK** r25 or later
+  - Install via [Android Studio](https://developer.android.com/studio) or command line tools
+  - Specify path via `--sdk-path` argument, or set `ANDROID_HOME`/`ANDROID_SDK_ROOT` environment variable
+
+- **JDK** 17 or later
+  - Specify path via `--jdk-path` argument, or set `JAVA_HOME` environment variable
+  - Android Studio bundled JDK works fine (auto-detected if not specified)
+  - Or download from [Eclipse Temurin](https://adoptium.net/) or [Oracle](https://www.oracle.com/java/technologies/downloads/)
+- **Minimum Android API Level**: 24 (Android 7.0 Nougat) - Required for Vulkan 1.0 support
+
+### Build Instructions
+
+**Step 1.** Clone the repository and navigate to the project directory:
+```bash
+git clone <repository-url>
+cd Mobile-3D-Gaussian-Splatting
+```
+
+**Step 2.** Build debug APK:
+```bash
+python scripts/configure.py android --build-type debug
+```
+
+Or with explicit SDK/JDK paths:
+```bash
+python scripts/configure.py android --sdk-path ~/Android/Sdk --jdk-path /path/to/jdk
+```
+
+**Step 3.** Install APK to device using adb:
+```bash
+adb install android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+The APK will be generated at:
+- Debug: `android/app/build/outputs/apk/debug/app-debug.apk`
+- Release: `android/app/build/outputs/apk/release/app-release.apk`
+
+### Android Build Options
+
+```bash
+python scripts/configure.py android [OPTIONS]
+```
+
+**Options:**
+- `--build-type {debug,release}` - Build configuration (default: debug)
+- `--sdk-path PATH` - Path to Android SDK (overrides ANDROID_HOME environment variable)
+- `--jdk-path PATH` - Path to JDK (overrides JAVA_HOME and auto-detection)
+- `--clean` - Clean build artifacts before building
+- `--verbose` - Show detailed Gradle build output
+
+### Examples
+
+```bash
+# Build debug APK (uses auto-detected SDK/JDK or environment variables)
+python scripts/configure.py android
+
+# Build release APK
+python scripts/configure.py android --build-type release
+
+# Build with explicit SDK and JDK paths
+python scripts/configure.py android --sdk-path ~/Android/Sdk --jdk-path ~/.jdks/temurin-17
+
+# Clean build with verbose output
+python scripts/configure.py android --clean --build-type debug --verbose
+```
+
+### Project Structure
+
+The Android build integrates with the main CMake project:
+- [android/app/src/main/cpp/android_main.cpp](android/app/src/main/cpp/android_main.cpp) - Android native activity entry point
+- [android/CMakeLists.txt](android/CMakeLists.txt) - Android-specific CMake configuration
+- [android/app/build.gradle.kts](android/app/build.gradle.kts) - Gradle build configuration
+- Shaders and models are automatically copied to APK assets during build
 
 ## Configure Script Options
 

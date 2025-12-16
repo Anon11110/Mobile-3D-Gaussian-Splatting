@@ -74,12 +74,26 @@ class HybridSplatRendererApp : public app::IApplication
 	void OnScroll(double xoffset, double yoffset) override;
 	void OnFramebufferResize(int width, int height) override;
 
-#if defined(__ANDROID__)
-	void SetAndroidSplatPath(const char *path)
+	void SetSplatPath(const char *path)
 	{
-		m_androidSplatPath = path;
+		m_splatPath = path;
 	}
+
+	const container::string &GetSplatPath() const
+	{
+		return m_splatPath;
+	}
+
+	static constexpr const char *GetDefaultAssetPath()
+	{
+#if defined(__ANDROID__)
+		return "models/flowers_1.ply";        // Path inside APK assets
+		                                      // return "models/train_7000.ply";
+#else
+		return "assets/flowers_1.ply";        // Desktop path
+		                                      // return "assets/train_7000.ply";
 #endif
+	}
 
   private:
 	void LoadSplatFile(const char *filepath);
@@ -130,8 +144,10 @@ class HybridSplatRendererApp : public app::IApplication
 
 	container::vector<math::vec3> m_testSplatPositions;
 
+	// Splat file path (can be set externally, defaults to assets/splats/flowers_1/point_cloud.ply)
+	container::string m_splatPath;
+
 #if defined(__ANDROID__)
-	container::string m_androidSplatPath;
 
 	// Touch UI state for Android
 	double m_lastTouchX = 0.0;

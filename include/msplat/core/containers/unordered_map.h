@@ -1,6 +1,8 @@
 #pragma once
 
-#include <memory_resource>
+#if !defined(__ANDROID__)
+#	include <memory_resource>
+#endif
 #include <unordered_map>
 
 #ifdef MSPLAT_USE_SYSTEM_STL

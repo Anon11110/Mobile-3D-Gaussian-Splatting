@@ -51,21 +51,23 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_camera.SetMovementSpeed(5.0f);
 	m_camera.SetMouseSensitivity(0.1f);
 
+	if (m_splatPath.empty())
+	{
 #if defined(__ANDROID__)
-	if (!m_androidSplatPath.empty())
-	{
-		LOG_INFO("Loading splat file from Android path: {}", m_androidSplatPath);
-		LoadSplatFile(m_androidSplatPath.c_str());
-	}
-	else
-	{
-		LOG_INFO("No Android splat path set, creating test data...");
+		// Android path should be set by android_main.cpp after extracting from APK assets
+		// If empty here, extraction failed and fall back to test data
+		LOG_INFO("No splat path set (extraction may have failed), creating test data...");
 		CreateTestSplatData();
-	}
 #else
-	LoadSplatFile("assets/flowers_1.ply");
-	// LoadSplatFile("assets/train_7000.ply");
+		m_splatPath = GetDefaultAssetPath();
 #endif
+	}
+
+	if (!m_splatPath.empty())
+	{
+		LOG_INFO("Loading splat file: {}", m_splatPath);
+		LoadSplatFile(m_splatPath.c_str());
+	}
 
 	// Create app-owned sorted indices buffer
 	if (m_scene->GetTotalSplatCount() > 0)
@@ -562,19 +564,24 @@ void HybridSplatRendererApp::OnRender()
 	rhi::SubmitInfo submitInfo = {};
 	submitInfo.signalFence     = m_inFlightFence.Get();
 
+	// Use explicit arrays to avoid std::span brace-initialization issues on Android release builds
+	rhi::SemaphoreWaitInfo waitInfoArray[1];
+	rhi::IRHISemaphore    *signalSemArray[1];
+
 	if (!m_vsyncBypassMode)
 	{
 		// Normal mode: wait for image available and signal when rendering is done
-		rhi::SemaphoreWaitInfo waitInfo = {};
-		waitInfo.semaphore              = m_imageAvailableSemaphores[acquireSemIndex].Get();
-		waitInfo.waitStage              = rhi::StageMask::RenderTarget;
+		waitInfoArray[0].semaphore = m_imageAvailableSemaphores[acquireSemIndex].Get();
+		waitInfoArray[0].waitStage = rhi::StageMask::RenderTarget;
 
-		submitInfo.waitSemaphores     = {&waitInfo, 1};
-		rhi::IRHISemaphore *signalSem = m_renderFinishedSemaphores[imageIndex].Get();
-		submitInfo.signalSemaphores   = {&signalSem, 1};
+		signalSemArray[0] = m_renderFinishedSemaphores[imageIndex].Get();
+
+		submitInfo.waitSemaphores   = std::span<const rhi::SemaphoreWaitInfo>(waitInfoArray, 1);
+		submitInfo.signalSemaphores = std::span<rhi::IRHISemaphore *const>(signalSemArray, 1);
 	}
 
-	device->SubmitCommandLists({&cmdList, 1}, rhi::QueueType::GRAPHICS, submitInfo);
+	rhi::IRHICommandList *cmdListArray[1] = {cmdList};
+	device->SubmitCommandLists(std::span<rhi::IRHICommandList *const>(cmdListArray, 1), rhi::QueueType::GRAPHICS, submitInfo);
 
 	// Present (skip in vsync bypass mode)
 	if (!m_vsyncBypassMode)

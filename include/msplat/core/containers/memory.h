@@ -5,8 +5,10 @@
 #include <memory>
 
 #include <bit>
-#include <memory_resource>
-#include <mimalloc.h>
+#if !defined(__ANDROID__)
+#	include <memory_resource>
+#	include <mimalloc.h>
+#endif
 #include <span>
 #include <type_traits>
 #include <utility>

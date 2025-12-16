@@ -495,16 +495,6 @@ Examples:
         help="Path to JDK (overrides JAVA_HOME and auto-detection)",
     )
     android_parser.add_argument(
-        "--install",
-        action="store_true",
-        help="Install APK to connected device after build",
-    )
-    android_parser.add_argument(
-        "--run",
-        action="store_true",
-        help="Run app after installation",
-    )
-    android_parser.add_argument(
         "--clean",
         action="store_true",
         help="Clean before building",
@@ -513,11 +503,6 @@ Examples:
         "--verbose",
         action="store_true",
         help="Show detailed build output",
-    )
-    android_parser.add_argument(
-        "--list-devices",
-        action="store_true",
-        help="List connected Android devices",
     )
 
     return parser
@@ -584,11 +569,6 @@ def handle_android_command(args) -> int:
     jdk_path = getattr(args, "jdk_path", None)
     config = AndroidConfig(sdk_path=sdk_path, jdk_path=jdk_path)
 
-    # List devices if requested
-    if args.list_devices:
-        config.list_devices()
-        return 0
-
     # Clean if requested
     if args.clean:
         if not config.clean():
@@ -600,11 +580,9 @@ def handle_android_command(args) -> int:
 
     # Build APK
     verbose = getattr(args, "verbose", False)
-    install = getattr(args, "install", False)
-    run = getattr(args, "run", False)
     build_type = getattr(args, "build_type", "debug")
 
-    if config.build_apk(build_type, install, run, verbose):
+    if config.build_apk(build_type, verbose):
         return 0
     return 1
 

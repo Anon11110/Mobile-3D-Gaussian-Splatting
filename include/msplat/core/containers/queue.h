@@ -1,7 +1,9 @@
 #pragma once
 
 #include <deque>
-#include <memory_resource>
+#if !defined(__ANDROID__)
+#	include <memory_resource>
+#endif
 #include <msplat/core/containers/memory.h>
 #include <queue>
 

@@ -55,6 +55,7 @@ FORMAT_DIRS = [
     "src/app",
     "src/core",
     "src/engine",
+    "android/app/src/main/cpp/",
     #"shaders",
 ]
 
