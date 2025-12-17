@@ -66,7 +66,10 @@ void DeviceManager::InitRHI()
 	swapchainDesc.width  = static_cast<uint32_t>(fbw);
 	swapchainDesc.height = static_cast<uint32_t>(fbh);
 	swapchainDesc.format = rhi::TextureFormat::R8G8B8A8_UNORM;
-	m_swapchain          = m_device->CreateSwapchain(swapchainDesc);
+	// Query the application if it requires pre-rotation to be disabled.
+	// This is needed when using ImGui that don't support pre-rotated rendering.
+	swapchainDesc.disablePreRotation = m_app->RequiresDisabledPreRotation();
+	m_swapchain                      = m_device->CreateSwapchain(swapchainDesc);
 }
 
 void DeviceManager::MainLoop()

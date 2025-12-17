@@ -13,9 +13,7 @@
 
 HybridSplatRendererApp::HybridSplatRendererApp()
 {
-#if !defined(__ANDROID__)
 	m_fpsHistory.fill(0.0f);
-#endif
 }
 HybridSplatRendererApp::~HybridSplatRendererApp()                                             = default;
 HybridSplatRendererApp::HybridSplatRendererApp(HybridSplatRendererApp &&) noexcept            = default;
@@ -231,9 +229,10 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_applicationTimer.start();
 	m_fpsCounter.reset();
 
-#if !defined(__ANDROID__)
-	InitImGui();
-#endif
+	if (m_imguiEnabled)
+	{
+		InitImGui();
+	}
 
 	// Log initialization summary
 	int initWidth, initHeight;
@@ -243,6 +242,10 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	         m_backend ? m_backend->GetName() : "None",
 	         m_backend ? m_backend->GetMethodName() : "N/A");
 	LOG_INFO("Splats loaded: {}", m_scene ? m_scene->GetTotalSplatCount() : 0);
+	LOG_INFO("ImGui: {}", m_imguiEnabled ? "enabled" : "disabled");
+#if defined(__ANDROID__)
+	LOG_INFO("Pre-rotation: {}", m_imguiEnabled ? "disabled (ImGui compatibility)" : "enabled (better performance)");
+#endif
 	LOG_INFO("=== Initialization Complete ===");
 
 	return true;
@@ -534,14 +537,12 @@ void HybridSplatRendererApp::OnRender()
 	uint32_t instanceCount = m_scene->GetTotalSplatCount();
 	cmdList->DrawIndexedInstanced(indexCount, instanceCount, 0, 0, 0);
 
-#if !defined(__ANDROID__)
-	if (m_showImGui)
+	if (m_imguiEnabled && m_showImGui)
 	{
 		UpdateFpsHistory();
 		RenderImGui();
 		RenderImGuiToCommandBuffer(cmdList);
 	}
-#endif
 
 	cmdList->EndRendering();
 
@@ -602,9 +603,10 @@ void HybridSplatRendererApp::OnShutdown()
 		rhi::IRHIDevice *device = m_deviceManager->GetDevice();
 		device->WaitIdle();
 
-#if !defined(__ANDROID__)
-		ShutdownImGui();
-#endif
+		if (m_imguiEnabled)
+		{
+			ShutdownImGui();
+		}
 
 		if (m_frameUboDataPtr)
 		{
@@ -703,9 +705,12 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 				break;
 
 			case GLFW_KEY_H:
-				// Toggle ImGui visibility
-				m_showImGui = !m_showImGui;
-				LOG_INFO("ImGui {}", m_showImGui ? "shown" : "hidden");
+				// Toggle ImGui visibility (only if ImGui is enabled)
+				if (m_imguiEnabled)
+				{
+					m_showImGui = !m_showImGui;
+					LOG_INFO("ImGui {}", m_showImGui ? "shown" : "hidden");
+				}
 				break;
 
 			case GLFW_KEY_X:
@@ -1150,13 +1155,36 @@ void HybridSplatRendererApp::PerformCrossBackendVerification()
 	LOG_INFO("=== Verification Complete ===");
 }
 
-#if !defined(__ANDROID__)
 void HybridSplatRendererApp::InitImGui()
 {
 	// Setup Dear ImGui context
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGuiIO &io = ImGui::GetIO();
+
+#if defined(__ANDROID__)
+	// Android-specific ImGui configuration
+	// Disable keyboard navigation on Android
+	io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+
+	ImGui::StyleColorsDark();
+
+	// Scale up UI for mobile screens
+	io.FontGlobalScale = 3.5f;
+	ImGuiStyle &style  = ImGui::GetStyle();
+	style.ScaleAllSizes(2.0f);
+	style.TouchExtraPadding = ImVec2(10.0f, 10.0f);
+
+	rhi::IRHISwapchain *swapchain        = m_deviceManager->GetSwapchain();
+	uint32_t            backbufferWidth  = swapchain->GetBackBufferView(0)->GetWidth();
+	uint32_t            backbufferHeight = swapchain->GetBackBufferView(0)->GetHeight();
+
+	io.DisplaySize = ImVec2(static_cast<float>(backbufferWidth), static_cast<float>(backbufferHeight));
+
+	LOG_INFO("ImGui init: backbuffer={}x{}", backbufferWidth, backbufferHeight);
+
+	ImGui_ImplAndroid_Init(m_imguiWindow);
+#else
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
 	ImGui::StyleColorsDark();
@@ -1164,6 +1192,7 @@ void HybridSplatRendererApp::InitImGui()
 	io.FontGlobalScale = 1.3f;
 
 	ImGui_ImplGlfw_InitForVulkan(m_deviceManager->GetWindow(), true);
+#endif
 
 	// Get RHI device
 	rhi::IRHIDevice *device = m_deviceManager->GetDevice();
@@ -1229,7 +1258,11 @@ void HybridSplatRendererApp::ShutdownImGui()
 {
 	// Cleanup ImGui
 	ImGui_ImplVulkan_Shutdown();
+#if defined(__ANDROID__)
+	ImGui_ImplAndroid_Shutdown();
+#else
 	ImGui_ImplGlfw_Shutdown();
+#endif
 	ImGui::DestroyContext();
 
 	// Destroy descriptor pool
@@ -1254,12 +1287,23 @@ void HybridSplatRendererApp::RenderImGui()
 {
 	// Start the Dear ImGui frame
 	ImGui_ImplVulkan_NewFrame();
+
+#if defined(__ANDROID__)
+	ImGui_ImplAndroid_NewFrame();
+#else
 	ImGui_ImplGlfw_NewFrame();
+#endif
 	ImGui::NewFrame();
 
 	// Create main control window
+#if defined(__ANDROID__)
+	// Scale up UI for mobile screens
+	ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(900, 1000), ImGuiCond_FirstUseEver);
+#else
 	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowSize(ImVec2(400, 500), ImGuiCond_FirstUseEver);
+#endif
 
 	if (ImGui::Begin("Hybrid Splat Renderer Controls", &m_showImGui))
 	{
@@ -1383,6 +1427,11 @@ void HybridSplatRendererApp::RenderImGui()
 		ImGui::Separator();
 		ImGui::Text("Controls Help");
 		ImGui::Separator();
+#if defined(__ANDROID__)
+		ImGui::BulletText("Single finger drag: Rotate camera");
+		ImGui::BulletText("Pinch: Zoom in/out");
+		ImGui::BulletText("Back button: Exit application");
+#else
 		ImGui::BulletText("WASD: Move camera");
 		ImGui::BulletText("Mouse: Look around");
 		ImGui::BulletText("ESC: Exit application");
@@ -1393,6 +1442,7 @@ void HybridSplatRendererApp::RenderImGui()
 		ImGui::BulletText("V: Verify sorting");
 		ImGui::BulletText("X: Toggle cross-backend verify");
 		ImGui::BulletText("B: Toggle vsync bypass");
+#endif
 	}
 	ImGui::End();
 
@@ -1404,4 +1454,15 @@ void HybridSplatRendererApp::RenderImGuiToCommandBuffer(rhi::IRHICommandList *cm
 	VkCommandBuffer vkCmdBuf = static_cast<VkCommandBuffer>(cmdList->GetNativeCommandBuffer());
 	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkCmdBuf);
 }
-#endif        // !defined(__ANDROID__)
+
+#if defined(__ANDROID__)
+bool HybridSplatRendererApp::HandleImGuiInput(AInputEvent *event)
+{
+	if (!m_imguiEnabled)
+	{
+		return false;
+	}
+	ImGui_ImplAndroid_HandleInputEvent(event);
+	return ImGui::GetIO().WantCaptureMouse;
+}
+#endif

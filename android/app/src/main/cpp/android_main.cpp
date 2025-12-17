@@ -139,6 +139,14 @@ class AndroidPlatformAdapter : public app::IPlatformAdapter
 		if (!m_app)
 			return 0;
 
+		// Forward input events to ImGui first
+		// If ImGui consumed the event, don't process it for camera control
+		auto *hybridApp = dynamic_cast<HybridSplatRendererApp *>(m_app);
+		if (hybridApp && hybridApp->HandleImGuiInput(event))
+		{
+			return 1;
+		}
+
 		int32_t eventType = AInputEvent_getType(event);
 
 		if (eventType == AINPUT_EVENT_TYPE_MOTION)
@@ -343,6 +351,7 @@ static void HandleAppCmd(android_app *androidApp, int32_t cmd)
 				g_platformAdapter->SetWindow(androidApp->window);
 
 				g_app = new HybridSplatRendererApp();
+				g_app->SetImGuiWindow(androidApp->window);
 
 				// Extract PLY file from assets to internal storage if not already extracted
 				auto        assetManager = androidApp->activity->assetManager;

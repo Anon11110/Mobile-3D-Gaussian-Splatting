@@ -366,6 +366,7 @@ class VulkanSwapchain final : public RefCounter<IRHISwapchain>
 	VkPresentModeKHR               chosenPresentMode;
 	uint32_t                       requestedBufferCount;
 	VkSurfaceTransformFlagBitsKHR  currentPreTransform;
+	bool                           disablePreRotation;
 
   public:
 	VulkanSwapchain(VkInstance instance, VkDevice device, VkPhysicalDevice physicalDevice, VmaAllocator allocator, VkSurfaceKHR surface,

@@ -9,11 +9,20 @@ set(IMGUI_SOURCES
     ${MSPLAT_ROOT}/third-party/imgui/imgui_widgets.cpp
 )
 
-# ImGui backend sources (GLFW + Vulkan)
-set(IMGUI_BACKEND_SOURCES
-    ${MSPLAT_ROOT}/third-party/imgui/backends/imgui_impl_glfw.cpp
-    ${MSPLAT_ROOT}/third-party/imgui/backends/imgui_impl_vulkan.cpp
-)
+# ImGui backend sources
+if(ANDROID)
+    # Android backend + Vulkan
+    set(IMGUI_BACKEND_SOURCES
+        ${MSPLAT_ROOT}/third-party/imgui/backends/imgui_impl_android.cpp
+        ${MSPLAT_ROOT}/third-party/imgui/backends/imgui_impl_vulkan.cpp
+    )
+else()
+    # GLFW + Vulkan for desktop
+    set(IMGUI_BACKEND_SOURCES
+        ${MSPLAT_ROOT}/third-party/imgui/backends/imgui_impl_glfw.cpp
+        ${MSPLAT_ROOT}/third-party/imgui/backends/imgui_impl_vulkan.cpp
+    )
+endif()
 
 # Create imgui static library
 add_library(imgui STATIC ${IMGUI_SOURCES} ${IMGUI_BACKEND_SOURCES})
@@ -32,12 +41,25 @@ if(MSVC)
     target_compile_options(imgui PUBLIC /utf-8)
 endif()
 
-# Link with required libraries (GLFW and Vulkan are needed for backends)
-find_package(Vulkan REQUIRED)
-target_link_libraries(imgui PUBLIC
-    glfw
-    Vulkan::Vulkan
-)
+# Link with required libraries
+if(ANDROID)
+    # Android: link with android and log libraries, Vulkan
+    find_library(android-lib android)
+    find_library(log-lib log)
+    find_package(Vulkan REQUIRED)
+    target_link_libraries(imgui PUBLIC
+        ${android-lib}
+        ${log-lib}
+        Vulkan::Vulkan
+    )
+else()
+    # Desktop: link with GLFW and Vulkan
+    find_package(Vulkan REQUIRED)
+    target_link_libraries(imgui PUBLIC
+        glfw
+        Vulkan::Vulkan
+    )
+endif()
 
 # Set target properties
 set_target_properties(imgui PROPERTIES

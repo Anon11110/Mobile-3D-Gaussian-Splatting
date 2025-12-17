@@ -9,10 +9,14 @@
 #include "shaders/shaderio.h"
 #include <array>
 #include <cstdlib>
-#if !defined(__ANDROID__)
-#	include <imgui.h>
+#include <imgui.h>
+#include <imgui_impl_vulkan.h>
+#if defined(__ANDROID__)
+#	include <android/input.h>
+#	include <android/native_window.h>
+#	include <imgui_impl_android.h>
+#else
 #	include <imgui_impl_glfw.h>
-#	include <imgui_impl_vulkan.h>
 #endif
 #include <msplat/engine/rendering/shader_factory.h>
 
@@ -84,6 +88,27 @@ class HybridSplatRendererApp : public app::IApplication
 		return m_splatPath;
 	}
 
+	void SetImGuiEnabled(bool enabled)
+	{
+		m_imguiEnabled = enabled;
+	}
+
+	bool IsImGuiEnabled() const
+	{
+		return m_imguiEnabled;
+	}
+
+	bool RequiresDisabledPreRotation() const override
+	{
+#if defined(__ANDROID__)
+		// On Android, disable pre-rotation only when ImGui is enabled
+		// since ImGui doesn't support pre-rotated rendering
+		return m_imguiEnabled;
+#else
+		return false;
+#endif
+	}
+
 	static constexpr const char *GetDefaultAssetPath()
 	{
 #if defined(__ANDROID__)
@@ -144,7 +169,6 @@ class HybridSplatRendererApp : public app::IApplication
 
 	container::vector<math::vec3> m_testSplatPositions;
 
-	// Splat file path (can be set externally, defaults to assets/splats/flowers_1/point_cloud.ply)
 	container::string m_splatPath;
 
 #if defined(__ANDROID__)
@@ -165,10 +189,10 @@ class HybridSplatRendererApp : public app::IApplication
 	void UpdateOrbitCamera();
 #endif
 
-#if !defined(__ANDROID__)
 	// ImGui state
 	void *m_imguiDescriptorPool = nullptr;
-	bool  m_showImGui           = true;
+	bool  m_imguiEnabled        = true;        // Whether ImGui is initialized (set before OnInit)
+	bool  m_showImGui           = true;        // Whether ImGui is visible (runtime toggle)
 
 	// FPS history for graph
 	static constexpr size_t             FPS_HISTORY_SIZE  = 120;
@@ -180,6 +204,19 @@ class HybridSplatRendererApp : public app::IApplication
 	void RenderImGui();
 	void RenderImGuiToCommandBuffer(rhi::IRHICommandList *cmdList);
 	void UpdateFpsHistory();
+
+#if defined(__ANDROID__)
+	// Android-specific ImGui state
+	ANativeWindow *m_imguiWindow = nullptr;
+
+  public:
+	bool HandleImGuiInput(AInputEvent *event);
+	void SetImGuiWindow(ANativeWindow *window)
+	{
+		m_imguiWindow = window;
+	}
+
+  private:
 #endif
 	void RecreateSwapchain();
 	void PerformCrossBackendVerification();

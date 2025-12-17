@@ -134,6 +134,9 @@ VulkanSwapchain::VulkanSwapchain(VkInstance instance, VkDevice device, VkPhysica
 		imageCount = std::min(imageCount, capabilities.maxImageCount);
 	}
 
+	// Store disablePreRotation flag
+	disablePreRotation = desc.disablePreRotation;
+
 	// Create swapchain
 	VkSwapchainCreateInfoKHR createInfo{};
 	createInfo.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -145,14 +148,22 @@ VulkanSwapchain::VulkanSwapchain(VkInstance instance, VkDevice device, VkPhysica
 	createInfo.imageArrayLayers = 1;
 	createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	createInfo.preTransform     = capabilities.currentTransform;
 	createInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-	createInfo.presentMode      = chosenPresentMode;
-	createInfo.clipped          = VK_TRUE;
-	createInfo.oldSwapchain     = VK_NULL_HANDLE;
 
-	// Store pre-transform for application to query
-	currentPreTransform = capabilities.currentTransform;
+	// Use IDENTITY transform if pre-rotation is disabled, otherwise use current transform
+	if (disablePreRotation)
+	{
+		createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+		currentPreTransform     = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+	}
+	else
+	{
+		createInfo.preTransform = capabilities.currentTransform;
+		currentPreTransform     = capabilities.currentTransform;
+	}
+	createInfo.presentMode  = chosenPresentMode;
+	createInfo.clipped      = VK_TRUE;
+	createInfo.oldSwapchain = VK_NULL_HANDLE;
 
 	if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain) != VK_SUCCESS)
 	{
@@ -325,14 +336,22 @@ void VulkanSwapchain::Resize(uint32_t width, uint32_t height)
 	createInfo.imageArrayLayers = 1;
 	createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	createInfo.preTransform     = capabilities.currentTransform;
 	createInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 	createInfo.presentMode      = chosenPresentMode;
 	createInfo.clipped          = VK_TRUE;
 	createInfo.oldSwapchain     = oldSwapchain;
 
-	// Update pre-transform for application to query
-	currentPreTransform = capabilities.currentTransform;
+	// Use IDENTITY transform if pre-rotation is disabled, otherwise use current transform
+	if (disablePreRotation)
+	{
+		createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+		currentPreTransform     = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+	}
+	else
+	{
+		createInfo.preTransform = capabilities.currentTransform;
+		currentPreTransform     = capabilities.currentTransform;
+	}
 
 	if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain) != VK_SUCCESS)
 	{

@@ -90,6 +90,19 @@ class IApplication
 		(void) width;
 		(void) height;
 	}
+
+	/**
+	 * @brief Returns whether the application requires pre-rotation to be disabled.
+	 *
+	 * On Android, pre-rotation improves performance but ImGUI don't support it.
+	 * Override this to return true if your application uses such frameworks.
+	 *
+	 * Default implementation returns false (pre-rotation enabled for better performance).
+	 */
+	virtual bool RequiresDisabledPreRotation() const
+	{
+		return false;
+	}
 };
 
 }        // namespace msplat::app

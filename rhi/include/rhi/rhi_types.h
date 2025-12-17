@@ -778,9 +778,10 @@ struct SwapchainDesc
 	WindowHandleType windowHandleType = WindowHandleType::GLFW;
 	uint32_t         width;
 	uint32_t         height;
-	TextureFormat    format      = TextureFormat::B8G8R8A8_UNORM;
-	uint32_t         bufferCount = 2;
-	bool             vsync       = true;
+	TextureFormat    format             = TextureFormat::B8G8R8A8_UNORM;
+	uint32_t         bufferCount        = 2;
+	bool             vsync              = true;
+	bool             disablePreRotation = false;        // If true, use IDENTITY transform (let compositor handle rotation)
 };
 
 struct ClearValue

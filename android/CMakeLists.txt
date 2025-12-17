@@ -35,6 +35,9 @@ add_subdirectory(${MSPLAT_ROOT}/rhi ${CMAKE_CURRENT_BINARY_DIR}/rhi)
 # Include app library configuration (will use android-specific sources)
 include(${MSPLAT_ROOT}/cmake/app.cmake)
 
+# Include imgui library configuration
+include(${MSPLAT_ROOT}/cmake/imgui.cmake)
+
 # Find required Android libraries
 find_library(log-lib log)
 find_library(android-lib android)
@@ -69,6 +72,7 @@ target_link_libraries(msplat_android PRIVATE
     engine
     app
     RHI
+    imgui
     native_app_glue
     ${android-lib}
     ${log-lib}
