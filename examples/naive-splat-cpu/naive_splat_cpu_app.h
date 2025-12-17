@@ -54,6 +54,9 @@ class NaiveSplatCpuApp : public app::IApplication
 	rhi::BufferHandle m_frameUboBuffer;
 	void             *m_frameUboDataPtr = nullptr;
 
+	// Command lists (one per swapchain image)
+	container::vector<rhi::CommandListHandle> m_commandLists;
+
 	// Synchronization
 	container::vector<rhi::SemaphoreHandle> m_imageAvailableSemaphores;
 	container::vector<rhi::SemaphoreHandle> m_renderFinishedSemaphores;

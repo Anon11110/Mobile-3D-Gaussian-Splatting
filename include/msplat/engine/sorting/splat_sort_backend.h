@@ -144,6 +144,8 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	container::unique_ptr<GpuSplatSorter> m_sorter;
 	int                                   m_currentMethod = 1;        // Default: IntegratedScan
 
+	rhi::CommandListHandle m_cmdList;
+
 	// Verification state
 	bool m_prepareVerification  = false;
 	bool m_verificationPrepared = false;

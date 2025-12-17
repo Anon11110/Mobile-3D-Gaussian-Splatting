@@ -21,6 +21,8 @@ bool GpuSplatSortBackend::Initialize(
 	m_targetBuffer = sortedIndicesBuffer;
 	m_splatCount   = totalSplatCount;
 
+	m_cmdList = device->CreateCommandList(rhi::QueueType::COMPUTE);
+
 	// Create GPU sorter
 	m_sorter = container::make_unique<GpuSplatSorter>(device, vfs);
 	m_sorter->Initialize(totalSplatCount);
@@ -40,12 +42,10 @@ void GpuSplatSortBackend::Update(const app::Camera &camera)
 		return;
 	}
 
-	// Create command list for compute work
-	auto cmdList = m_device->CreateCommandList(rhi::QueueType::COMPUTE);
-	cmdList->Begin();
+	m_cmdList->Begin();
 
 	// Execute GPU sort - pass camera directly
-	m_sorter->Sort(cmdList.Get(), *m_scene, camera);
+	m_sorter->Sort(m_cmdList.Get(), *m_scene, camera);
 
 	// Copy result from sorter's internal buffer to app-owned target buffer
 	rhi::BufferHandle sorterOutput = m_sorter->GetSortedIndices();
@@ -55,12 +55,12 @@ void GpuSplatSortBackend::Update(const app::Camera &camera)
 	copyRegion.size      = static_cast<uint64_t>(m_splatCount) * sizeof(uint32_t);
 
 	std::array<rhi::BufferCopy, 1> regions = {copyRegion};
-	cmdList->CopyBuffer(sorterOutput.Get(), m_targetBuffer.Get(), regions);
+	m_cmdList->CopyBuffer(sorterOutput.Get(), m_targetBuffer.Get(), regions);
 
-	cmdList->End();
+	m_cmdList->End();
 
 	// Submit and wait for completion
-	std::array<rhi::IRHICommandList *, 1> cmdLists = {cmdList.Get()};
+	std::array<rhi::IRHICommandList *, 1> cmdLists = {m_cmdList.Get()};
 	m_device->SubmitCommandLists(cmdLists, rhi::QueueType::COMPUTE);
 	m_device->WaitIdle();
 }

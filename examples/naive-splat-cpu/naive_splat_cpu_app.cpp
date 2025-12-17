@@ -139,17 +139,25 @@ bool NaiveSplatCpuApp::OnInit(app::DeviceManager *deviceManager)
 	m_camera.SetPerspectiveProjection(45.0f, (float) width / height, 0.1f, 100.0f);
 	m_camera.SetPosition({0.0f, 0.0f, 5.0f});
 
-	// 9. Synchronization Primitives
-	m_inFlightFences.resize(2);
-	m_imageAvailableSemaphores.resize(2);
-	for (int i = 0; i < 2; ++i)
+	// 9. Command lists
+	uint32_t imageCount = swapchain->GetImageCount();
+	m_commandLists.resize(imageCount);
+	for (uint32_t i = 0; i < imageCount; ++i)
 	{
-		m_inFlightFences[i]           = device->CreateFence(true);
-		m_imageAvailableSemaphores[i] = device->CreateSemaphore();
+		m_commandLists[i] = device->CreateCommandList(rhi::QueueType::GRAPHICS);
 	}
-	m_renderFinishedSemaphores.resize(swapchain->GetImageCount());
-	for (uint32_t i = 0; i < swapchain->GetImageCount(); ++i)
+
+	// 10. Synchronization Primitives
+	m_inFlightFences.resize(2);
+	for (uint32_t i = 0; i < 2; ++i)
 	{
+		m_inFlightFences[i] = device->CreateFence(true);
+	}
+	m_imageAvailableSemaphores.resize(imageCount);
+	m_renderFinishedSemaphores.resize(imageCount);
+	for (uint32_t i = 0; i < imageCount; ++i)
+	{
+		m_imageAvailableSemaphores[i] = device->CreateSemaphore();
 		m_renderFinishedSemaphores[i] = device->CreateSemaphore();
 	}
 
@@ -181,9 +189,8 @@ void NaiveSplatCpuApp::OnRender()
 		return;
 	}
 
-	// Wait for the frame in flight to be finished
+	// Wait for previous frame to finish
 	m_inFlightFences[m_currentFrame]->Wait();
-	m_inFlightFences[m_currentFrame]->Reset();
 
 	m_fpsCounter.frame();
 
@@ -195,6 +202,9 @@ void NaiveSplatCpuApp::OnRender()
 		// Handle swapchain recreation if necessary
 		return;
 	}
+
+	// Reset fence AFTER successful acquire to avoid blocking forever on early returns
+	m_inFlightFences[m_currentFrame]->Reset();
 
 	FrameUBO ubo{};
 	ubo.view       = m_camera.GetViewMatrix();
@@ -210,6 +220,7 @@ void NaiveSplatCpuApp::OnRender()
 	ubo.enableSplatFilter  = 1;                                    // Enable EWA filtering
 	ubo.basisViewport      = {1.0f / width, 1.0f / height};        // Resolution-aware scaling
 	ubo.inverseFocalAdj    = 1.0f;                                 // No FOV adjustment by default
+	ubo.screenRotation     = {1.0f, 0.0f, 0.0f, 1.0f};             // Identity rotation matrix
 	memcpy(m_frameUboDataPtr, &ubo, sizeof(FrameUBO));
 
 	// Check for new sorted indices and upload them
@@ -221,7 +232,7 @@ void NaiveSplatCpuApp::OnRender()
 	}
 
 	// Record command buffer
-	auto cmdList = device->CreateCommandList();
+	rhi::IRHICommandList *cmdList = m_commandLists[imageIndex].Get();
 	cmdList->Begin();
 
 	// Transition swapchain image to render target
@@ -278,19 +289,24 @@ void NaiveSplatCpuApp::OnRender()
 	cmdList->End();
 
 	// Submit to the graphics queue
-	rhi::SemaphoreWaitInfo waitInfo   = {m_imageAvailableSemaphores[m_currentFrame].Get(), rhi::StageMask::RenderTarget};
-	rhi::IRHISemaphore    *signalSem  = m_renderFinishedSemaphores[imageIndex].Get();
-	rhi::IRHICommandList  *cmdListPtr = cmdList.Get();
+	// Use explicit arrays to avoid std::span brace-initialization issues on release builds
+	rhi::SemaphoreWaitInfo waitInfoArray[1];
+	waitInfoArray[0].semaphore = m_imageAvailableSemaphores[m_currentFrame].Get();
+	waitInfoArray[0].waitStage = rhi::StageMask::RenderTarget;
+
+	rhi::IRHISemaphore *signalSemArray[1];
+	signalSemArray[0] = m_renderFinishedSemaphores[m_currentFrame].Get();
 
 	rhi::SubmitInfo submitInfo{};
-	submitInfo.waitSemaphores   = std::span<const rhi::SemaphoreWaitInfo>(&waitInfo, 1);
-	submitInfo.signalSemaphores = std::span<rhi::IRHISemaphore *const>(&signalSem, 1);
+	submitInfo.waitSemaphores   = std::span<const rhi::SemaphoreWaitInfo>(waitInfoArray, 1);
+	submitInfo.signalSemaphores = std::span<rhi::IRHISemaphore *const>(signalSemArray, 1);
 	submitInfo.signalFence      = m_inFlightFences[m_currentFrame].Get();
 
-	device->SubmitCommandLists(std::span<rhi::IRHICommandList *const>(&cmdListPtr, 1), rhi::QueueType::GRAPHICS, submitInfo);
+	rhi::IRHICommandList *cmdListArray[1] = {cmdList};
+	device->SubmitCommandLists(std::span<rhi::IRHICommandList *const>(cmdListArray, 1), rhi::QueueType::GRAPHICS, submitInfo);
 
 	// Present
-	swapchain->Present(imageIndex, m_renderFinishedSemaphores[imageIndex].Get());
+	swapchain->Present(imageIndex, m_renderFinishedSemaphores[m_currentFrame].Get());
 
 	m_currentFrame = (m_currentFrame + 1) % 2;
 

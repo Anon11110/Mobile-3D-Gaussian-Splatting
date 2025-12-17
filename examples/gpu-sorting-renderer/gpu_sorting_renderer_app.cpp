@@ -233,6 +233,7 @@ void GpuSortingRendererApp::OnRender()
 	ubo.enableSplatFilter  = 1;                                    // Enable EWA filtering
 	ubo.basisViewport      = {1.0f / width, 1.0f / height};        // Resolution-aware scaling
 	ubo.inverseFocalAdj    = 1.0f;                                 // No FOV adjustment by default
+	ubo.screenRotation     = {1.0f, 0.0f, 0.0f, 1.0f};             // Identity rotation matrix
 	memcpy(frameUboDataPtr, &ubo, sizeof(FrameUBO));
 
 	rhi::IRHICommandList *cmdList = commandLists[imageIndex].Get();
@@ -371,19 +372,24 @@ void GpuSortingRendererApp::OnRender()
 	rhi::SubmitInfo submitInfo = {};
 	submitInfo.signalFence     = inFlightFence.Get();
 
+	// Use explicit arrays to avoid std::span brace-initialization issues on release builds
+	rhi::SemaphoreWaitInfo waitInfoArray[1];
+	rhi::IRHISemaphore    *signalSemArray[1];
+
 	if (!benchmarkMode)
 	{
 		// Normal mode: wait for image available and signal when rendering is done
-		rhi::SemaphoreWaitInfo waitInfo = {};
-		waitInfo.semaphore              = imageAvailableSemaphores[acquireSemIndex].Get();
-		waitInfo.waitStage              = rhi::StageMask::RenderTarget;
+		waitInfoArray[0].semaphore = imageAvailableSemaphores[acquireSemIndex].Get();
+		waitInfoArray[0].waitStage = rhi::StageMask::RenderTarget;
 
-		submitInfo.waitSemaphores     = {&waitInfo, 1};
-		rhi::IRHISemaphore *signalSem = renderFinishedSemaphores[imageIndex].Get();
-		submitInfo.signalSemaphores   = {&signalSem, 1};
+		signalSemArray[0] = renderFinishedSemaphores[imageIndex].Get();
+
+		submitInfo.waitSemaphores   = std::span<const rhi::SemaphoreWaitInfo>(waitInfoArray, 1);
+		submitInfo.signalSemaphores = std::span<rhi::IRHISemaphore *const>(signalSemArray, 1);
 	}
 
-	device->SubmitCommandLists({&cmdList, 1}, rhi::QueueType::GRAPHICS, submitInfo);
+	rhi::IRHICommandList *cmdListArray[1] = {cmdList};
+	device->SubmitCommandLists(std::span<rhi::IRHICommandList *const>(cmdListArray, 1), rhi::QueueType::GRAPHICS, submitInfo);
 
 	// Present (skip in benchmark mode to remove vsync bottleneck)
 	if (!benchmarkMode)
