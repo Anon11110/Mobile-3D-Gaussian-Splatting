@@ -1141,11 +1141,20 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 	if (verificationHistogram)
 	{
 		LOG_INFO("");
-		LOG_INFO("=== Scanned Histogram Verification (Prefix Sums) ===");
-		LOG_INFO("Note: After scan passes, histograms contain exclusive prefix sums, not counts");
+		if (sortMethod == SortMethod::Prescan)
+		{
+			LOG_INFO("=== Scanned Histogram Verification (Prefix Sums) ===");
+			LOG_INFO("Note: After scan passes, histograms contain exclusive prefix sums, not counts");
+		}
+		else
+		{
+			LOG_INFO("=== Raw Histogram Verification (Counts) ===");
+			LOG_INFO("Note: IntegratedScan keeps raw histogram counts, computes prefix sums inline");
+		}
 
-		uint32_t  numWorkgroups = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
-		uint32_t *histogramData = static_cast<uint32_t *>(verificationHistogram->Map());
+		uint32_t  bufferLayoutNumWorkgroups = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
+		uint32_t  numWorkgroups             = std::min(MaxWorkgroups, bufferLayoutNumWorkgroups);
+		uint32_t *histogramData             = static_cast<uint32_t *>(verificationHistogram->Map());
 
 		container::vector<uint32_t> tempKeys;
 		tempKeys.resize(totalSplatCount);
@@ -1190,7 +1199,7 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 				}
 
 				// Histogram data layout: [bin0: WG0..WGn | bin1: WG0..WGn | ...]
-				uint32_t passOffset = pass * numWorkgroups * RadixSortBins;
+				uint32_t passOffset = pass * bufferLayoutNumWorkgroups * RadixSortBins;
 				for (uint32_t wg = 0; wg < numWorkgroups; ++wg)
 				{
 					for (uint32_t bin = 0; bin < RadixSortBins; ++bin)
@@ -1220,8 +1229,7 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 				}
 
 				// Distribute elements to workgroups as the GPU does
-				uint32_t actualNumWorkgroups   = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
-				uint32_t elementsPerWorkgroup  = (totalSplatCount + actualNumWorkgroups - 1) / actualNumWorkgroups;
+				uint32_t elementsPerWorkgroup  = (totalSplatCount + numWorkgroups - 1) / numWorkgroups;
 				uint32_t numBlocksPerWorkgroup = (elementsPerWorkgroup + WorkgroupSize - 1) / WorkgroupSize;
 
 				// Debug: Track elements in specific bins for WG[0]
@@ -1230,7 +1238,7 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 				uint32_t debugAllBin51Count = 0;
 
 				// Each workgroup processes numBlocksPerWorkgroup blocks of WorkgroupSize elements
-				for (uint32_t wg = 0; wg < actualNumWorkgroups; ++wg)
+				for (uint32_t wg = 0; wg < numWorkgroups; ++wg)
 				{
 					uint32_t startIdx = wg * numBlocksPerWorkgroup * WorkgroupSize;
 
@@ -1249,7 +1257,7 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 							uint32_t bin      = (depthKey >> shift) & (RadixSortBins - 1);
 
 							// Use bin-major indexing: bin * numWorkgroups + wg
-							allHistogramCounts[bin * actualNumWorkgroups + wg]++;
+							allHistogramCounts[bin * numWorkgroups + wg]++;
 
 							// Debug tracking for bins 51 and 52
 							if (bin == 51)
@@ -1283,11 +1291,11 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 
 				if (pass == 0)
 				{
-					LOG_INFO("    DEBUG: WG[0] Bin[51] CPU count: {}", allHistogramCounts[51 * actualNumWorkgroups + 0]);
-					LOG_INFO("    DEBUG: WG[0] Bin[52] CPU count: {}", allHistogramCounts[52 * actualNumWorkgroups + 0]);
+					LOG_INFO("    DEBUG: WG[0] Bin[51] CPU count: {}", allHistogramCounts[51 * numWorkgroups + 0]);
+					LOG_INFO("    DEBUG: WG[0] Bin[52] CPU count: {}", allHistogramCounts[52 * numWorkgroups + 0]);
 					LOG_INFO("    DEBUG: Total Bin[51] count across all WGs: {}", debugAllBin51Count);
 					LOG_INFO("    DEBUG: Elements per workgroup: {}", elementsPerWorkgroup);
-					LOG_INFO("    DEBUG: Actual num workgroups: {}", actualNumWorkgroups);
+					LOG_INFO("    DEBUG: Actual num workgroups: {}", numWorkgroups);
 				}
 
 				// Now perform exclusive prefix sum
@@ -1298,19 +1306,22 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 					runningSum += allHistogramCounts[i];
 				}
 
-				// Debug: Print first few raw values from GPU histogram
+				// Debug: Print first few values from GPU histogram
+				bool verifyPrefixSumsDebug = (sortMethod == SortMethod::Prescan);
 				if (pass == 0 || pass == 1)
 				{
-					LOG_INFO("  Debug: First 10 raw GPU histogram values (bin-major order):");
+					LOG_INFO("  Debug: First 10 GPU histogram values (bin-major order, expecting {}):",
+					         verifyPrefixSumsDebug ? "prefix sums" : "raw counts");
 					for (uint32_t i = 0; i < std::min<uint32_t>(10, numWorkgroups * RadixSortBins); ++i)
 					{
+						uint32_t expected = verifyPrefixSumsDebug ? expectedPrefixSums[i] : allHistogramCounts[i];
 						LOG_INFO("    histData[{}] = {} (expected={})", i,
-						         histogramData[passOffset + i], expectedPrefixSums[i]);
+						         histogramData[passOffset + i], expected);
 					}
-					LOG_INFO("  Debug: Values at key positions:");
+					LOG_INFO("  Debug: Values at key positions (bin spacing = {}):", numWorkgroups);
 					LOG_INFO("    histData[0] (bin0,wg0) = {}", histogramData[passOffset + 0]);
-					LOG_INFO("    histData[40] (bin1,wg0) = {}", histogramData[passOffset + 40]);
-					LOG_INFO("    histData[80] (bin2,wg0) = {}", histogramData[passOffset + 80]);
+					LOG_INFO("    histData[{}] (bin1,wg0) = {}", numWorkgroups, histogramData[passOffset + numWorkgroups]);
+					LOG_INFO("    histData[{}] (bin2,wg0) = {}", 2 * numWorkgroups, histogramData[passOffset + 2 * numWorkgroups]);
 
 					if (pass == 1)
 					{
@@ -1320,12 +1331,41 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 						LOG_INFO("  Debug: WG[1] Bin[0] - idx={}, GPU={}, Expected={}",
 						         idx_wg1_bin0, histogramData[idx_wg1_bin0], expected_wg1_bin0);
 					}
+
+					if (pass == 2)
+					{
+						// Extended debug for Pass 2
+						LOG_INFO("  Debug Pass 2: Buffer layout info:");
+						LOG_INFO("    bufferLayoutNumWorkgroups = {}", bufferLayoutNumWorkgroups);
+						LOG_INFO("    numWorkgroups (capped) = {}", numWorkgroups);
+						LOG_INFO("    passOffset = {} (pass * {} * {})", passOffset, bufferLayoutNumWorkgroups, RadixSortBins);
+
+						// Check raw buffer values at passOffset
+						LOG_INFO("  Debug Pass 2: Raw buffer values at passOffset:");
+						for (uint32_t i = 0; i < 5; ++i)
+						{
+							LOG_INFO("    histogramData[{}] = {}", passOffset + i, histogramData[passOffset + i]);
+						}
+
+						// Check if there's data at the expected location
+						uint32_t nonZeroCount = 0;
+						uint32_t totalChecked = std::min<uint32_t>(1000, numWorkgroups * RadixSortBins);
+						for (uint32_t i = 0; i < totalChecked; ++i)
+						{
+							if (histogramData[passOffset + i] != 0)
+								nonZeroCount++;
+						}
+						LOG_INFO("  Debug Pass 2: Non-zero values in first {} entries: {}", totalChecked, nonZeroCount);
+					}
 				}
 
-				// Compare GPU scanned results with expected prefix sums
-				bool     passCorrect   = true;
-				uint32_t mismatchCount = 0;
-				uint32_t nonZeroBins   = 0;
+				// Compare GPU results with expected values
+				// Prescan: compare with prefix sums (histogram is scanned)
+				// IntegratedScan: compare with raw counts (histogram is not scanned)
+				bool     passCorrect      = true;
+				uint32_t mismatchCount    = 0;
+				uint32_t nonZeroBins      = 0;
+				bool     verifyPrefixSums = (sortMethod == SortMethod::Prescan);
 
 				for (uint32_t wg = 0; wg < numWorkgroups; ++wg)
 				{
@@ -1335,7 +1375,7 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 						uint32_t idx           = passOffset + bin * numWorkgroups + wg;
 						uint32_t globalIdx     = bin * numWorkgroups + wg;
 						uint32_t gpuValue      = histogramData[idx];
-						uint32_t expectedValue = expectedPrefixSums[globalIdx];
+						uint32_t expectedValue = verifyPrefixSums ? expectedPrefixSums[globalIdx] : allHistogramCounts[globalIdx];
 
 						if (gpuValue != expectedValue || allHistogramCounts[globalIdx] > 0)
 						{
@@ -1354,8 +1394,9 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 										uint32_t prevBin       = bin - 1;
 										uint32_t prevIdx       = passOffset + prevBin * numWorkgroups + wg;
 										uint32_t prevGlobalIdx = prevBin * numWorkgroups + wg;
+										uint32_t prevExpected  = verifyPrefixSums ? expectedPrefixSums[prevGlobalIdx] : allHistogramCounts[prevGlobalIdx];
 										LOG_INFO("    Previous: WG[{}] Bin[{:3}]: GPU={:6}, Expected={:6} (count was {})",
-										         wg, prevBin, histogramData[prevIdx], expectedPrefixSums[prevGlobalIdx],
+										         wg, prevBin, histogramData[prevIdx], prevExpected,
 										         allHistogramCounts[prevGlobalIdx]);
 									}
 
@@ -1365,8 +1406,9 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 										uint32_t nextBin       = bin + 1;
 										uint32_t nextIdx       = passOffset + nextBin * numWorkgroups + wg;
 										uint32_t nextGlobalIdx = nextBin * numWorkgroups + wg;
+										uint32_t nextExpected  = verifyPrefixSums ? expectedPrefixSums[nextGlobalIdx] : allHistogramCounts[nextGlobalIdx];
 										LOG_INFO("    Next: WG[{}] Bin[{:3}]: GPU={:6}, Expected={:6} (count was {})",
-										         wg, nextBin, histogramData[nextIdx], expectedPrefixSums[nextGlobalIdx],
+										         wg, nextBin, histogramData[nextIdx], nextExpected,
 										         allHistogramCounts[nextGlobalIdx]);
 									}
 
@@ -1399,11 +1441,11 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 
 				if (passCorrect)
 				{
-					LOG_INFO("Pass {} scanned histogram verification: PASSED ✓", pass + 1);
+					LOG_INFO("Pass {} {} histogram verification: PASSED ✓", pass + 1, verifyPrefixSums ? "scanned" : "raw");
 				}
 				else
 				{
-					LOG_ERROR("Pass {} scanned histogram verification: FAILED ({} mismatches) ✗", pass + 1, mismatchCount);
+					LOG_ERROR("Pass {} {} histogram verification: FAILED ({} mismatches) ✗", pass + 1, verifyPrefixSums ? "scanned" : "raw", mismatchCount);
 				}
 
 				if (pass == 3)

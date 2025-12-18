@@ -547,7 +547,7 @@ void GpuSortingRendererApp::LoadSplatFile(const char *filepath)
 void GpuSortingRendererApp::CreateTestSplatData()
 {
 	// Camera is at (0, 0, 5) looking down -Z axis (towards origin)
-	const uint32_t testSplatCount = 10000000;
+	const uint32_t testSplatCount = 500000;
 	auto           testData       = container::make_shared<engine::SplatSoA>();
 	testData->Resize(testSplatCount, 0);
 

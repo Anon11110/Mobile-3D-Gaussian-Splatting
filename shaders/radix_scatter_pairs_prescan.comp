@@ -94,7 +94,7 @@ void main()
             depthKey = inputDepthKeys[elementId];
             splatIdx = inputSplatIndices[elementId];
             binID = uint(depthKey >> pc.shift) & uint(RADIX_SORT_BINS - 1);
-            atomicAdd(binFlags[binID].flags[flagsBin], flagsBit);
+            atomicOr(binFlags[binID].flags[flagsBin], flagsBit);
         }
         barrier();
 
