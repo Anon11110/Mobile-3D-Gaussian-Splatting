@@ -94,9 +94,6 @@ container::span<const uint32_t> CpuSplatSorter::Impl::GetSortedIndices()
 	uint32_t *readyBuffer = m_consumerBuffer.exchange(nullptr);
 	if (readyBuffer)
 	{
-		// Swap the producer buffer so the worker can write to the one we just consumed
-		std::unique_lock<std::mutex> lock(m_mutex);
-		m_producerBuffer = readyBuffer;
 		return {readyBuffer, m_indices_A.size()};
 	}
 	return {};
@@ -142,8 +139,10 @@ void CpuSplatSorter::Impl::SortWorker()
 		core::ParallelSort(m_producerBuffer, m_producerBuffer + count,
 		                   [depthsPtr](const uint32_t a, const uint32_t b) { return depthsPtr[a] < depthsPtr[b]; });
 
-		// 3. Mark as complete
-		m_consumerBuffer.store(m_producerBuffer);
+		// 3. Mark as complete and swap to the other buffer for next sort
+		uint32_t *completedBuffer = m_producerBuffer;
+		m_producerBuffer          = (completedBuffer == m_indices_A.data()) ? m_indices_B.data() : m_indices_A.data();
+		m_consumerBuffer.store(completedBuffer);
 
 		// Reset request flag (needs lock for synchronization with RequestSort)
 		{
