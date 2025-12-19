@@ -104,7 +104,6 @@ void main()
 
             // Calculate output index of element
             uint prefix = 0;
-            uint count = 0;
             for (uint i = 0; i < WORKGROUP_SIZE / 32; i++)
             {
                 const uint bits = binFlags[binID].flags[i];
@@ -112,22 +111,25 @@ void main()
                 const uint partialCount = bitCount(bits & (flagsBit - 1));
                 prefix += (i < flagsBin) ? fullCount : 0U;
                 prefix += (i == flagsBin) ? partialCount : 0U;
-                count += fullCount;
             }
 
             // Write both depth key and splat index to output
             uint outputIdx = binOffset + prefix;
             outputDepthKeys[outputIdx] = depthKey;
             outputSplatIndices[outputIdx] = splatIdx;
-
-            // Update local offsets for next block within this workgroup
-            // Only one thread per bin should do this
-            if (prefix == count - 1)
-            {
-                atomicAdd(localOffsets[binID], count);
-            }
         }
+        barrier();
 
+        // Update local offsets for next block, all threads update their respective bin
+        if (lID < RADIX_SORT_BINS)
+        {
+            uint count = 0;
+            for (uint k = 0; k < WORKGROUP_SIZE / 32; k++)
+            {
+                count += bitCount(binFlags[lID].flags[k]);
+            }
+            localOffsets[lID] += count;
+        }
         barrier();
     }
 }

@@ -311,6 +311,7 @@ class VulkanCommandList final : public RefCounter<IRHICommandList>
 	void DispatchIndirect(IRHIBuffer *buffer, size_t offset) override;
 
 	void CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer, std::span<const BufferCopy> regions) override;
+	void FillBuffer(IRHIBuffer *buffer, size_t offset, size_t size, uint32_t value) override;
 	void CopyTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureCopy> regions) override;
 	void BlitTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureBlit> regions, FilterMode filter = FilterMode::LINEAR) override;
 

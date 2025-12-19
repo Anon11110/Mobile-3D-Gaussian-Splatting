@@ -355,6 +355,17 @@ void VulkanCommandList::CopyBuffer(IRHIBuffer *srcBuffer, IRHIBuffer *dstBuffer,
 	                reinterpret_cast<const VkBufferCopy *>(regions.data()));
 }
 
+void VulkanCommandList::FillBuffer(IRHIBuffer *buffer, size_t offset, size_t size, uint32_t value)
+{
+	auto *vkBuffer = static_cast<VulkanBuffer *>(buffer);
+
+	// size == 0 means fill the entire buffer from offset to the end
+	VkDeviceSize fillSize = (size == 0) ? VK_WHOLE_SIZE : static_cast<VkDeviceSize>(size);
+
+	vkCmdFillBuffer(commandBuffer, vkBuffer->GetHandle(),
+	                static_cast<VkDeviceSize>(offset), fillSize, value);
+}
+
 void VulkanCommandList::CopyTexture(IRHITexture *srcTexture, IRHITexture *dstTexture, std::span<const TextureCopy> regions)
 {
 	if (regions.empty())

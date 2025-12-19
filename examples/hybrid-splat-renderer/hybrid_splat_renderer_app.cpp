@@ -170,17 +170,10 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_descriptorSet->BindBuffer(3, colorsBinding);
 
 	// Binding 4: SH Rest
-	if (m_scene->GetGpuData().shRest)
-	{
-		rhi::BufferBinding shBinding{};
-		shBinding.buffer = m_scene->GetGpuData().shRest.Get();
-		shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(4, shBinding);
-	}
-	else
-	{
-		LOG_INFO("Skipping SH rest buffer binding (no SH data in scene)");
-	}
+	rhi::BufferBinding shBinding{};
+	shBinding.buffer = m_scene->GetGpuData().shRest.Get();
+	shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+	m_descriptorSet->BindBuffer(4, shBinding);
 
 	// Binding 5: Sorted indices (app-owned buffer, written to by backend)
 	if (m_sortedIndices)

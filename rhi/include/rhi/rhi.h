@@ -198,6 +198,7 @@ class IRHICommandList : public IRefCounted
 	virtual void DispatchIndirect(IRHIBuffer *buffer, size_t offset)                                = 0;
 
 	virtual void CopyBuffer(IRHIBuffer *RHI_RESTRICT srcBuffer, IRHIBuffer *RHI_RESTRICT dstBuffer, std::span<const BufferCopy> regions) = 0;
+	virtual void FillBuffer(IRHIBuffer *buffer, size_t offset, size_t size, uint32_t value)                                              = 0;
 
 	virtual void CopyTexture(IRHITexture *RHI_RESTRICT srcTexture, IRHITexture *RHI_RESTRICT dstTexture, std::span<const TextureCopy> regions)                                         = 0;
 	virtual void BlitTexture(IRHITexture *RHI_RESTRICT srcTexture, IRHITexture *RHI_RESTRICT dstTexture, std::span<const TextureBlit> regions, FilterMode filter = FilterMode::LINEAR) = 0;

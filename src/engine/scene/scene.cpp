@@ -296,17 +296,27 @@ void Scene::AllocateGpuBuffers()
 
 	// Spherical harmonics coefficients buffer
 	// For standard 3DGS models with SH degree 3, we need exactly 45 coefficients per splat
-	if (maxShCoeffsPerSplat > 0)
 	{
-		const uint32_t shCoeffsPerSplat = 45;
-		BufferDesc     desc{};
+		BufferDesc desc{};
 		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
 		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * shCoeffsPerSplat * sizeof(float);
-		gpuData.shRest     = device->CreateBuffer(desc);
-		LOG_INFO("Allocated SH buffer for {} splats with {} coeffs each ({} MB)",
-		         totalSplatCount, shCoeffsPerSplat,
-		         (desc.size / 1024.0f / 1024.0f));
+
+		if (maxShCoeffsPerSplat > 0)
+		{
+			const uint32_t shCoeffsPerSplat = 45;
+			desc.size                       = totalSplatCount * shCoeffsPerSplat * sizeof(float);
+			gpuData.shRest                  = device->CreateBuffer(desc);
+			LOG_INFO("Allocated SH buffer for {} splats with {} coeffs each ({} MB)",
+			         totalSplatCount, shCoeffsPerSplat,
+			         (desc.size / 1024.0f / 1024.0f));
+		}
+		else
+		{
+			// Create minimal placeholder buffer when no SH data exists
+			desc.size      = 16;
+			gpuData.shRest = device->CreateBuffer(desc);
+			LOG_INFO("Allocated minimal SH placeholder buffer (no SH data)");
+		}
 	}
 
 	// Sorted indices buffer for rendering order

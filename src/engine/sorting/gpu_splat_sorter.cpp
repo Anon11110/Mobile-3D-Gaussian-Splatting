@@ -1454,39 +1454,71 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 				}
 
 				// Perform CPU radix sort for this pass to prepare for next pass
-				container::vector<uint32_t> counts;
-				counts.resize(RadixSortBins);
-				for (uint32_t i = 0; i < RadixSortBins; ++i)
+				container::vector<container::vector<uint32_t>> wgCounts;
+				wgCounts.resize(numWorkgroups);
+				for (uint32_t wg = 0; wg < numWorkgroups; ++wg)
 				{
-					counts[i] = 0;
+					wgCounts[wg].resize(RadixSortBins, 0);
 				}
 
-				for (uint32_t i = 0; i < totalSplatCount; ++i)
+				// Count elements per (workgroup, bin)
+				for (uint32_t wg = 0; wg < numWorkgroups; ++wg)
 				{
-					uint32_t bin = (cpuSortedKeys[i] >> shift) & (RadixSortBins - 1);
-					counts[bin]++;
+					uint32_t startIdx = wg * numBlocksPerWorkgroup * WorkgroupSize;
+					for (uint32_t block = 0; block < numBlocksPerWorkgroup; ++block)
+					{
+						uint32_t blockStartIdx = startIdx + block * WorkgroupSize;
+						for (uint32_t tid = 0; tid < WorkgroupSize; ++tid)
+						{
+							uint32_t i = blockStartIdx + tid;
+							if (i >= totalSplatCount)
+								break;
+							uint32_t bin = (cpuSortedKeys[i] >> shift) & (RadixSortBins - 1);
+							wgCounts[wg][bin]++;
+						}
+					}
 				}
 
-				// Calculate exclusive prefix sums (starting positions)
-				container::vector<uint32_t> offsets;
-				offsets.resize(RadixSortBins);
-				uint32_t sum = 0;
-				for (uint32_t i = 0; i < RadixSortBins; ++i)
+				// Compute global offsets in bin-major order: [bin0: WG0..WGn | bin1: WG0..WGn | ...]
+				container::vector<uint32_t> globalOffsets;
+				globalOffsets.resize(RadixSortBins * numWorkgroups);
+				uint32_t runningOffset = 0;
+				for (uint32_t bin = 0; bin < RadixSortBins; ++bin)
 				{
-					offsets[i] = sum;
-					sum += counts[i];
+					for (uint32_t wg = 0; wg < numWorkgroups; ++wg)
+					{
+						globalOffsets[bin * numWorkgroups + wg] = runningOffset;
+						runningOffset += wgCounts[wg][bin];
+					}
 				}
 
-				// Scatter elements to their sorted positions
-				for (uint32_t i = 0; i < totalSplatCount; ++i)
+				// Scatter elements using workgroup-based ordering (matching GPU)
+				container::vector<uint32_t> localOffsets(RadixSortBins * numWorkgroups);
+				for (uint32_t i = 0; i < RadixSortBins * numWorkgroups; ++i)
 				{
-					uint32_t key       = cpuSortedKeys[i];
-					uint32_t idx       = cpuSortedIndices[i];
-					uint32_t bin       = (key >> shift) & (RadixSortBins - 1);
-					uint32_t outputPos = offsets[bin]++;
+					localOffsets[i] = globalOffsets[i];
+				}
 
-					tempKeys[outputPos]    = key;
-					tempIndices[outputPos] = idx;
+				for (uint32_t wg = 0; wg < numWorkgroups; ++wg)
+				{
+					uint32_t startIdx = wg * numBlocksPerWorkgroup * WorkgroupSize;
+					for (uint32_t block = 0; block < numBlocksPerWorkgroup; ++block)
+					{
+						uint32_t blockStartIdx = startIdx + block * WorkgroupSize;
+						for (uint32_t tid = 0; tid < WorkgroupSize; ++tid)
+						{
+							uint32_t i = blockStartIdx + tid;
+							if (i >= totalSplatCount)
+								break;
+							uint32_t key       = cpuSortedKeys[i];
+							uint32_t idx       = cpuSortedIndices[i];
+							uint32_t bin       = (key >> shift) & (RadixSortBins - 1);
+							uint32_t outputPos = localOffsets[bin * numWorkgroups + wg]++;
+
+							tempKeys[outputPos]    = key;
+							tempIndices[outputPos] = idx;
+						}
+					}
 				}
 
 				// Swap buffers for next pass

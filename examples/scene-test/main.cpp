@@ -148,10 +148,7 @@ void TestGpuUpload(rhi::IRHIDevice* device, const std::filesystem::path& plyPath
 		LOG_INFO("  - Positions: {} bytes", gpuData.positions->GetSize());
 		LOG_INFO("  - Covariances3D: {} bytes", gpuData.covariances3D->GetSize());
 		LOG_INFO("  - Colors: {} bytes", gpuData.colors->GetSize());
-		if (gpuData.shRest)
-		{
-			LOG_INFO("  - SH Rest: {} bytes", gpuData.shRest->GetSize());
-		}
+		LOG_INFO("  - SH Rest: {} bytes", gpuData.shRest->GetSize());
 
 		// Retire completed GPU operations (optional in test, but good practice)
 		device->RetireCompletedFrame();
