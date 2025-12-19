@@ -9,7 +9,7 @@
 #include <type_traits>
 
 // Conditional compilation support
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 #	include <functional>
 #else
 #	include "third-party/rapidhash/rapidhash.h"
@@ -18,7 +18,7 @@
 namespace msplat::container
 {
 
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 // Use standard library hash
 template <typename T>
 using hash = std::hash<T>;
@@ -195,12 +195,12 @@ struct hash<std::wstring_view> : basic_string_hash<wchar_t, std::char_traits<wch
 
 // Generic specializations for character pointers and arrays
 template <typename Char>
-requires is_char_v<Char>
+    requires is_char_v<Char>
 struct hash<Char *> : basic_string_hash<Char, std::char_traits<Char>>
 {};
 
 template <typename Char, size_t N>
-requires is_char_v<Char>
+    requires is_char_v<Char>
 struct hash<Char[N]> : basic_string_hash<Char, std::char_traits<Char>>
 {};
 
@@ -330,6 +330,6 @@ inline std::size_t hash_combine(Args... args) noexcept
 	return rapidhash(hashes, sizeof(hashes));
 }
 
-#endif        // MSPLAT_USE_SYSTEM_STL
+#endif        // MSPLAT_USE_STD_CONTAINERS
 
 }        // namespace msplat::container

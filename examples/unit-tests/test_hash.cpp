@@ -20,7 +20,7 @@ struct TestPoint
 // Custom hash specialization for TestPoint
 namespace msplat::container
 {
-#ifndef MSPLAT_USE_SYSTEM_STL
+#ifndef MSPLAT_USE_STD_CONTAINERS
 template <>
 struct hash<TestPoint>
 {
@@ -35,7 +35,7 @@ struct hash<TestPoint>
 }        // namespace msplat::container
 
 // For std::hash when using system STL
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 namespace std
 {
 template <>
@@ -378,7 +378,7 @@ TEST(unordered_map_custom_struct)
 	return true;
 }
 
-#ifndef MSPLAT_USE_SYSTEM_STL
+#ifndef MSPLAT_USE_STD_CONTAINERS
 // Test hash_combine (only available in custom implementation)
 TEST(hash_combine_functionality)
 {
@@ -440,7 +440,7 @@ TEST(hash_with_seed_functionality)
 
 	return true;
 }
-#endif        // MSPLAT_USE_SYSTEM_STL
+#endif        // MSPLAT_USE_STD_CONTAINERS
 
 // Basic unordered_set test
 TEST(unordered_set_basic)

@@ -15,8 +15,7 @@
     <application
         android:label="@string/app_name"
         android:allowBackup="false"
-        android:hasCode="false"
-        android:extractNativeLibs="true">
+        android:hasCode="false">
 
         <!-- NativeActivity for pure C++ application -->
         <activity

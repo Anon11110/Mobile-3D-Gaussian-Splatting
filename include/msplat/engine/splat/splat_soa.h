@@ -43,7 +43,7 @@ struct SplatSoA
 	uint32_t shDegree         = 0;
 	uint32_t shCoeffsPerSplat = 0;
 
-#if defined(MSPLAT_USE_SYSTEM_STL) || defined(__ANDROID__)
+#if defined(MSPLAT_USE_STD_CONTAINERS) || defined(__ANDROID__)
 	// System STL uses std::vector which doesn't support custom allocators in this way
 	SplatSoA() = default;
 #else

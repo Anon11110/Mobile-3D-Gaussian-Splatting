@@ -13,13 +13,14 @@ class SplatLoader
 {
   public:
 	SplatLoader();
-
 	~SplatLoader();
 
-	[[nodiscard]] std::future<container::shared_ptr<SplatSoA>> Load(const container::filesystem::path &path);
+	SplatLoader(const SplatLoader &)                = delete;
+	SplatLoader &operator=(const SplatLoader &)     = delete;
+	SplatLoader(SplatLoader &&) noexcept            = default;
+	SplatLoader &operator=(SplatLoader &&) noexcept = default;
 
-	SplatLoader(const SplatLoader &)            = delete;
-	SplatLoader &operator=(const SplatLoader &) = delete;
+	[[nodiscard]] std::future<container::shared_ptr<SplatSoA>> Load(const container::filesystem::path &path);
 
   private:
 	class Impl;

@@ -218,7 +218,7 @@ inline void run_all_benchmarks()
 
 	for (const auto &benchmark : benchmarks)
 	{
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 		if (benchmark.requires_custom_impl)
 		{
 			LOG_INFO("  ⊘ {} skipped (requires custom implementation)", benchmark.name);

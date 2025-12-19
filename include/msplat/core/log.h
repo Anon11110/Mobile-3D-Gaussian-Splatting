@@ -36,6 +36,12 @@ enum class Severity
 // Internal singleton logger class
 class Logger
 {
+  public:
+	Logger(const Logger &)            = delete;
+	Logger &operator=(const Logger &) = delete;
+	Logger(Logger &&)                 = delete;
+	Logger &operator=(Logger &&)      = delete;
+
   private:
 	std::shared_ptr<spdlog::logger> m_logger;
 	std::mutex                      m_sinkMutex;        // Protects sink modifications

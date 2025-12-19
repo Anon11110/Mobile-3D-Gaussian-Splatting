@@ -102,8 +102,8 @@ target_compile_definitions(core PRIVATE
 )
 
 # Container selection: use system STL if option is enabled
-if(MSPLAT_USE_SYSTEM_STL)
-    target_compile_definitions(core PUBLIC MSPLAT_USE_SYSTEM_STL)
+if(MSPLAT_USE_STD_CONTAINERS)
+    target_compile_definitions(core PUBLIC MSPLAT_USE_STD_CONTAINERS)
 endif()
 
 # ============================================================================

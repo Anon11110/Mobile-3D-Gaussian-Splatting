@@ -408,6 +408,13 @@ class AndroidConfig(PlatformConfig):
             term.warn("Android directory not found, nothing to clean")
             return True
 
+        if not self._check_java():
+            return False
+
+        if self.android_home:
+            os.environ["ANDROID_HOME"] = str(self.android_home)
+            os.environ["ANDROID_SDK_ROOT"] = str(self.android_home)
+
         term.info("Cleaning Android build...")
 
         original_dir = os.getcwd()

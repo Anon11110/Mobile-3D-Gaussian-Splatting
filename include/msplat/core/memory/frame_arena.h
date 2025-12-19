@@ -42,6 +42,11 @@ class FrameArenaResource
 	const size_t mArenaSize;
 
   public:
+	FrameArenaResource(const FrameArenaResource &)            = delete;
+	FrameArenaResource &operator=(const FrameArenaResource &) = delete;
+	FrameArenaResource(FrameArenaResource &&)                 = delete;
+	FrameArenaResource &operator=(FrameArenaResource &&)      = delete;
+
 	explicit FrameArenaResource(size_t arenaBytes = 64 * 1024 * 1024) :
 	    mArenaSize(arenaBytes)
 	{

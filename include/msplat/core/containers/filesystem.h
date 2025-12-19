@@ -4,7 +4,7 @@
 #include <filesystem>
 
 // Conditional compilation support
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 namespace msplat::container
 {
 // Filesystem namespace alias for consistency with LuisaCompute pattern
@@ -69,4 +69,4 @@ using path = std::filesystem::path;
 
 }        // namespace msplat::container
 
-#endif        // MSPLAT_USE_SYSTEM_STL
+#endif        // MSPLAT_USE_STD_CONTAINERS

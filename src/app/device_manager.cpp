@@ -123,8 +123,9 @@ void DeviceManager::HandleResize(int width, int height)
 
 void DeviceManager::Shutdown()
 {
-	if (m_app && m_device)
+	if (m_app && m_device && !m_appShutdown)
 	{
+		m_appShutdown = true;
 		m_device->WaitIdle();
 		m_app->OnShutdown();
 	}

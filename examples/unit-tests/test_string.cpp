@@ -33,7 +33,7 @@ TEST(string_basic_types)
 // Test PMR allocator functionality (when using custom implementation)
 TEST(string_pmr_allocators)
 {
-#ifndef MSPLAT_USE_SYSTEM_STL
+#ifndef MSPLAT_USE_STD_CONTAINERS
 	// Test that PMR strings use polymorphic allocators
 	msplat::container::string str1 = "test string";
 	msplat::container::string str2 = str1;                   // Copy
@@ -135,7 +135,7 @@ TEST(string_view_hashing)
 // Test transparent hashing with heterogeneous lookup
 TEST(string_transparent_hashing)
 {
-#ifndef MSPLAT_USE_SYSTEM_STL
+#ifndef MSPLAT_USE_STD_CONTAINERS
 	// Test that basic_string_hash supports transparent hashing
 	msplat::container::basic_string_hash<char, std::char_traits<char>> hasher;
 
@@ -162,7 +162,7 @@ TEST(string_heterogeneous_lookup)
 {
 	using StringMap = msplat::container::unordered_map<msplat::container::string, int>;
 
-#ifndef MSPLAT_USE_SYSTEM_STL
+#ifndef MSPLAT_USE_STD_CONTAINERS
 	// Create map with custom hash and allocator
 	auto map = msplat::container::make_unordered_map_default<msplat::container::string, int>();
 #else
@@ -223,7 +223,7 @@ TEST(string_cstring_hashing)
 // Test character array hashing
 TEST(string_char_array_hashing)
 {
-#ifndef MSPLAT_USE_SYSTEM_STL
+#ifndef MSPLAT_USE_STD_CONTAINERS
 	// Test that character arrays are hashable
 	msplat::container::hash<char[10]> char_array_hasher;
 

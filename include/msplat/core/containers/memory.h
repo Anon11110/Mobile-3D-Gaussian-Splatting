@@ -38,7 +38,7 @@ std::shared_ptr<T> reinterpret_pointer_cast(const std::shared_ptr<U> &ptr) noexc
 }
 #endif
 
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 // Memory utilities
 #	if !defined(__ANDROID__)
 using std::bit_cast;

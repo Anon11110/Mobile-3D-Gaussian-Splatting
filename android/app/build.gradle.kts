@@ -62,6 +62,12 @@ android {
         abortOnError = false
     }
 
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     externalNativeBuild {
         cmake {
             path = file("../CMakeLists.txt")

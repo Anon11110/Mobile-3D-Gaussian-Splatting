@@ -29,6 +29,11 @@ class DeviceManager
 	DeviceManager(IApplication *app);
 	~DeviceManager();
 
+	DeviceManager(const DeviceManager &)            = delete;
+	DeviceManager &operator=(const DeviceManager &) = delete;
+	DeviceManager(DeviceManager &&)                 = delete;
+	DeviceManager &operator=(DeviceManager &&)      = delete;
+
 	/**
 	 * @brief Initializes the window and RHI device and starts the main loop.
 	 * @param width The initial width of the window.
@@ -93,18 +98,23 @@ class DeviceManager
 
 	GLFWwindow *GetWindow() const;
 
-	IApplication *m_app;
+	IApplication *GetApplication() const
+	{
+		return m_app;
+	}
 
   private:
 	void InitRHI();
 	void MainLoop();
 
+	IApplication                           *m_app             = nullptr;
 	IPlatformAdapter                       *m_platformAdapter = nullptr;
 	bool                                    m_ownsAdapter     = false;
 	rhi::DeviceHandle                       m_device;
 	rhi::SwapchainHandle                    m_swapchain;
 	container::shared_ptr<vfs::IFileSystem> m_vfs;
 	bool                                    m_initialized = false;
+	bool                                    m_appShutdown = false;
 };
 
 }        // namespace msplat::app

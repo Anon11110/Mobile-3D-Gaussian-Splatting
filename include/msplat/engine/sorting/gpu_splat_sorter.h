@@ -22,6 +22,11 @@ class GpuSplatSorter
 	GpuSplatSorter(rhi::IRHIDevice *device, container::shared_ptr<vfs::IFileSystem> vfs = nullptr);
 	~GpuSplatSorter() = default;
 
+	GpuSplatSorter(const GpuSplatSorter &)                = delete;
+	GpuSplatSorter &operator=(const GpuSplatSorter &)     = delete;
+	GpuSplatSorter(GpuSplatSorter &&) noexcept            = default;
+	GpuSplatSorter &operator=(GpuSplatSorter &&) noexcept = default;
+
 	void Initialize(uint32_t totalSplatCount);
 	void Sort(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera);
 

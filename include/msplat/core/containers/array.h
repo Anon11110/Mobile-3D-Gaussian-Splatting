@@ -10,14 +10,14 @@
 #include <utility>
 
 // Conditional compilation support
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 #	include <array>
 #endif
 
 namespace msplat::container
 {
 
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 // Use standard library array
 template <typename T, size_t N>
 using array = std::array<T, N>;
@@ -390,7 +390,7 @@ struct array<T, 0>
 };
 
 // Deduction guides (C++17)
-#	if __cplusplus >= 201703L && !defined(MSPLAT_USE_SYSTEM_STL)
+#	if __cplusplus >= 201703L && !defined(MSPLAT_USE_STD_CONTAINERS)
 template <class T, class... U>
 array(T, U...) -> array<T, 1 + sizeof...(U)>;
 #	endif
@@ -468,12 +468,12 @@ constexpr const T &&get(const array<T, N> &&arr) noexcept
 	return std::move(arr.mData[I]);
 }
 
-#endif        // MSPLAT_USE_SYSTEM_STL
+#endif        // MSPLAT_USE_STD_CONTAINERS
 
 }        // namespace msplat::container
 
 // Structured binding support (C++17)
-#if __cplusplus >= 201703L && !defined(MSPLAT_USE_SYSTEM_STL)
+#if __cplusplus >= 201703L && !defined(MSPLAT_USE_STD_CONTAINERS)
 namespace std
 {
 template <typename T, size_t N>

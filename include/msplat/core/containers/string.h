@@ -5,7 +5,7 @@
 #include <string_view>
 
 // Conditional compilation support
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 namespace msplat::container
 {
 // Use standard library string types
@@ -180,4 +180,4 @@ struct hash<wstring> : basic_string_hash<wchar_t, std::char_traits<wchar_t>>
 
 }        // namespace msplat::container
 
-#endif        // MSPLAT_USE_SYSTEM_STL
+#endif        // MSPLAT_USE_STD_CONTAINERS

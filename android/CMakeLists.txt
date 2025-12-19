@@ -21,7 +21,7 @@ set(MSPLAT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 # Core library options - Android NDK libc++ doesn't have std::pmr (memory_resource),
 # so we must use system STL containers
-set(MSPLAT_USE_SYSTEM_STL ON CACHE BOOL "" FORCE)
+set(MSPLAT_USE_STD_CONTAINERS ON CACHE BOOL "" FORCE)
 
 # Include core library configuration
 include(${MSPLAT_ROOT}/cmake/core.cmake)

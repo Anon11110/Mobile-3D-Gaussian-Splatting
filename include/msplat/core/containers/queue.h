@@ -10,7 +10,7 @@
 namespace msplat::container
 {
 
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 // Use standard library queue
 template <typename T, typename Container = std::deque<T>>
 using queue = std::queue<T, Container>;
@@ -90,6 +90,6 @@ class queue : public std::queue<T, Container>
 	}
 };
 
-#endif        // MSPLAT_USE_SYSTEM_STL
+#endif        // MSPLAT_USE_STD_CONTAINERS
 
 }        // namespace msplat::container

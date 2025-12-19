@@ -94,6 +94,11 @@ if(MSVC)
     target_compile_options(RHI PUBLIC /utf-8)
 endif()
 
+# Suppress nullability warnings from VMA third-party library
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+    target_compile_options(RHI PRIVATE -Wno-nullability-completeness)
+endif()
+
 # Option to build RHI tests
 option(RHI_BUILD_TESTS "Build RHI tests" OFF)
 

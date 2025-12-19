@@ -5,7 +5,7 @@
 #endif
 #include <unordered_map>
 
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 namespace msplat::container
 {
 

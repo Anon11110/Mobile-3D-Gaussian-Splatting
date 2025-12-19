@@ -12,7 +12,7 @@ The container system implements a sophisticated dual-mode architecture supportin
 
 The implementation provides production-grade replacements for critical STL containers including `vector`, `array`, `unordered_map`, `queue`, and `string`. Each container is designed with renderer-specific optimizations, featuring PMR integration with mimalloc backend, trivial destructor optimizations for POD types, and move-first semantics for efficient data flow. The `unordered_map` utilizes ankerl::unordered_dense for superior performance with custom hash functions optimized for graphics primitives.
 
-The conditional compilation system (`MSPLAT_USE_SYSTEM_STL`) enables seamless switching between implementations, facilitating debugging with standard containers while deploying with optimized versions. Factory functions provide ergonomic construction with appropriate memory resources, supporting frame arena allocation for transient data and custom memory resource injection for specialized allocation strategies.
+The conditional compilation system (`MSPLAT_USE_STD_CONTAINERS`) enables seamless switching between implementations, facilitating debugging with standard containers while deploying with optimized versions. Factory functions provide ergonomic construction with appropriate memory resources, supporting frame arena allocation for transient data and custom memory resource injection for specialized allocation strategies.
 
 ## Advanced Memory Management
 
@@ -74,7 +74,7 @@ Thread safety is carefully considered throughout, with immutable interfaces wher
 
 ## Implementation Strategy
 
-The implementation strategy balances performance requirements with development velocity through careful architectural choices. The conditional compilation system (`MSPLAT_USE_SYSTEM_STL`) enables rapid prototyping with familiar standard library interfaces while maintaining the ability to deploy highly optimized custom implementations.
+The implementation strategy balances performance requirements with development velocity through careful architectural choices. The conditional compilation system (`MSPLAT_USE_STD_CONTAINERS`) enables rapid prototyping with familiar standard library interfaces while maintaining the ability to deploy highly optimized custom implementations.
 
 Integration of best-in-class third-party libraries including spdlog for logging, mimalloc for memory allocation, ankerl::unordered_dense for hash maps, and GLM for mathematics provides production-tested foundations while maintaining consistent interfaces through wrapper layers. This approach leverages community expertise while retaining architectural flexibility.
 

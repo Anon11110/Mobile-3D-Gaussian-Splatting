@@ -31,7 +31,7 @@ struct Point
 }        // namespace
 
 // Hash specialization for Point - need both for comparison
-#ifndef MSPLAT_USE_SYSTEM_STL
+#ifndef MSPLAT_USE_STD_CONTAINERS
 namespace msplat::container
 {
 // Custom hash implementation using hash_combine
@@ -200,7 +200,7 @@ double benchmark_deletion(Map &map, const std::vector<Key> &delete_keys)
 }
 
 // Benchmark runner for comparison
-#ifndef MSPLAT_USE_SYSTEM_STL
+#ifndef MSPLAT_USE_STD_CONTAINERS
 template <typename Key, typename Value>
 void run_comparison_benchmark(const std::string        &test_name,
                               const std::vector<Key>   &keys,
@@ -341,8 +341,8 @@ int hash_performance_main()
 {
 	perf::log_suite_header("Unordered Map/Set Performance Tests");
 
-#ifdef MSPLAT_USE_SYSTEM_STL
-	LOG_INFO("  ⊘ Custom unordered_map implementation disabled (MSPLAT_USE_SYSTEM_STL defined)");
+#ifdef MSPLAT_USE_STD_CONTAINERS
+	LOG_INFO("  ⊘ Custom unordered_map implementation disabled (MSPLAT_USE_STD_CONTAINERS defined)");
 	LOG_INFO("  ⊘ Skipping performance comparison benchmarks");
 #else
 	LOG_INFO("  Comparing: Custom (ankerl::unordered_dense + RapidHash) vs STL");

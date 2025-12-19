@@ -39,8 +39,8 @@ int vector_performance_main()
 {
 	perf::log_suite_header("Vector Performance Tests");
 
-#ifdef MSPLAT_USE_SYSTEM_STL
-	LOG_INFO("  ⊘ Custom vector implementation disabled (MSPLAT_USE_SYSTEM_STL defined)");
+#ifdef MSPLAT_USE_STD_CONTAINERS
+	LOG_INFO("  ⊘ Custom vector implementation disabled (MSPLAT_USE_STD_CONTAINERS defined)");
 	LOG_INFO("  ⊘ Skipping performance comparison benchmarks");
 #else
 	// Push Back Comparison

@@ -64,7 +64,7 @@ struct NonTrivialType
 int NonTrivialType::construct_count = 0;
 int NonTrivialType::destruct_count  = 0;
 
-#ifndef MSPLAT_USE_SYSTEM_STL
+#ifndef MSPLAT_USE_STD_CONTAINERS
 // Only test custom vector implementation
 
 TEST(vector_default_construction)
@@ -398,7 +398,7 @@ TEST(vector_with_frame_arena)
 	return vec.size() == 10 && vec[9] == 9;
 }
 
-#endif        // !MSPLAT_USE_SYSTEM_STL
+#endif        // !MSPLAT_USE_STD_CONTAINERS
 
 // Register all custom vector tests
 void register_custom_vector_tests()

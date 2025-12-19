@@ -17,6 +17,11 @@ namespace msplat::engine
 class Scene
 {
   public:
+	Scene(const Scene &)            = delete;
+	Scene &operator=(const Scene &) = delete;
+	Scene(Scene &&)                 = delete;
+	Scene &operator=(Scene &&)      = delete;
+
 	struct GpuData
 	{
 		// Splat attribute buffers

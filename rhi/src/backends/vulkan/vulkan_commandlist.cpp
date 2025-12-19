@@ -111,6 +111,8 @@ void VulkanCommandList::BeginRendering(const RenderingInfo &info)
 					case ResolveMode::AVERAGE:
 						resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
 						break;
+					case ResolveMode::NONE:
+						break;
 				}
 			}
 			else

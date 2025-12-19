@@ -16,7 +16,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Core library options
-option(MSPLAT_USE_SYSTEM_STL "Use system STL containers instead of custom implementations" OFF)
+option(MSPLAT_USE_STD_CONTAINERS "Use system STL containers instead of custom implementations" OFF)
 
 # Windows-specific: Function to apply Windows macro fixes to a target
 function(apply_windows_macro_fix target)

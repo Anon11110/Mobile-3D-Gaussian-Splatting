@@ -15,6 +15,11 @@ class CpuSplatSorter
 	explicit CpuSplatSorter(uint32_t max_splats);
 	~CpuSplatSorter();        // Destructor will handle joining the worker thread.
 
+	CpuSplatSorter(const CpuSplatSorter &)                = delete;
+	CpuSplatSorter &operator=(const CpuSplatSorter &)     = delete;
+	CpuSplatSorter(CpuSplatSorter &&) noexcept            = default;
+	CpuSplatSorter &operator=(CpuSplatSorter &&) noexcept = default;
+
 	// Triggers a new sort on the background thread. This is a non-blocking call.
 	// It takes the consolidated positions of all splats and the camera's view matrix.
 	void RequestSort(const container::vector<math::vec3> &splat_positions, const math::mat4 &view_matrix);
@@ -27,9 +32,6 @@ class CpuSplatSorter
 	container::span<const uint32_t> GetSortedIndices();
 
   private:
-	CpuSplatSorter(const CpuSplatSorter &)            = delete;
-	CpuSplatSorter &operator=(const CpuSplatSorter &) = delete;
-
 	class Impl;
 	container::unique_ptr<Impl> p_impl;
 };

@@ -13,7 +13,7 @@
 #include <utility>
 
 // Conditional compilation support
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 #	include <vector>
 #else
 #	include <msplat/core/containers/memory.h>
@@ -22,7 +22,7 @@
 namespace msplat::container
 {
 
-#ifdef MSPLAT_USE_SYSTEM_STL
+#ifdef MSPLAT_USE_STD_CONTAINERS
 // Use standard library vector
 template <typename T>
 using vector = std::vector<T>;
@@ -580,6 +580,6 @@ void swap(vector<T> &lhs, vector<T> &rhs) noexcept
 	lhs.swap(rhs);
 }
 
-#endif        // MSPLAT_USE_SYSTEM_STL
+#endif        // MSPLAT_USE_STD_CONTAINERS
 
 }        // namespace msplat::container
