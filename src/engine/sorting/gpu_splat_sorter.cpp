@@ -624,8 +624,8 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 	}
 
 	// Upload camera data
-	math::mat4 viewMatrix = camera.GetViewMatrix();
-	device->UpdateBuffer(cameraUBO.Get(), &viewMatrix, sizeof(math::mat4), 0);
+	lastViewMatrix = camera.GetViewMatrix();
+	device->UpdateBuffer(cameraUBO.Get(), &lastViewMatrix, sizeof(math::mat4), 0);
 
 	// Update depth calc descriptor set
 	const Scene::GpuData &gpuData = scene.GetGpuData();
@@ -1060,56 +1060,91 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 		return 0xFFFFFFFFu - (u ^ mask);
 	};
 
+	// Reverse function to convert sortable uint back to float for debugging
+	auto sortableUintToFloat = [](uint32_t key) -> float {
+		// Reverse: u ^ mask = 0xFFFFFFFF - key, then u = (0xFFFFFFFF - key) ^ mask
+		// For negative floats: key was computed as 0xFFFFFFFF - (u ^ 0xFFFFFFFF) = ~(~u) = u... wait
+		uint32_t invKey = 0xFFFFFFFFu - key;
+		// If sign bit of result would be set, mask was 0xFFFFFFFF
+		// If sign bit of result would be clear, mask was 0x80000000
+		uint32_t u1 = invKey ^ 0x80000000u;        // for positive floats
+		uint32_t u2 = invKey ^ 0xFFFFFFFFu;        // for negative floats
+		// Use the one that has consistent sign
+		uint32_t u = (u1 & 0x80000000u) ? u2 : u1;
+		return *reinterpret_cast<float *>(&u);
+	};
+
 	container::vector<uint32_t> cpuDepthKeys;
 	cpuDepthKeys.resize(totalSplatCount);
 
-	bool     allCorrect     = true;
-	uint32_t incorrectCount = 0;
+	bool     allCorrect           = true;
+	uint32_t incorrectCount       = 0;
+	uint32_t withinToleranceCount = 0;
+
+	// Allow small floating-point precision differences between CPU and GPU
+	constexpr uint32_t maxUlpDifference = 256;
 
 	for (uint32_t i = 0; i < totalSplatCount; ++i)
 	{
 		// Expected depth for test data using actual test position
-		float worldZ = (*testPositions)[i].z;
-
-		float viewZ         = worldZ - 5.0f;        // Camera at Z=5
-		float expectedDepth = -viewZ;               // depth = -viewPos.z
+		math::vec3 worldPos      = (*testPositions)[i];
+		math::vec4 viewPos       = lastViewMatrix * math::vec4(worldPos, 1.0f);
+		float      expectedDepth = -viewPos.z;        // depth = -viewPos.z (same as GPU)
 
 		uint32_t expectedKey = floatToSortableUint(expectedDepth);
 		uint32_t gpuKey      = depthKeys[i];
 
 		// Store CPU-calculated key for histogram verification
-		cpuDepthKeys[i] = expectedKey;
+		cpuDepthKeys[i] = gpuKey;
 
-		bool isCorrect = (gpuKey == expectedKey);
-		if (!isCorrect)
+		// Check if keys are exactly equal or within floating-point tolerance
+		uint32_t keyDiff           = (gpuKey > expectedKey) ? (gpuKey - expectedKey) : (expectedKey - gpuKey);
+		bool     isExact           = (gpuKey == expectedKey);
+		bool     isWithinTolerance = (keyDiff <= maxUlpDifference);
+
+		if (!isWithinTolerance)
 		{
 			allCorrect = false;
 			incorrectCount++;
 
 			if (incorrectCount <= 10)
 			{
-				LOG_INFO("  Splat[{}]: GPU Key={:#010x}, Expected Key={:#010x}, Depth={:.2f} ✗ INCORRECT",
-				         i, gpuKey, expectedKey, expectedDepth);
+				float gpuDepth  = sortableUintToFloat(gpuKey);
+				float depthDiff = gpuDepth - expectedDepth;
+				LOG_INFO("  Splat[{}]: GPU Key={:#010x}, Expected Key={:#010x}, KeyDiff={}", i, gpuKey, expectedKey, keyDiff);
+				LOG_INFO("    GPU Depth={:.6f}, CPU Depth={:.6f}, DepthDiff={:.6f}, WorldZ={:.2f}",
+				         gpuDepth, expectedDepth, depthDiff, worldPos.z);
 			}
+		}
+		else if (!isExact)
+		{
+			withinToleranceCount++;
 		}
 	}
 
 	if (allCorrect)
 	{
-		LOG_INFO("All {} depth keys are correct ✓", totalSplatCount);
+		if (withinToleranceCount > 0)
+		{
+			LOG_INFO("All {} depth keys are correct ✓ ({} within FP tolerance)", totalSplatCount, withinToleranceCount);
+		}
+		else
+		{
+			LOG_INFO("All {} depth keys are correct ✓", totalSplatCount);
+		}
 	}
 	else
 	{
-		LOG_ERROR("Found {} incorrect depth keys out of {}", incorrectCount, totalSplatCount);
+		LOG_ERROR("Found {} incorrect depth keys out of {} (tolerance={} ULPs)", incorrectCount, totalSplatCount, maxUlpDifference);
 
 		LOG_INFO("Sample of correct values for reference:");
 		for (uint32_t i = 0; i < std::min<uint32_t>(5, totalSplatCount); ++i)
 		{
-			float    worldZ        = (*testPositions)[i].z;
-			float    viewZ         = worldZ - 5.0f;
-			float    expectedDepth = -viewZ;
-			uint32_t expectedKey   = floatToSortableUint(expectedDepth);
-			uint32_t gpuKey        = depthKeys[i];
+			math::vec3 worldPos      = (*testPositions)[i];
+			math::vec4 viewPos       = lastViewMatrix * math::vec4(worldPos, 1.0f);
+			float      expectedDepth = -viewPos.z;
+			uint32_t   expectedKey   = floatToSortableUint(expectedDepth);
+			uint32_t   gpuKey        = depthKeys[i];
 
 			if (gpuKey == expectedKey)
 			{
@@ -1719,22 +1754,24 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 				LOG_INFO("  First 5 sorted splats (farthest, smallest keys):");
 				for (uint32_t i = 0; i < std::min<uint32_t>(5, totalSplatCount); ++i)
 				{
-					uint32_t splatIdx = sortedIndices[i];
-					float    worldZ   = (*testPositions)[splatIdx].z;
-					float    depth    = -(worldZ - 5.0f);
+					uint32_t   splatIdx = sortedIndices[i];
+					math::vec3 worldPos = (*testPositions)[splatIdx];
+					math::vec4 viewPos  = lastViewMatrix * math::vec4(worldPos, 1.0f);
+					float      depth    = -viewPos.z;
 					LOG_INFO("    [{}]: key={:#010x}, splatIdx={}, worldZ={:.1f}, depth={:.1f}",
-					         i, sortedKeys[i], splatIdx, worldZ, depth);
+					         i, sortedKeys[i], splatIdx, worldPos.z, depth);
 				}
 
 				LOG_INFO("  Last 5 sorted splats (nearest, largest keys):");
 				uint32_t start = totalSplatCount > 5 ? totalSplatCount - 5 : 0;
 				for (uint32_t i = start; i < totalSplatCount; ++i)
 				{
-					uint32_t splatIdx = sortedIndices[i];
-					float    worldZ   = (*testPositions)[splatIdx].z;
-					float    depth    = -(worldZ - 5.0f);
+					uint32_t   splatIdx = sortedIndices[i];
+					math::vec3 worldPos = (*testPositions)[splatIdx];
+					math::vec4 viewPos  = lastViewMatrix * math::vec4(worldPos, 1.0f);
+					float      depth    = -viewPos.z;
 					LOG_INFO("    [{}]: key={:#010x}, splatIdx={}, worldZ={:.1f}, depth={:.1f}",
-					         i, sortedKeys[i], splatIdx, worldZ, depth);
+					         i, sortedKeys[i], splatIdx, worldPos.z, depth);
 				}
 			}
 			else

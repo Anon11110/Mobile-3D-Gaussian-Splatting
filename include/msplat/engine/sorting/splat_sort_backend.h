@@ -96,6 +96,12 @@ class ISplatSortBackend
 	{
 		return true;
 	}
+
+	/// Set test positions for comprehensive verification (GPU backend only)
+	virtual void SetTestPositions(const container::vector<math::vec3> *positions)
+	{
+		(void) positions;
+	}
 };
 
 /// GPU backend implementation using GpuSplatSorter
@@ -124,6 +130,7 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	const char *GetMethodName() const override;
 	bool        HasComprehensiveVerification() const override;
 	bool        RunComprehensiveVerification() override;
+	void        SetTestPositions(const container::vector<math::vec3> *positions) override;
 
 	void RequestVerification();
 
@@ -147,8 +154,9 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	rhi::CommandListHandle m_cmdList;
 
 	// Verification state
-	bool m_prepareVerification  = false;
-	bool m_verificationPrepared = false;
+	bool                                 m_prepareVerification  = false;
+	bool                                 m_verificationPrepared = false;
+	const container::vector<math::vec3> *m_testPositions        = nullptr;
 };
 
 /// CPU backend implementation using Scene's CpuSplatSorter

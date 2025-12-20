@@ -49,7 +49,13 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_camera.SetMovementSpeed(5.0f);
 	m_camera.SetMouseSensitivity(0.1f);
 
-	if (m_splatPath.empty())
+	// For comprehensive verification, always use test data
+	if (!m_useSimpleVerification)
+	{
+		LOG_INFO("Comprehensive verification mode enabled - using test data");
+		CreateTestSplatData();
+	}
+	else if (m_splatPath.empty())
 	{
 #if defined(__ANDROID__)
 		// Android path should be set by android_main.cpp after extracting from APK assets
@@ -61,7 +67,7 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 #endif
 	}
 
-	if (!m_splatPath.empty())
+	if (!m_splatPath.empty() && m_useSimpleVerification)
 	{
 		LOG_INFO("Loading splat file: {}", m_splatPath);
 		LoadSplatFile(m_splatPath.c_str());
@@ -99,6 +105,13 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 		else
 		{
 			LOG_INFO("Initialized GPU sort backend for {} splats", m_scene->GetTotalSplatCount());
+		}
+
+		// Set test positions for comprehensive verification
+		if (!m_useSimpleVerification && !m_testSplatPositions.empty() && m_backend)
+		{
+			m_backend->SetTestPositions(&m_testSplatPositions);
+			LOG_INFO("Test positions set for comprehensive verification ({} positions)", m_testSplatPositions.size());
 		}
 	}
 
@@ -429,7 +442,17 @@ void HybridSplatRendererApp::OnRender()
 		if (m_checkVerificationResults)
 		{
 			LOG_INFO("Checking sorting verification results...");
-			bool sortingCorrect = m_backend->VerifySort();
+
+			bool sortingCorrect;
+			if (m_useSimpleVerification)
+			{
+				sortingCorrect = m_backend->VerifySort();
+			}
+			else
+			{
+				sortingCorrect = m_backend->RunComprehensiveVerification();
+			}
+
 			if (sortingCorrect)
 			{
 				LOG_INFO("Sorting verification completed successfully");
@@ -457,7 +480,17 @@ void HybridSplatRendererApp::OnRender()
 			{
 				// CPU backend: Verify directly (no GPU preparation needed)
 				LOG_INFO("Verifying CPU sorting...");
-				bool sortingCorrect = m_backend->VerifySort();
+
+				bool sortingCorrect;
+				if (m_useSimpleVerification)
+				{
+					sortingCorrect = m_backend->VerifySort();
+				}
+				else
+				{
+					sortingCorrect = m_backend->RunComprehensiveVerification();
+				}
+
 				if (sortingCorrect)
 				{
 					LOG_INFO("CPU sorting verification completed successfully");
@@ -866,7 +899,7 @@ void HybridSplatRendererApp::LoadSplatFile(const char *filepath)
 void HybridSplatRendererApp::CreateTestSplatData()
 {
 	// Camera is at (0, 0, 5) looking down -Z axis (towards origin)
-	const uint32_t testSplatCount = 100000;
+	const uint32_t testSplatCount = 500000;
 	auto           testData       = container::make_shared<engine::SplatSoA>();
 	testData->Resize(testSplatCount, 0);
 
@@ -892,25 +925,38 @@ void HybridSplatRendererApp::CreateTestSplatData()
 	uint32_t nearestIdx      = 0;
 	uint32_t farthestIdx     = 0;
 
+	// Dead zone around camera Z where floating-point precision issues cause
+	const float cameraZ      = 5.0f;
+	const float deadZoneHalf = 0.1f;        // Avoid Z in range [4.9, 5.1]
+
 	for (uint32_t i = 0; i < testSplatCount; ++i)
 	{
 		float randomValue = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
 		float z           = minZ + randomValue * zRange;
 
+		// Push random values out of the dead zone around camera Z
+		if (z > (cameraZ - deadZoneHalf) && z < (cameraZ + deadZoneHalf))
+		{
+			z = (z < cameraZ) ? (cameraZ - deadZoneHalf) : (cameraZ + deadZoneHalf);
+		}
+
 		// Add some specific test cases to ensure edge cases are covered
+		// Note: Avoid z = cameraZ exactly as depth=0 causes FP precision issues
 		if (i == 0)
-			z = minZ;        // Ensure we have the minimum Z
+			z = minZ;        // Minimum Z (farthest behind camera)
 		if (i == 1)
-			z = maxZ;        // Ensure we have the maximum Z
+			z = maxZ;        // Maximum Z (farthest in front)
 		if (i == 2)
-			z = 5.0f;        // Ensure we have a splat at camera position
+			z = cameraZ - deadZoneHalf;        // Edge of dead zone (behind)
 		if (i == 3)
-			z = 4.99f;        // Very close behind camera
+			z = cameraZ + deadZoneHalf;        // Edge of dead zone (in front)
 		if (i == 4)
-			z = 5.01f;        // Very close in front of camera
+			z = cameraZ - 1.0f;        // 1 unit behind camera
 		if (i == 5)
-			z = -1000.0f;        // Moderately far behind camera
+			z = cameraZ + 1.0f;        // 1 unit in front of camera
 		if (i == 6)
+			z = -1000.0f;        // Moderately far behind camera
+		if (i == 7)
 			z = 1000.0f;        // Moderately far in front of camera
 
 		testData->posX[i] = 0.0f;

@@ -148,7 +148,12 @@ bool GpuSplatSortBackend::RunComprehensiveVerification()
 		return false;
 	}
 
-	return m_sorter->VerifySortOrder();
+	return m_sorter->CheckVerificationResults(m_testPositions);
+}
+
+void GpuSplatSortBackend::SetTestPositions(const container::vector<math::vec3> *positions)
+{
+	m_testPositions = positions;
 }
 
 }        // namespace msplat::engine

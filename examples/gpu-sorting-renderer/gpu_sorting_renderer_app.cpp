@@ -43,8 +43,17 @@ bool GpuSortingRendererApp::OnInit(app::DeviceManager *deviceManager)
 	camera.SetMovementSpeed(5.0f);
 	camera.SetMouseSensitivity(0.1f);
 
-	LoadSplatFile("assets/flowers_1.ply");
-	// LoadSplatFile("assets/train_7000.ply");
+	// For comprehensive verification, always use test data
+	if (!useSimpleVerification)
+	{
+		LOG_INFO("Comprehensive verification mode enabled - using test data");
+		CreateTestSplatData();
+	}
+	else
+	{
+		LoadSplatFile("assets/flowers_1.ply");
+		// LoadSplatFile("assets/train_7000.ply");
+	}
 
 	sorter = container::make_unique<engine::GpuSplatSorter>(device);
 	if (scene->GetTotalSplatCount() > 0)

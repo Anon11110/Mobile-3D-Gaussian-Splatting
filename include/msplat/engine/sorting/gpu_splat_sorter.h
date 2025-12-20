@@ -123,6 +123,9 @@ class GpuSplatSorter
 	rhi::DescriptorSetHandle scatterPairsIntegratedDescriptorSets[4];        // Integrated scan descriptor sets
 
 	SortMethod sortMethod = SortMethod::IntegratedScan;
+
+	// Store last view matrix for verification
+	math::mat4 lastViewMatrix = math::mat4(1.0f);
 };
 
 }        // namespace msplat::engine
