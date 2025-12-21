@@ -12,6 +12,10 @@
 #	include <GLFW/glfw3.h>
 #endif
 
+#if defined(__APPLE__)
+#	include <vulkan/vulkan_metal.h>
+#endif
+
 namespace rhi::vulkan
 {
 
