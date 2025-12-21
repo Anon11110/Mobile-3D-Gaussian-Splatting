@@ -1403,7 +1403,7 @@ void HybridSplatRendererApp::RenderImGui()
 				ImGui::Text("Upload Time: %.2f ms", metrics.uploadDurationMs);
 			}
 
-			// Sort method switching only for GPU backend
+			// Sort method and shader variant switching only for GPU backend
 			if (m_currentBackendType == BackendType::GPU)
 			{
 				int         currentMethod = m_backend->GetSortMethod();
@@ -1412,6 +1412,24 @@ void HybridSplatRendererApp::RenderImGui()
 				{
 					m_backend->SetSortMethod(currentMethod);
 					LOG_INFO("Switched to {} radix sort method", methods[currentMethod]);
+				}
+
+				// Shader variant combo
+				int         currentVariant = m_backend->GetShaderVariant();
+				const char *variants[]     = {"Portable", "SubgroupOptimized"};
+				if (ImGui::Combo("##ShaderVariant", &currentVariant, variants, 2))
+				{
+					m_backend->SetShaderVariant(currentVariant);
+					LOG_INFO("Switched to {} shader variant", variants[currentVariant]);
+				}
+				ImGui::SameLine();
+				ImGui::TextDisabled("(?)");
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::BeginTooltip();
+					ImGui::Text("Portable: Works on all GPUs");
+					ImGui::Text("SubgroupOptimized: Faster, requires reliable subgroup ops (Fail on Qualcomm Adreno)");
+					ImGui::EndTooltip();
 				}
 			}
 		}

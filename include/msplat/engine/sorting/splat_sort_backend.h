@@ -85,6 +85,24 @@ class ISplatSortBackend
 		return "Default";
 	}
 
+	/// Set shader variant (GPU backend only: 0=Portable, 1=SubgroupOptimized)
+	virtual void SetShaderVariant(int variant)
+	{
+		(void) variant;
+	}
+
+	/// Get current shader variant index
+	virtual int GetShaderVariant() const
+	{
+		return 0;
+	}
+
+	/// Get human-readable shader variant name
+	virtual const char *GetShaderVariantName() const
+	{
+		return "Default";
+	}
+
 	/// Check if comprehensive verification is available
 	virtual bool HasComprehensiveVerification() const
 	{
@@ -128,6 +146,9 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	void        SetSortMethod(int method) override;
 	int         GetSortMethod() const override;
 	const char *GetMethodName() const override;
+	void        SetShaderVariant(int variant) override;
+	int         GetShaderVariant() const override;
+	const char *GetShaderVariantName() const override;
 	bool        HasComprehensiveVerification() const override;
 	bool        RunComprehensiveVerification() override;
 	void        SetTestPositions(const container::vector<math::vec3> *positions) override;

@@ -43,7 +43,7 @@ void GpuSplatSorter::Initialize(uint32_t totalSplatCount)
 
 	// Histogram buffer for radix sort
 	// Each workgroup generates a histogram with 256 bins for each of the 4 passes
-	uint32_t numWorkgroups = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
+	uint32_t numWorkgroups = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 	bufferDesc.size        = RadixPasses * numWorkgroups * RadixSortBins * sizeof(uint32_t);
 	histograms             = device->CreateBuffer(bufferDesc);
 
@@ -124,12 +124,22 @@ void GpuSplatSorter::CreateComputePipelines()
 	    "shaders/compiled/depth_calc.comp.spv",
 	    rhi::ShaderStage::COMPUTE);
 
+	// Portable shaders
 	rhi::ShaderHandle histogramShader = shaderFactory.getOrCreateShader(
 	    "shaders/compiled/radix_histogram.comp.spv",
 	    rhi::ShaderStage::COMPUTE);
 
 	rhi::ShaderHandle radixPrefixScanShader = shaderFactory.getOrCreateShader(
 	    "shaders/compiled/radix_prefix_scan.comp.spv",
+	    rhi::ShaderStage::COMPUTE);
+
+	// Subgroup-optimized shaders
+	rhi::ShaderHandle histogramSubgroupShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_histogram_subgroup.comp.spv",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle radixPrefixScanSubgroupShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_prefix_scan_subgroup.comp.spv",
 	    rhi::ShaderStage::COMPUTE);
 
 	rhi::ShaderHandle scatterPairsShader = shaderFactory.getOrCreateShader(
@@ -295,7 +305,7 @@ void GpuSplatSorter::CreateComputePipelines()
 		depthCalcPipeline = device->CreateComputePipeline(pipelineDesc);
 	}
 
-	// Histogram pipeline
+	// Portable histogram pipeline
 	{
 		rhi::ComputePipelineDesc pipelineDesc = {};
 		pipelineDesc.computeShader            = histogramShader.Get();
@@ -310,7 +320,23 @@ void GpuSplatSorter::CreateComputePipelines()
 		histogramPipeline = device->CreateComputePipeline(pipelineDesc);
 	}
 
-	// Radix prefix scan pipeline for global prefix sum
+	// Subgroup-optimized histogram pipeline
+	if (histogramSubgroupShader)
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = histogramSubgroupShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {histogramSetLayout.Get()};
+
+		rhi::PushConstantRange pushConstantRange = {};
+		pushConstantRange.stageFlags             = rhi::ShaderStageFlags::COMPUTE;
+		pushConstantRange.offset                 = 0;
+		pushConstantRange.size                   = sizeof(PushConstants);
+		pipelineDesc.pushConstantRanges          = {pushConstantRange};
+
+		histogramSubgroupPipeline = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Portable radix prefix scan pipeline
 	{
 		rhi::ComputePipelineDesc pipelineDesc = {};
 		pipelineDesc.computeShader            = radixPrefixScanShader.Get();
@@ -323,6 +349,22 @@ void GpuSplatSorter::CreateComputePipelines()
 		pipelineDesc.pushConstantRanges          = {pushConstantRange};
 
 		radixPrefixScanPipeline = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Subgroup-optimized radix prefix scan pipeline
+	if (radixPrefixScanSubgroupShader)
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = radixPrefixScanSubgroupShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {scanSetLayout.Get()};
+
+		rhi::PushConstantRange pushConstantRange = {};
+		pushConstantRange.stageFlags             = rhi::ShaderStageFlags::COMPUTE;
+		pushConstantRange.offset                 = 0;
+		pushConstantRange.size                   = sizeof(ScanPushConstants);
+		pipelineDesc.pushConstantRanges          = {pushConstantRange};
+
+		radixPrefixScanSubgroupPipeline = device->CreateComputePipeline(pipelineDesc);
 	}
 
 	// Scatter pairs pipeline with integrated prefix sum
@@ -384,7 +426,7 @@ void GpuSplatSorter::CreateDescriptorSets()
 
 	// Create descriptor sets for histogram (one per pass)
 	{
-		uint32_t numWorkgroups        = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
+		uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 
 		for (uint32_t pass = 0; pass < RadixPasses; ++pass)
@@ -438,7 +480,7 @@ void GpuSplatSorter::CreateDescriptorSets()
 
 	// Create descriptor sets for scan operations (one per radix pass)
 	{
-		uint32_t numWorkgroups        = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
+		uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 
 		for (uint32_t pass = 0; pass < RadixPasses; ++pass)
@@ -479,7 +521,7 @@ void GpuSplatSorter::CreateDescriptorSets()
 
 	// Create descriptor sets for prescan scatter operations (one per pass)
 	{
-		uint32_t numWorkgroups        = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
+		uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 
 		for (uint32_t pass = 0; pass < RadixPasses; ++pass)
@@ -548,7 +590,7 @@ void GpuSplatSorter::CreateDescriptorSets()
 
 	// Create descriptor sets for integrated scan scatter operations (one per pass)
 	{
-		uint32_t numWorkgroups        = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
+		uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 
 		for (uint32_t pass = 0; pass < RadixPasses; ++pass)
@@ -690,6 +732,23 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		return;
 	}
 
+	// Select pipelines based on shader variant
+	rhi::IRHIPipeline *activeHistogramPipeline = histogramPipeline.Get();
+	rhi::IRHIPipeline *activeScanPipeline      = radixPrefixScanPipeline.Get();
+
+	if (shaderVariant == ShaderVariant::SubgroupOptimized)
+	{
+		if (histogramSubgroupPipeline && radixPrefixScanSubgroupPipeline)
+		{
+			activeHistogramPipeline = histogramSubgroupPipeline.Get();
+			activeScanPipeline      = radixPrefixScanSubgroupPipeline.Get();
+		}
+		else
+		{
+			LOG_WARNING("Subgroup-optimized shaders not available, falling back to portable");
+		}
+	}
+
 	uint32_t numWorkgroups = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 
 	// Calculate how many blocks each workgroup needs to process
@@ -716,7 +775,7 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		pushConstants.numBlocksPerWorkgroup = numBlocksPerWorkgroup;
 
 		// --- Pass 1: HISTOGRAM ---
-		cmdList->SetPipeline(histogramPipeline.Get());
+		cmdList->SetPipeline(activeHistogramPipeline);
 		cmdList->BindDescriptorSet(0, histogramDescriptorSets[pass].Get());
 
 		cmdList->PushConstants(
@@ -739,7 +798,7 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		    {});
 
 		// --- Pass 2: SCAN BLOCKS ---
-		cmdList->SetPipeline(radixPrefixScanPipeline.Get());
+		cmdList->SetPipeline(activeScanPipeline);
 		cmdList->BindDescriptorSet(0, scanDescriptorSets[pass].Get());
 
 		ScanPushConstants scanPushConstants = {};
@@ -770,7 +829,7 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		    {});
 
 		// --- Pass 3: SCAN BLOCK SUMS ---
-		cmdList->SetPipeline(radixPrefixScanPipeline.Get());
+		cmdList->SetPipeline(activeScanPipeline);
 		cmdList->BindDescriptorSet(0, scanBlockSumsDescriptorSet.Get());
 
 		scanPushConstants.numElements = numScanWorkgroups;
@@ -796,7 +855,7 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		    {});
 
 		// --- Pass 4: ADD OFFSETS ---
-		cmdList->SetPipeline(radixPrefixScanPipeline.Get());
+		cmdList->SetPipeline(activeScanPipeline);
 		cmdList->BindDescriptorSet(0, scanDescriptorSets[pass].Get());
 
 		scanPushConstants.numElements = numScanElements;
@@ -869,9 +928,16 @@ void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList)
 		return;
 	}
 
+	// Select histogram pipeline based on shader variant
+	rhi::IRHIPipeline *activeHistogramPipeline = histogramPipeline.Get();
+
+	if (shaderVariant == ShaderVariant::SubgroupOptimized && histogramSubgroupPipeline)
+	{
+		activeHistogramPipeline = histogramSubgroupPipeline.Get();
+	}
+
 	uint32_t numWorkgroups = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 
-	// Calculate how many blocks each workgroup needs to process
 	uint32_t elementsPerWorkgroup  = (totalSplatCount + numWorkgroups - 1) / numWorkgroups;
 	uint32_t numBlocksPerWorkgroup = (elementsPerWorkgroup + WorkgroupSize - 1) / WorkgroupSize;
 
@@ -887,7 +953,7 @@ void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList)
 		pushConstants.numBlocksPerWorkgroup = numBlocksPerWorkgroup;
 
 		// --- Pass 1: HISTOGRAM (raw counts, not scanned) ---
-		cmdList->SetPipeline(histogramPipeline.Get());
+		cmdList->SetPipeline(activeHistogramPipeline);
 		cmdList->BindDescriptorSet(0, histogramDescriptorSets[pass].Get());
 
 		cmdList->PushConstants(
@@ -989,7 +1055,7 @@ void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
 	cmdList->CopyBuffer(finalIndices.Get(), verificationSortedIndices.Get(), {&copyRegion, 1});
 
 	// Copy histogram data for verification
-	uint32_t numWorkgroups        = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
+	uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 	uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 	uint32_t totalHistogramSize   = RadixPasses * histogramSizePerPass;
 
@@ -1187,9 +1253,8 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 			LOG_INFO("Note: IntegratedScan keeps raw histogram counts, computes prefix sums inline");
 		}
 
-		uint32_t  bufferLayoutNumWorkgroups = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
-		uint32_t  numWorkgroups             = std::min(MaxWorkgroups, bufferLayoutNumWorkgroups);
-		uint32_t *histogramData             = static_cast<uint32_t *>(verificationHistogram->Map());
+		uint32_t  numWorkgroups = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
+		uint32_t *histogramData = static_cast<uint32_t *>(verificationHistogram->Map());
 
 		container::vector<uint32_t> tempKeys;
 		tempKeys.resize(totalSplatCount);
@@ -1234,7 +1299,7 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 				}
 
 				// Histogram data layout: [bin0: WG0..WGn | bin1: WG0..WGn | ...]
-				uint32_t passOffset = pass * bufferLayoutNumWorkgroups * RadixSortBins;
+				uint32_t passOffset = pass * numWorkgroups * RadixSortBins;
 				for (uint32_t wg = 0; wg < numWorkgroups; ++wg)
 				{
 					for (uint32_t bin = 0; bin < RadixSortBins; ++bin)
@@ -1371,9 +1436,8 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 					{
 						// Extended debug for Pass 2
 						LOG_INFO("  Debug Pass 2: Buffer layout info:");
-						LOG_INFO("    bufferLayoutNumWorkgroups = {}", bufferLayoutNumWorkgroups);
-						LOG_INFO("    numWorkgroups (capped) = {}", numWorkgroups);
-						LOG_INFO("    passOffset = {} (pass * {} * {})", passOffset, bufferLayoutNumWorkgroups, RadixSortBins);
+						LOG_INFO("    numWorkgroups = {}", numWorkgroups);
+						LOG_INFO("    passOffset = {} (pass * {} * {})", passOffset, numWorkgroups, RadixSortBins);
 
 						// Check raw buffer values at passOffset
 						LOG_INFO("  Debug Pass 2: Raw buffer values at passOffset:");

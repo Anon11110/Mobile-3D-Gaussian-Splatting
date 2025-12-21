@@ -19,6 +19,12 @@ class GpuSplatSorter
 		IntegratedScan        // Integrated prefix sum in scatter (2 dispatches per pass)
 	};
 
+	enum class ShaderVariant
+	{
+		Portable,                // Works on all GPUs (Blelloch scan, direct atomics)
+		SubgroupOptimized        // Faster but requires reliable subgroup support (Fail on Qualcomm Adreno)
+	};
+
 	GpuSplatSorter(rhi::IRHIDevice *device, container::shared_ptr<vfs::IFileSystem> vfs = nullptr);
 	~GpuSplatSorter() = default;
 
@@ -44,6 +50,20 @@ class GpuSplatSorter
 	const char *GetSortMethodName() const
 	{
 		return sortMethod == SortMethod::Prescan ? "Prescan" : "Integrated";
+	}
+
+	// Shader variant switching
+	void SetShaderVariant(ShaderVariant variant)
+	{
+		shaderVariant = variant;
+	}
+	ShaderVariant GetShaderVariant() const
+	{
+		return shaderVariant;
+	}
+	const char *GetShaderVariantName() const
+	{
+		return shaderVariant == ShaderVariant::Portable ? "Portable" : "SubgroupOptimized";
 	}
 
 	// Verification methods
@@ -104,8 +124,15 @@ class GpuSplatSorter
 	rhi::BufferHandle cameraUBO;
 
 	rhi::PipelineHandle depthCalcPipeline;
+
+	// Portable shader pipelines
 	rhi::PipelineHandle histogramPipeline;
 	rhi::PipelineHandle radixPrefixScanPipeline;
+
+	// Subgroup-optimized shader pipelines
+	rhi::PipelineHandle histogramSubgroupPipeline;
+	rhi::PipelineHandle radixPrefixScanSubgroupPipeline;
+
 	rhi::PipelineHandle scatterPairsPipeline;               // Default scatter with integrated scan
 	rhi::PipelineHandle scatterPairsPrescanPipeline;        // Scatter with prescan method
 
@@ -122,7 +149,8 @@ class GpuSplatSorter
 	rhi::DescriptorSetHandle scatterPairsPrescanDescriptorSets[4];           // Prescan method descriptor sets
 	rhi::DescriptorSetHandle scatterPairsIntegratedDescriptorSets[4];        // Integrated scan descriptor sets
 
-	SortMethod sortMethod = SortMethod::IntegratedScan;
+	SortMethod    sortMethod    = SortMethod::IntegratedScan;
+	ShaderVariant shaderVariant = ShaderVariant::Portable;
 
 	// Store last view matrix for verification
 	math::mat4 lastViewMatrix = math::mat4(1.0f);

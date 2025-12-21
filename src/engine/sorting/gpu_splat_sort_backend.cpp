@@ -136,6 +136,36 @@ const char *GpuSplatSortBackend::GetMethodName() const
 	return m_currentMethod == 0 ? "Prescan" : "Integrated Scan";
 }
 
+void GpuSplatSortBackend::SetShaderVariant(int variant)
+{
+	if (!m_sorter)
+	{
+		return;
+	}
+
+	m_sorter->SetShaderVariant(variant == 0 ? GpuSplatSorter::ShaderVariant::Portable : GpuSplatSorter::ShaderVariant::SubgroupOptimized);
+}
+
+int GpuSplatSortBackend::GetShaderVariant() const
+{
+	if (!m_sorter)
+	{
+		return 0;
+	}
+
+	return m_sorter->GetShaderVariant() == GpuSplatSorter::ShaderVariant::Portable ? 0 : 1;
+}
+
+const char *GpuSplatSortBackend::GetShaderVariantName() const
+{
+	if (!m_sorter)
+	{
+		return "Unknown";
+	}
+
+	return m_sorter->GetShaderVariantName();
+}
+
 bool GpuSplatSortBackend::HasComprehensiveVerification() const
 {
 	return true;
