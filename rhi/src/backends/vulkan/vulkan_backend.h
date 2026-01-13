@@ -273,12 +273,14 @@ class VulkanCommandList final : public RefCounter<IRHICommandList>
 	// Cached function pointers
 	PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
 	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
+	PFN_vkCmdPipelineBarrier2  vkCmdPipelineBarrier2;
 
   public:
 	VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType, uint32_t queueFamily,
 	                  uint32_t graphicsFamily, uint32_t computeFamily, uint32_t transferFamily,
 	                  PFN_vkCmdBeginRenderingKHR beginFunc,
-	                  PFN_vkCmdEndRenderingKHR   endFunc);
+	                  PFN_vkCmdEndRenderingKHR   endFunc,
+	                  PFN_vkCmdPipelineBarrier2  barrier2Func);
 	~VulkanCommandList() override = default;
 
 	VulkanCommandList(const VulkanCommandList &)            = delete;
@@ -565,5 +567,10 @@ VkAccessFlags         AccessMaskToVulkan(AccessMask mask);
 void                  GetVulkanStagesAndAccess(ResourceState state, PipelineScope scope,
                                                VkPipelineStageFlags &stages, VkAccessFlags &access);
 VkImageLayout         ResourceStateToImageLayout(ResourceState state);
+VkPipelineStageFlags2 PipelineScopeToVulkanStages2(PipelineScope scope);
+VkPipelineStageFlags2 StageMaskToVulkan2(StageMask mask);
+VkAccessFlags2        AccessMaskToVulkan2(AccessMask mask);
+void                  GetVulkanStagesAndAccess2(ResourceState state, PipelineScope scope,
+                                                VkPipelineStageFlags2 &stages, VkAccessFlags2 &access);
 
 }        // namespace rhi::vulkan

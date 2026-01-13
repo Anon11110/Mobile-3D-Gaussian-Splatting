@@ -8,8 +8,9 @@ namespace rhi::vulkan
 VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType, uint32_t queueFamily,
                                      uint32_t graphicsFamily, uint32_t computeFamily, uint32_t transferFamily,
                                      PFN_vkCmdBeginRenderingKHR beginFunc,
-                                     PFN_vkCmdEndRenderingKHR   endFunc) :
-    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), queueType(queueType), queueFamily(queueFamily), graphicsQueueFamily(graphicsFamily), computeQueueFamily(computeFamily), transferQueueFamily(transferFamily), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc)
+                                     PFN_vkCmdEndRenderingKHR   endFunc,
+                                     PFN_vkCmdPipelineBarrier2  barrier2Func) :
+    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), queueType(queueType), queueFamily(queueFamily), graphicsQueueFamily(graphicsFamily), computeQueueFamily(computeFamily), transferQueueFamily(transferFamily), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc), vkCmdPipelineBarrier2(barrier2Func)
 {
 	// Allocate command buffer
 	VkCommandBufferAllocateInfo allocInfo{};
@@ -479,12 +480,9 @@ void VulkanCommandList::Barrier(
     std::span<const TextureTransition> texture_transitions,
     std::span<const MemoryBarrier>     memory_barriers)
 {
-	std::vector<VkBufferMemoryBarrier> bufferBarriers;
-	std::vector<VkImageMemoryBarrier>  imageBarriers;
-	std::vector<VkMemoryBarrier>       memBarriers;
-
-	VkPipelineStageFlags srcStageFlags = 0;
-	VkPipelineStageFlags dstStageFlags = 0;
+	std::vector<VkBufferMemoryBarrier2> bufferBarriers;
+	std::vector<VkImageMemoryBarrier2>  imageBarriers;
+	std::vector<VkMemoryBarrier2>       memBarriers;
 
 	// Process buffer transitions
 	for (const auto &transition : buffer_transitions)
@@ -492,56 +490,55 @@ void VulkanCommandList::Barrier(
 		if (!transition.buffer)
 			continue;
 
-		VkBufferMemoryBarrier barrier{};
-		barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		VkBufferMemoryBarrier2 barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
 		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		barrier.buffer              = static_cast<VulkanBuffer *>(transition.buffer)->GetHandle();
 		barrier.offset              = transition.offset;
 		barrier.size                = (transition.size == ~0ull) ? VK_WHOLE_SIZE : transition.size;
 
-		VkPipelineStageFlags srcStages, dstStages;
-		VkAccessFlags        srcAccess, dstAccess;
+		VkPipelineStageFlags2 srcStages, dstStages;
+		VkAccessFlags2        srcAccess, dstAccess;
 
 		if (transition.src_stages != StageMask::Auto)
 		{
-			srcStages = StageMaskToVulkan(transition.src_stages);
-			srcAccess = AccessMaskToVulkan(transition.src_access);
+			srcStages = StageMaskToVulkan2(transition.src_stages);
+			srcAccess = AccessMaskToVulkan2(transition.src_access);
 
 			// If user provided stages but not access, infer access from the state
-			if (srcAccess == 0 && transition.src_access == AccessMask::Auto)
+			if (srcAccess == VK_ACCESS_2_NONE && transition.src_access == AccessMask::Auto)
 			{
-				VkPipelineStageFlags tempStages;        // Unused
-				GetVulkanStagesAndAccess(transition.before, src_scope, tempStages, srcAccess);
+				VkPipelineStageFlags2 tempStages;
+				GetVulkanStagesAndAccess2(transition.before, src_scope, tempStages, srcAccess);
 			}
 		}
 		else
 		{
-			GetVulkanStagesAndAccess(transition.before, src_scope, srcStages, srcAccess);
+			GetVulkanStagesAndAccess2(transition.before, src_scope, srcStages, srcAccess);
 		}
 
 		if (transition.dst_stages != StageMask::Auto)
 		{
-			dstStages = StageMaskToVulkan(transition.dst_stages);
-			dstAccess = AccessMaskToVulkan(transition.dst_access);
+			dstStages = StageMaskToVulkan2(transition.dst_stages);
+			dstAccess = AccessMaskToVulkan2(transition.dst_access);
 
 			// If user provided stages but not access, infer access from the state
-			if (dstAccess == 0 && transition.dst_access == AccessMask::Auto)
+			if (dstAccess == VK_ACCESS_2_NONE && transition.dst_access == AccessMask::Auto)
 			{
-				VkPipelineStageFlags tempStages;        // Unused
-				GetVulkanStagesAndAccess(transition.after, dst_scope, tempStages, dstAccess);
+				VkPipelineStageFlags2 tempStages;
+				GetVulkanStagesAndAccess2(transition.after, dst_scope, tempStages, dstAccess);
 			}
 		}
 		else
 		{
-			GetVulkanStagesAndAccess(transition.after, dst_scope, dstStages, dstAccess);
+			GetVulkanStagesAndAccess2(transition.after, dst_scope, dstStages, dstAccess);
 		}
 
+		barrier.srcStageMask  = srcStages;
 		barrier.srcAccessMask = srcAccess;
+		barrier.dstStageMask  = dstStages;
 		barrier.dstAccessMask = dstAccess;
-
-		srcStageFlags |= srcStages;
-		dstStageFlags |= dstStages;
 
 		bufferBarriers.push_back(barrier);
 	}
@@ -552,8 +549,8 @@ void VulkanCommandList::Barrier(
 		if (!transition.texture)
 			continue;
 
-		VkImageMemoryBarrier barrier{};
-		barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		VkImageMemoryBarrier2 barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
 		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		barrier.image               = static_cast<VulkanTexture *>(transition.texture)->GetHandle();
@@ -578,48 +575,47 @@ void VulkanCommandList::Barrier(
 		barrier.subresourceRange.baseArrayLayer = transition.baseArrayLayer;
 		barrier.subresourceRange.layerCount     = (transition.arrayLayerCount == ~0u) ? VK_REMAINING_ARRAY_LAYERS : transition.arrayLayerCount;
 
-		VkPipelineStageFlags srcStages, dstStages;
-		VkAccessFlags        srcAccess, dstAccess;
+		VkPipelineStageFlags2 srcStages, dstStages;
+		VkAccessFlags2        srcAccess, dstAccess;
 
 		if (transition.src_stages != StageMask::Auto)
 		{
-			srcStages = StageMaskToVulkan(transition.src_stages);
-			srcAccess = AccessMaskToVulkan(transition.src_access);
+			srcStages = StageMaskToVulkan2(transition.src_stages);
+			srcAccess = AccessMaskToVulkan2(transition.src_access);
 
 			// If user provided stages but not access, infer access from the state
-			if (srcAccess == 0 && transition.src_access == AccessMask::Auto)
+			if (srcAccess == VK_ACCESS_2_NONE && transition.src_access == AccessMask::Auto)
 			{
-				VkPipelineStageFlags tempStages;        // Unused
-				GetVulkanStagesAndAccess(transition.before, src_scope, tempStages, srcAccess);
+				VkPipelineStageFlags2 tempStages;
+				GetVulkanStagesAndAccess2(transition.before, src_scope, tempStages, srcAccess);
 			}
 		}
 		else
 		{
-			GetVulkanStagesAndAccess(transition.before, src_scope, srcStages, srcAccess);
+			GetVulkanStagesAndAccess2(transition.before, src_scope, srcStages, srcAccess);
 		}
 
 		if (transition.dst_stages != StageMask::Auto)
 		{
-			dstStages = StageMaskToVulkan(transition.dst_stages);
-			dstAccess = AccessMaskToVulkan(transition.dst_access);
+			dstStages = StageMaskToVulkan2(transition.dst_stages);
+			dstAccess = AccessMaskToVulkan2(transition.dst_access);
 
 			// If user provided stages but not access, infer access from the state
-			if (dstAccess == 0 && transition.dst_access == AccessMask::Auto)
+			if (dstAccess == VK_ACCESS_2_NONE && transition.dst_access == AccessMask::Auto)
 			{
-				VkPipelineStageFlags tempStages;        // Unused
-				GetVulkanStagesAndAccess(transition.after, dst_scope, tempStages, dstAccess);
+				VkPipelineStageFlags2 tempStages;
+				GetVulkanStagesAndAccess2(transition.after, dst_scope, tempStages, dstAccess);
 			}
 		}
 		else
 		{
-			GetVulkanStagesAndAccess(transition.after, dst_scope, dstStages, dstAccess);
+			GetVulkanStagesAndAccess2(transition.after, dst_scope, dstStages, dstAccess);
 		}
 
+		barrier.srcStageMask  = srcStages;
 		barrier.srcAccessMask = srcAccess;
+		barrier.dstStageMask  = dstStages;
 		barrier.dstAccessMask = dstAccess;
-
-		srcStageFlags |= srcStages;
-		dstStageFlags |= dstStages;
 
 		imageBarriers.push_back(barrier);
 	}
@@ -627,53 +623,46 @@ void VulkanCommandList::Barrier(
 	// Process memory barriers
 	for (const auto &memBarrier : memory_barriers)
 	{
-		VkMemoryBarrier barrier{};
-		barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		VkMemoryBarrier2 barrier{};
+		barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
 
 		if (memBarrier.src_stages != StageMask::Auto)
 		{
-			srcStageFlags |= StageMaskToVulkan(memBarrier.src_stages);
-			barrier.srcAccessMask = AccessMaskToVulkan(memBarrier.src_access);
+			barrier.srcStageMask  = StageMaskToVulkan2(memBarrier.src_stages);
+			barrier.srcAccessMask = AccessMaskToVulkan2(memBarrier.src_access);
 		}
 		else
 		{
-			srcStageFlags |= PipelineScopeToVulkanStages(src_scope);
-			barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+			barrier.srcStageMask  = PipelineScopeToVulkanStages2(src_scope);
+			barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
 		}
 
 		if (memBarrier.dst_stages != StageMask::Auto)
 		{
-			dstStageFlags |= StageMaskToVulkan(memBarrier.dst_stages);
-			barrier.dstAccessMask = AccessMaskToVulkan(memBarrier.dst_access);
+			barrier.dstStageMask  = StageMaskToVulkan2(memBarrier.dst_stages);
+			barrier.dstAccessMask = AccessMaskToVulkan2(memBarrier.dst_access);
 		}
 		else
 		{
-			dstStageFlags |= PipelineScopeToVulkanStages(dst_scope);
-			barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+			barrier.dstStageMask  = PipelineScopeToVulkanStages2(dst_scope);
+			barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
 		}
 
 		memBarriers.push_back(barrier);
 	}
 
-	// If no specific stages were set, use the scope defaults
-	if (srcStageFlags == 0)
-		srcStageFlags = PipelineScopeToVulkanStages(src_scope);
-	if (dstStageFlags == 0)
-		dstStageFlags = PipelineScopeToVulkanStages(dst_scope);
-
 	if (!bufferBarriers.empty() || !imageBarriers.empty() || !memBarriers.empty())
 	{
-		vkCmdPipelineBarrier(
-		    commandBuffer,
-		    srcStageFlags,
-		    dstStageFlags,
-		    0,
-		    static_cast<uint32_t>(memBarriers.size()),
-		    memBarriers.empty() ? nullptr : memBarriers.data(),
-		    static_cast<uint32_t>(bufferBarriers.size()),
-		    bufferBarriers.empty() ? nullptr : bufferBarriers.data(),
-		    static_cast<uint32_t>(imageBarriers.size()),
-		    imageBarriers.empty() ? nullptr : imageBarriers.data());
+		VkDependencyInfo depInfo{};
+		depInfo.sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		depInfo.memoryBarrierCount       = static_cast<uint32_t>(memBarriers.size());
+		depInfo.pMemoryBarriers          = memBarriers.empty() ? nullptr : memBarriers.data();
+		depInfo.bufferMemoryBarrierCount = static_cast<uint32_t>(bufferBarriers.size());
+		depInfo.pBufferMemoryBarriers    = bufferBarriers.empty() ? nullptr : bufferBarriers.data();
+		depInfo.imageMemoryBarrierCount  = static_cast<uint32_t>(imageBarriers.size());
+		depInfo.pImageMemoryBarriers     = imageBarriers.empty() ? nullptr : imageBarriers.data();
+
+		vkCmdPipelineBarrier2(commandBuffer, &depInfo);
 	}
 }
 
@@ -710,9 +699,8 @@ void VulkanCommandList::ReleaseToQueue(
 			break;
 	}
 
-	std::vector<VkBufferMemoryBarrier> bufferBarriers;
-	std::vector<VkImageMemoryBarrier>  imageBarriers;
-	VkPipelineStageFlags               accumulatedSrcStages = 0;
+	std::vector<VkBufferMemoryBarrier2> bufferBarriers;
+	std::vector<VkImageMemoryBarrier2>  imageBarriers;
 
 	// Process buffer transitions for release
 	for (const auto &transition : buffer_transitions)
@@ -720,24 +708,23 @@ void VulkanCommandList::ReleaseToQueue(
 		if (!transition.buffer)
 			continue;
 
-		VkBufferMemoryBarrier barrier{};
-		barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		barrier.srcQueueFamilyIndex = queueFamily;           // Current queue family
-		barrier.dstQueueFamilyIndex = dstQueueFamily;        // Destination queue family
+		VkBufferMemoryBarrier2 barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+		barrier.srcQueueFamilyIndex = queueFamily;
+		barrier.dstQueueFamilyIndex = dstQueueFamily;
 		barrier.buffer              = static_cast<VulkanBuffer *>(transition.buffer)->GetHandle();
 		barrier.offset              = transition.offset;
 		barrier.size                = (transition.size == ~0ull) ? VK_WHOLE_SIZE : transition.size;
 
 		// For release, we specify the source access based on the 'before' state
-		VkPipelineStageFlags srcStages;
-		VkAccessFlags        srcAccess;
-		GetVulkanStagesAndAccess(transition.before, currentScope, srcStages, srcAccess);
+		VkPipelineStageFlags2 srcStages;
+		VkAccessFlags2        srcAccess;
+		GetVulkanStagesAndAccess2(transition.before, currentScope, srcStages, srcAccess);
 
+		barrier.srcStageMask  = srcStages;
 		barrier.srcAccessMask = srcAccess;
-		barrier.dstAccessMask = 0;        // No destination access for release
-
-		// Accumulate the precise source stages
-		accumulatedSrcStages |= srcStages;
+		barrier.dstStageMask  = VK_PIPELINE_STAGE_2_NONE;
+		barrier.dstAccessMask = VK_ACCESS_2_NONE;
 
 		bufferBarriers.push_back(barrier);
 	}
@@ -748,10 +735,10 @@ void VulkanCommandList::ReleaseToQueue(
 		if (!transition.texture)
 			continue;
 
-		VkImageMemoryBarrier barrier{};
-		barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		barrier.srcQueueFamilyIndex = queueFamily;           // Current queue family
-		barrier.dstQueueFamilyIndex = dstQueueFamily;        // Destination queue family
+		VkImageMemoryBarrier2 barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+		barrier.srcQueueFamilyIndex = queueFamily;
+		barrier.dstQueueFamilyIndex = dstQueueFamily;
 		barrier.image               = static_cast<VulkanTexture *>(transition.texture)->GetHandle();
 		barrier.oldLayout           = ResourceStateToImageLayout(transition.before);
 		barrier.newLayout           = ResourceStateToImageLayout(transition.after);
@@ -775,15 +762,14 @@ void VulkanCommandList::ReleaseToQueue(
 		barrier.subresourceRange.layerCount     = (transition.arrayLayerCount == ~0u) ? VK_REMAINING_ARRAY_LAYERS : transition.arrayLayerCount;
 
 		// For release, we specify the source access based on the 'before' state
-		VkPipelineStageFlags srcStages;
-		VkAccessFlags        srcAccess;
-		GetVulkanStagesAndAccess(transition.before, currentScope, srcStages, srcAccess);
+		VkPipelineStageFlags2 srcStages;
+		VkAccessFlags2        srcAccess;
+		GetVulkanStagesAndAccess2(transition.before, currentScope, srcStages, srcAccess);
 
+		barrier.srcStageMask  = srcStages;
 		barrier.srcAccessMask = srcAccess;
-		barrier.dstAccessMask = 0;        // No destination access for release
-
-		// Accumulate the precise source stages
-		accumulatedSrcStages |= srcStages;
+		barrier.dstStageMask  = VK_PIPELINE_STAGE_2_NONE;
+		barrier.dstAccessMask = VK_ACCESS_2_NONE;
 
 		imageBarriers.push_back(barrier);
 	}
@@ -791,23 +777,14 @@ void VulkanCommandList::ReleaseToQueue(
 	// Issue the pipeline barrier for release
 	if (!bufferBarriers.empty() || !imageBarriers.empty())
 	{
-		// Use accumulated stages for more precise synchronization
-		// If no stages were accumulated (shouldn't happen), fall back to a safe default
-		VkPipelineStageFlags srcStageFlags = accumulatedSrcStages ? accumulatedSrcStages : PipelineScopeToVulkanStages(currentScope);
+		VkDependencyInfo depInfo{};
+		depInfo.sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		depInfo.bufferMemoryBarrierCount = static_cast<uint32_t>(bufferBarriers.size());
+		depInfo.pBufferMemoryBarriers    = bufferBarriers.empty() ? nullptr : bufferBarriers.data();
+		depInfo.imageMemoryBarrierCount  = static_cast<uint32_t>(imageBarriers.size());
+		depInfo.pImageMemoryBarriers     = imageBarriers.empty() ? nullptr : imageBarriers.data();
 
-		// Destination stage is BOTTOM_OF_PIPE for release
-		VkPipelineStageFlags dstStageFlags = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-
-		vkCmdPipelineBarrier(
-		    commandBuffer,
-		    srcStageFlags,
-		    dstStageFlags,
-		    0,
-		    0, nullptr,
-		    static_cast<uint32_t>(bufferBarriers.size()),
-		    bufferBarriers.empty() ? nullptr : bufferBarriers.data(),
-		    static_cast<uint32_t>(imageBarriers.size()),
-		    imageBarriers.empty() ? nullptr : imageBarriers.data());
+		vkCmdPipelineBarrier2(commandBuffer, &depInfo);
 	}
 }
 
@@ -844,9 +821,8 @@ void VulkanCommandList::AcquireFromQueue(
 			break;
 	}
 
-	std::vector<VkBufferMemoryBarrier> bufferBarriers;
-	std::vector<VkImageMemoryBarrier>  imageBarriers;
-	VkPipelineStageFlags               accumulatedDstStages = 0;
+	std::vector<VkBufferMemoryBarrier2> bufferBarriers;
+	std::vector<VkImageMemoryBarrier2>  imageBarriers;
 
 	// Process buffer transitions for acquire
 	for (const auto &transition : buffer_transitions)
@@ -854,24 +830,23 @@ void VulkanCommandList::AcquireFromQueue(
 		if (!transition.buffer)
 			continue;
 
-		VkBufferMemoryBarrier barrier{};
-		barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		barrier.srcQueueFamilyIndex = srcQueueFamily;        // Source queue family
-		barrier.dstQueueFamilyIndex = queueFamily;           // Current queue family
+		VkBufferMemoryBarrier2 barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+		barrier.srcQueueFamilyIndex = srcQueueFamily;
+		barrier.dstQueueFamilyIndex = queueFamily;
 		barrier.buffer              = static_cast<VulkanBuffer *>(transition.buffer)->GetHandle();
 		barrier.offset              = transition.offset;
 		barrier.size                = (transition.size == ~0ull) ? VK_WHOLE_SIZE : transition.size;
 
 		// For acquire, we specify the destination access based on the 'after' state
-		VkPipelineStageFlags dstStages;
-		VkAccessFlags        dstAccess;
-		GetVulkanStagesAndAccess(transition.after, currentScope, dstStages, dstAccess);
+		VkPipelineStageFlags2 dstStages;
+		VkAccessFlags2        dstAccess;
+		GetVulkanStagesAndAccess2(transition.after, currentScope, dstStages, dstAccess);
 
-		barrier.srcAccessMask = 0;        // No source access for acquire
+		barrier.srcStageMask  = VK_PIPELINE_STAGE_2_NONE;
+		barrier.srcAccessMask = VK_ACCESS_2_NONE;
+		barrier.dstStageMask  = dstStages;
 		barrier.dstAccessMask = dstAccess;
-
-		// Accumulate the precise destination stages
-		accumulatedDstStages |= dstStages;
 
 		bufferBarriers.push_back(barrier);
 	}
@@ -882,10 +857,10 @@ void VulkanCommandList::AcquireFromQueue(
 		if (!transition.texture)
 			continue;
 
-		VkImageMemoryBarrier barrier{};
-		barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		barrier.srcQueueFamilyIndex = srcQueueFamily;        // Source queue family
-		barrier.dstQueueFamilyIndex = queueFamily;           // Current queue family
+		VkImageMemoryBarrier2 barrier{};
+		barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+		barrier.srcQueueFamilyIndex = srcQueueFamily;
+		barrier.dstQueueFamilyIndex = queueFamily;
 		barrier.image               = static_cast<VulkanTexture *>(transition.texture)->GetHandle();
 		barrier.oldLayout           = ResourceStateToImageLayout(transition.before);
 		barrier.newLayout           = ResourceStateToImageLayout(transition.after);
@@ -909,15 +884,14 @@ void VulkanCommandList::AcquireFromQueue(
 		barrier.subresourceRange.layerCount     = (transition.arrayLayerCount == ~0u) ? VK_REMAINING_ARRAY_LAYERS : transition.arrayLayerCount;
 
 		// For acquire, we specify the destination access based on the 'after' state
-		VkPipelineStageFlags dstStages;
-		VkAccessFlags        dstAccess;
-		GetVulkanStagesAndAccess(transition.after, currentScope, dstStages, dstAccess);
+		VkPipelineStageFlags2 dstStages;
+		VkAccessFlags2        dstAccess;
+		GetVulkanStagesAndAccess2(transition.after, currentScope, dstStages, dstAccess);
 
-		barrier.srcAccessMask = 0;        // No source access for acquire
+		barrier.srcStageMask  = VK_PIPELINE_STAGE_2_NONE;
+		barrier.srcAccessMask = VK_ACCESS_2_NONE;
+		barrier.dstStageMask  = dstStages;
 		barrier.dstAccessMask = dstAccess;
-
-		// Accumulate the precise destination stages
-		accumulatedDstStages |= dstStages;
 
 		imageBarriers.push_back(barrier);
 	}
@@ -925,23 +899,14 @@ void VulkanCommandList::AcquireFromQueue(
 	// Issue the pipeline barrier for acquire
 	if (!bufferBarriers.empty() || !imageBarriers.empty())
 	{
-		// Source stage is TOP_OF_PIPE for acquire
-		VkPipelineStageFlags srcStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		VkDependencyInfo depInfo{};
+		depInfo.sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		depInfo.bufferMemoryBarrierCount = static_cast<uint32_t>(bufferBarriers.size());
+		depInfo.pBufferMemoryBarriers    = bufferBarriers.empty() ? nullptr : bufferBarriers.data();
+		depInfo.imageMemoryBarrierCount  = static_cast<uint32_t>(imageBarriers.size());
+		depInfo.pImageMemoryBarriers     = imageBarriers.empty() ? nullptr : imageBarriers.data();
 
-		// Use accumulated stages for more precise synchronization
-		// If no stages were accumulated (shouldn't happen), fall back to a safe default
-		VkPipelineStageFlags dstStageFlags = accumulatedDstStages ? accumulatedDstStages : PipelineScopeToVulkanStages(currentScope);
-
-		vkCmdPipelineBarrier(
-		    commandBuffer,
-		    srcStageFlags,
-		    dstStageFlags,
-		    0,
-		    0, nullptr,
-		    static_cast<uint32_t>(bufferBarriers.size()),
-		    bufferBarriers.empty() ? nullptr : bufferBarriers.data(),
-		    static_cast<uint32_t>(imageBarriers.size()),
-		    imageBarriers.empty() ? nullptr : imageBarriers.data());
+		vkCmdPipelineBarrier2(commandBuffer, &depInfo);
 	}
 }
 

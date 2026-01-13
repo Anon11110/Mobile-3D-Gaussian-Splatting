@@ -46,6 +46,7 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 
 	PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
 	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
+	PFN_vkCmdPipelineBarrier2  vkCmdPipelineBarrier2;
 
 	// Device feature flags
 	bool hasDynamicRendering;
@@ -232,7 +233,8 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		uint32_t           queueFamily = GetQueueFamily(queueType);
 		VulkanCommandList *cmdList     = new VulkanCommandList(device, commandPool, queueType, queueFamily,
 		                                                       graphicsQueueFamily, computeQueueFamily, transferQueueFamily,
-		                                                       vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR);
+		                                                       vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR,
+		                                                       vkCmdPipelineBarrier2);
 		return RefCntPtr<IRHICommandList>::Create(cmdList);
 	}
 
@@ -964,6 +966,11 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		dynamicRenderingFeatures.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
 		dynamicRenderingFeatures.dynamicRendering = VK_TRUE;
 
+		// Enable synchronization2
+		VkPhysicalDeviceSynchronization2Features sync2Features{};
+		sync2Features.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+		sync2Features.synchronization2 = VK_TRUE;
+
 		VkDeviceCreateInfo createInfo{};
 		createInfo.sType                = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
@@ -1054,10 +1061,13 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		createInfo.enabledExtensionCount   = static_cast<uint32_t>(deviceExtensions.size());
 		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
+		// Chain feature structures into pNext
+		// sync2Features -> dynamicRenderingFeatures (if enabled)
 		if (hasDynamicRendering)
 		{
-			createInfo.pNext = &dynamicRenderingFeatures;
+			sync2Features.pNext = &dynamicRenderingFeatures;
 		}
+		createInfo.pNext = &sync2Features;
 
 		if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
 		{
@@ -1280,8 +1290,12 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		vkBeginCommandBuffer(copyCmd, &beginInfo);
 
 		// Transition image from UNDEFINED to TRANSFER_DST_OPTIMAL
-		VkImageMemoryBarrier barrier{};
-		barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		VkImageMemoryBarrier2 barrier{};
+		barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+		barrier.srcStageMask                    = VK_PIPELINE_STAGE_2_NONE;
+		barrier.srcAccessMask                   = VK_ACCESS_2_NONE;
+		barrier.dstStageMask                    = VK_PIPELINE_STAGE_2_COPY_BIT;
+		barrier.dstAccessMask                   = VK_ACCESS_2_TRANSFER_WRITE_BIT;
 		barrier.oldLayout                       = VK_IMAGE_LAYOUT_UNDEFINED;
 		barrier.newLayout                       = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 		barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
@@ -1292,11 +1306,13 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		barrier.subresourceRange.levelCount     = desc.mipLevels;
 		barrier.subresourceRange.baseArrayLayer = 0;
 		barrier.subresourceRange.layerCount     = 1;
-		barrier.srcAccessMask                   = 0;
-		barrier.dstAccessMask                   = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-		vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
-		                     0, nullptr, 1, &barrier);
+		VkDependencyInfo depInfo{};
+		depInfo.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		depInfo.imageMemoryBarrierCount = 1;
+		depInfo.pImageMemoryBarriers    = &barrier;
+
+		vkCmdPipelineBarrier2(copyCmd, &depInfo);
 
 		// Copy buffer to image
 		VkBufferImageCopy region{};
@@ -1314,13 +1330,14 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		                       &region);
 
 		// Transition image from TRANSFER_DST_OPTIMAL to SHADER_READ_ONLY_OPTIMAL
+		barrier.srcStageMask  = VK_PIPELINE_STAGE_2_COPY_BIT;
+		barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+		barrier.dstStageMask  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+		barrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
 		barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 		barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-		vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
-		                     nullptr, 0, nullptr, 1, &barrier);
+		vkCmdPipelineBarrier2(copyCmd, &depInfo);
 
 		vkEndCommandBuffer(copyCmd);
 
@@ -1438,6 +1455,14 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		{
 			vkCmdBeginRenderingKHR = nullptr;
 			vkCmdEndRenderingKHR   = nullptr;
+		}
+
+		// Load synchronization2 function
+		vkCmdPipelineBarrier2 = (PFN_vkCmdPipelineBarrier2) vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier2");
+		if (!vkCmdPipelineBarrier2)
+		{
+			// Fall back to KHR extension function
+			vkCmdPipelineBarrier2 = (PFN_vkCmdPipelineBarrier2) vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier2KHR");
 		}
 	}
 };
