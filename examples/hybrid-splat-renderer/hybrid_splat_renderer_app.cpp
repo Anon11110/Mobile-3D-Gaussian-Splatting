@@ -616,6 +616,8 @@ void HybridSplatRendererApp::OnRender()
 		swapchain->Present(imageIndex, m_renderFinishedSemaphores[imageIndex].Get());
 	}
 
+	device->RetireCompletedFrame();
+
 	m_frameCount++;
 }
 

@@ -554,7 +554,21 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 
 	void RetireCompletedFrame() override
 	{
-		///@todo
+		std::lock_guard<std::mutex> lock(deferredDeletionsMutex);
+
+		// Remove entries whose fences have signaled
+		auto it = std::remove_if(deferredDeletions.begin(), deferredDeletions.end(),
+		                         [this](const DeferredDeletion &deletion) {
+			                         if (deletion.fence && deletion.fence->IsSignaled())
+			                         {
+				                         vmaDestroyBuffer(allocator, deletion.stagingBuffer, deletion.stagingAllocation);
+				                         vkFreeCommandBuffers(device, transferCommandPool, 1, &deletion.commandBuffer);
+				                         return true;
+			                         }
+			                         return false;
+		                         });
+
+		deferredDeletions.erase(it, deferredDeletions.end());
 	}
 
 #ifdef RHI_VULKAN

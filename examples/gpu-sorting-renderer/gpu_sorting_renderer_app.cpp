@@ -406,6 +406,8 @@ void GpuSortingRendererApp::OnRender()
 		swapchain->Present(imageIndex, renderFinishedSemaphores[imageIndex].Get());
 	}
 
+	device->RetireCompletedFrame();
+
 	frameCount++;
 }
 
