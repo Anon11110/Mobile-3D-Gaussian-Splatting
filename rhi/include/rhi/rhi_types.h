@@ -198,13 +198,59 @@ enum class SampleCount
 enum class TextureFormat
 {
 	UNDEFINED,
+
+	// Standard RGBA formats
 	R8G8B8A8_UNORM,
 	R8G8B8A8_SRGB,
 	B8G8R8A8_UNORM,
 	B8G8R8A8_SRGB,
 	R32G32B32_FLOAT,
+
+	// Depth/stencil formats
 	D32_FLOAT,
-	D24_UNORM_S8_UINT
+	D24_UNORM_S8_UINT,
+
+	// Single channel formats
+	R8_UNORM,
+	R16_FLOAT,
+	R32_FLOAT,
+
+	// Dual channel formats
+	RG8_UNORM,
+	RG16_FLOAT,
+	RG32_FLOAT,
+
+	// HDR formats
+	RGBA16_FLOAT,
+	RGBA32_FLOAT,
+	R11G11B10_FLOAT,
+
+	// Compressed formats
+	ASTC_4x4_UNORM,
+	ASTC_4x4_SRGB,
+	ASTC_6x6_UNORM,
+	ASTC_6x6_SRGB,
+
+	ETC2_RGB8_UNORM,
+	ETC2_RGB8_SRGB,
+	ETC2_RGBA8_UNORM,
+	ETC2_RGBA8_SRGB,
+
+	BC1_RGB_UNORM,
+	BC1_RGB_SRGB,
+	BC3_RGBA_UNORM,
+	BC3_RGBA_SRGB,
+	BC5_RG_UNORM,
+	BC7_RGBA_UNORM,
+	BC7_RGBA_SRGB
+};
+
+enum class TextureType
+{
+	TEXTURE_2D,
+	TEXTURE_2D_ARRAY,
+	TEXTURE_CUBE,
+	TEXTURE_3D
 };
 
 enum class VertexFormat
@@ -526,10 +572,12 @@ struct TextureDesc
 	uint32_t        mipLevels   = 1;
 	uint32_t        arrayLayers = 1;
 	TextureFormat   format;
+	TextureType     type            = TextureType::TEXTURE_2D;
 	ResourceUsage   resourceUsage   = ResourceUsage::Static;
 	AllocationHints hints           = {};
 	bool            isRenderTarget  = false;
 	bool            isDepthStencil  = false;
+	bool            isCubeMap       = false;
 	const void     *initialData     = nullptr;
 	size_t          initialDataSize = 0;
 };

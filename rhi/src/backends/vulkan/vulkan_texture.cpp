@@ -5,6 +5,48 @@
 namespace rhi::vulkan
 {
 
+namespace
+{
+VkImageType GetVkImageType(TextureType type)
+{
+	switch (type)
+	{
+		case TextureType::TEXTURE_3D:
+			return VK_IMAGE_TYPE_3D;
+		default:
+			return VK_IMAGE_TYPE_2D;
+	}
+}
+
+VkImageViewType GetVkImageViewType(TextureType type, uint32_t arrayLayers, bool isCubeMap)
+{
+	if (isCubeMap || type == TextureType::TEXTURE_CUBE)
+	{
+		return (arrayLayers > 6) ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : VK_IMAGE_VIEW_TYPE_CUBE;
+	}
+
+	switch (type)
+	{
+		case TextureType::TEXTURE_2D_ARRAY:
+			return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+		case TextureType::TEXTURE_3D:
+			return VK_IMAGE_VIEW_TYPE_3D;
+		case TextureType::TEXTURE_2D:
+		default:
+			return (arrayLayers > 1) ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+	}
+}
+
+VkImageCreateFlags GetImageCreateFlags(TextureType type, bool isCubeMap)
+{
+	if (isCubeMap || type == TextureType::TEXTURE_CUBE)
+	{
+		return VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+	}
+	return 0;
+}
+}        // namespace
+
 VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, VkImage image, VkFormat format, uint32_t width,
                              uint32_t height, bool ownedBySwapchain) :
     device(device), allocator(allocator), image(image), imageView(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), width(width), height(height), depth(1), mipLevels(1), arrayLayers(1), format(VulkanFormatToTexture(format)), ownedBySwapchain(ownedBySwapchain)
@@ -41,7 +83,8 @@ VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, const Text
 	// Create image info
 	VkImageCreateInfo imageInfo{};
 	imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	imageInfo.imageType     = VK_IMAGE_TYPE_2D;
+	imageInfo.imageType     = GetVkImageType(desc.type);
+	imageInfo.flags         = GetImageCreateFlags(desc.type, desc.isCubeMap);
 	imageInfo.extent.width  = desc.width;
 	imageInfo.extent.height = desc.height;
 	imageInfo.extent.depth  = desc.depth;
@@ -121,7 +164,7 @@ VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, const Text
 	VkImageViewCreateInfo viewInfo{};
 	viewInfo.sType        = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	viewInfo.image        = image;
-	viewInfo.viewType     = VK_IMAGE_VIEW_TYPE_2D;
+	viewInfo.viewType     = GetVkImageViewType(desc.type, desc.arrayLayers, desc.isCubeMap);
 	viewInfo.format       = TextureFormatToVulkan(desc.format);
 	viewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
 	viewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -145,7 +188,7 @@ VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, const Text
 	viewInfo.subresourceRange.baseMipLevel   = 0;
 	viewInfo.subresourceRange.levelCount     = desc.mipLevels;
 	viewInfo.subresourceRange.baseArrayLayer = 0;
-	viewInfo.subresourceRange.layerCount     = 1;
+	viewInfo.subresourceRange.layerCount     = desc.arrayLayers;
 
 	if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS)
 	{
