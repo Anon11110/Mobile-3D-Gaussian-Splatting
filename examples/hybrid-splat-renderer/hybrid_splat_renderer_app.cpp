@@ -5,6 +5,7 @@
 #	include <GLFW/glfw3.h>
 #endif
 #include <chrono>
+#include <msplat/core/profiling/memory_profiler.h>
 #include <msplat/engine/scene/scene.h>
 #include <msplat/engine/sorting/splat_sort_backend.h>
 #include <msplat/engine/splat/splat_loader.h>
@@ -235,6 +236,9 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_applicationTimer.start();
 	m_fpsCounter.reset();
 
+	// Initialize GPU profiling
+	InitGpuProfiling();
+
 	if (m_imguiEnabled)
 	{
 		InitImGui();
@@ -435,7 +439,9 @@ void HybridSplatRendererApp::OnRender()
 	rhi::IRHICommandList *cmdList = m_commandLists[imageIndex].Get();
 	cmdList->Begin();
 
-	// Perform GPU sorting if enabled
+	// Reset GPU profiling queries for this frame
+	BeginGpuFrame(cmdList);
+
 	if (m_backend && m_sortingEnabled)
 	{
 		// Check verification results from previous frame if pending
@@ -549,9 +555,15 @@ void HybridSplatRendererApp::OnRender()
 	renderingInfo.renderAreaWidth                         = width;
 	renderingInfo.renderAreaHeight                        = height;
 
+	// Record render pass begin timestamp
+	RecordRenderTimestamp(cmdList, true);
+
 	cmdList->BeginRendering(renderingInfo);
 	cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
 	cmdList->SetScissor(0, 0, width, height);
+
+	// Begin pipeline statistics query
+	BeginPipelineStatsQuery(cmdList);
 
 	// Draw the splats using indexed procedural vertex generation
 	cmdList->SetPipeline(m_renderPipeline.Get());
@@ -563,6 +575,9 @@ void HybridSplatRendererApp::OnRender()
 	uint32_t instanceCount = m_scene->GetTotalSplatCount();
 	cmdList->DrawIndexedInstanced(indexCount, instanceCount, 0, 0, 0);
 
+	// End pipeline statistics query
+	EndPipelineStatsQuery(cmdList);
+
 	if (m_imguiEnabled && m_showImGui)
 	{
 		UpdateFpsHistory();
@@ -571,6 +586,9 @@ void HybridSplatRendererApp::OnRender()
 	}
 
 	cmdList->EndRendering();
+
+	// Record render pass end timestamp
+	RecordRenderTimestamp(cmdList, false);
 
 	// Transition to present
 	rhi::TextureTransition presentTransition = {};
@@ -618,6 +636,11 @@ void HybridSplatRendererApp::OnRender()
 
 	device->RetireCompletedFrame();
 
+	// Read GPU timing results from N frames ago after GPU work is complete
+	ReadGpuTimingResults();
+
+	m_profilingFrameIndex++;
+
 	m_frameCount++;
 }
 
@@ -635,6 +658,8 @@ void HybridSplatRendererApp::OnShutdown()
 		{
 			ShutdownImGui();
 		}
+
+		ShutdownGpuProfiling();
 
 		if (m_frameUboDataPtr)
 		{
@@ -1075,6 +1100,182 @@ void HybridSplatRendererApp::RecreateSwapchain()
 	LOG_INFO("Swapchain resized: {}x{}", width, height);
 }
 
+void HybridSplatRendererApp::InitGpuProfiling()
+{
+	if (!m_deviceManager)
+	{
+		return;
+	}
+
+	rhi::IRHIDevice    *device    = m_deviceManager->GetDevice();
+	rhi::IRHISwapchain *swapchain = m_deviceManager->GetSwapchain();
+
+	m_gpuProfilingFrameLatency = swapchain->GetImageCount();
+	m_timestampPeriod          = device->GetTimestampPeriod();        // nanoseconds
+
+	rhi::QueryPoolDesc timestampDesc{};
+	timestampDesc.queryType  = rhi::QueryType::TIMESTAMP;
+	timestampDesc.queryCount = TIMESTAMPS_PER_FRAME * m_gpuProfilingFrameLatency;
+	m_timestampQueryPool     = device->CreateQueryPool(timestampDesc);
+
+	if (!m_timestampQueryPool)
+	{
+		LOG_WARNING("Failed to create timestamp query pool, GPU timing disabled");
+	}
+
+	rhi::QueryPoolDesc statsDesc{};
+	statsDesc.queryType       = rhi::QueryType::PIPELINE_STATISTICS;
+	statsDesc.queryCount      = m_gpuProfilingFrameLatency;
+	statsDesc.statisticsFlags = rhi::PipelineStatisticFlags::FRAGMENT_SHADER_INVOCATIONS;
+	m_pipelineStatsQueryPool  = device->CreateQueryPool(statsDesc);
+
+	if (!m_pipelineStatsQueryPool)
+	{
+		LOG_WARNING("Failed to create pipeline stats query pool, fragment stats disabled");
+	}
+
+	LOG_INFO("GPU Profiling initialized: {} timestamp queries, {} stats queries",
+	         timestampDesc.queryCount, statsDesc.queryCount);
+}
+
+void HybridSplatRendererApp::ShutdownGpuProfiling()
+{
+	m_timestampQueryPool     = nullptr;
+	m_pipelineStatsQueryPool = nullptr;
+	m_gpuTimingHistory.clear();
+}
+
+void HybridSplatRendererApp::BeginGpuFrame(rhi::IRHICommandList *cmdList)
+{
+	if (!m_profilingEnabled || !m_timestampQueryPool)
+	{
+		return;
+	}
+
+	// This frame's queries will be properly reset, clear the mid-frame enable flag
+	m_profilingJustEnabled = false;
+
+	// Calculate query indices for this frame
+	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
+	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
+
+	// Reset timestamp and pipeline stats queries for this frame
+	cmdList->ResetQueryPool(m_timestampQueryPool.Get(), timestampOffset, TIMESTAMPS_PER_FRAME);
+	if (m_pipelineStatsQueryPool)
+	{
+		cmdList->ResetQueryPool(m_pipelineStatsQueryPool.Get(), frameSlot, 1);
+	}
+}
+
+void HybridSplatRendererApp::RecordRenderTimestamp(rhi::IRHICommandList *cmdList, bool begin)
+{
+	if (!m_profilingEnabled || !m_timestampQueryPool || m_profilingJustEnabled)
+	{
+		return;
+	}
+
+	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
+	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
+	uint32_t queryIndex      = timestampOffset + (begin ? 0 : 1);        // 0 = render_begin, 1 = render_end
+
+	cmdList->WriteTimestamp(m_timestampQueryPool.Get(), queryIndex, rhi::StageMask::RenderTarget);
+}
+
+void HybridSplatRendererApp::BeginPipelineStatsQuery(rhi::IRHICommandList *cmdList)
+{
+	if (!m_profilingEnabled || !m_pipelineStatsQueryPool || m_profilingJustEnabled)
+	{
+		return;
+	}
+
+	uint32_t frameSlot = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
+	cmdList->BeginQuery(m_pipelineStatsQueryPool.Get(), frameSlot);
+}
+
+void HybridSplatRendererApp::EndPipelineStatsQuery(rhi::IRHICommandList *cmdList)
+{
+	if (!m_profilingEnabled || !m_pipelineStatsQueryPool || m_profilingJustEnabled)
+	{
+		return;
+	}
+
+	uint32_t frameSlot = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
+	cmdList->EndQuery(m_pipelineStatsQueryPool.Get(), frameSlot);
+}
+
+void HybridSplatRendererApp::ReadGpuTimingResults()
+{
+	if (!m_profilingEnabled || !m_timestampQueryPool || !m_deviceManager)
+	{
+		return;
+	}
+
+	// Only read results after enough frames have passed
+	if (m_profilingFrameIndex < m_gpuProfilingFrameLatency)
+	{
+		return;
+	}
+
+	rhi::IRHIDevice *device = m_deviceManager->GetDevice();
+
+	// Read from the oldest frame slot (N frames ago)
+	uint32_t readFrameIndex  = (m_profilingFrameIndex - m_gpuProfilingFrameLatency) % m_gpuProfilingFrameLatency;
+	uint32_t timestampOffset = readFrameIndex * TIMESTAMPS_PER_FRAME;
+
+	// Read render pass timestamp results (indices 0 and 1)
+	uint64_t timestamps[TIMESTAMPS_PER_FRAME];
+	bool     timestampsValid = device->GetQueryPoolResults(
+        m_timestampQueryPool.Get(),
+        timestampOffset,
+        TIMESTAMPS_PER_FRAME,
+        timestamps,
+        sizeof(timestamps),
+        sizeof(uint64_t),
+        rhi::QueryResultFlags::WAIT);
+
+	GpuTimingResults results{};
+	results.valid = timestampsValid;
+
+	if (timestampsValid)
+	{
+		// timestamps: [0]=render_begin, [1]=render_end
+		double renderTicks   = static_cast<double>(timestamps[1] - timestamps[0]);
+		results.renderTimeMs = (renderTicks * m_timestampPeriod) / 1000000.0;        // ns to ms
+	}
+
+	// Get sort time from the sorting backend
+	if (m_backend && m_sortingEnabled)
+	{
+		auto metrics       = m_backend->GetMetrics();
+		results.sortTimeMs = metrics.sortDurationMs;
+	}
+	else
+	{
+		results.sortTimeMs = 0.0;
+	}
+
+	// Read pipeline statistics if available
+	if (m_pipelineStatsQueryPool)
+	{
+		uint64_t fragmentInvocations;
+		bool     statsValid = device->GetQueryPoolResults(
+            m_pipelineStatsQueryPool.Get(),
+            readFrameIndex,
+            1,
+            &fragmentInvocations,
+            sizeof(fragmentInvocations),
+            sizeof(uint64_t),
+            rhi::QueryResultFlags::WAIT);
+
+		if (statsValid)
+		{
+			results.fragmentInvocations = fragmentInvocations;
+		}
+	}
+
+	m_currentGpuTiming = results;
+}
+
 void HybridSplatRendererApp::PerformCrossBackendVerification()
 {
 	if (m_currentBackendType != BackendType::GPU || !m_backend || !m_scene)
@@ -1364,6 +1565,78 @@ void HybridSplatRendererApp::RenderImGui()
 		                 0.0f,
 		                 120.0f,
 		                 ImVec2(0, 80));
+
+		// GPU Profiling section
+		{
+			ImGui::Spacing();
+			ImGui::Separator();
+			bool wasEnabled = m_profilingEnabled;
+			ImGui::Checkbox("Profiling", &m_profilingEnabled);
+			if (m_profilingEnabled && !wasEnabled)
+			{
+				// Reset frame index when profiling is enabled to avoid reading stale queries
+				m_profilingFrameIndex  = 0;
+				m_currentGpuTiming     = {};
+				m_profilingJustEnabled = true;        // Skip query writes for rest of this frame
+			}
+			ImGui::Separator();
+
+			if (m_profilingEnabled)
+			{
+				// GPU Timing
+				if (m_currentGpuTiming.valid)
+				{
+					ImGui::Text("Sort Pass:   %.3f ms", m_currentGpuTiming.sortTimeMs);
+					ImGui::Text("Render Pass: %.3f ms", m_currentGpuTiming.renderTimeMs);
+					ImGui::Text("Total GPU:   %.3f ms", m_currentGpuTiming.sortTimeMs + m_currentGpuTiming.renderTimeMs);
+
+					// Fragment shader invocations
+					if (m_pipelineStatsQueryPool && m_scene)
+					{
+						uint64_t fragmentInvocations = m_currentGpuTiming.fragmentInvocations;
+						uint32_t splatCount          = m_scene->GetTotalSplatCount();
+						uint32_t pixelCount          = m_deviceManager->GetSwapchain()->GetBackBufferView(0)->GetWidth() *
+						                      m_deviceManager->GetSwapchain()->GetBackBufferView(0)->GetHeight();
+
+						float shadingLoad       = (pixelCount > 0) ? static_cast<float>(fragmentInvocations) / static_cast<float>(pixelCount) : 0.0f;
+						float fragmentsPerSplat = (splatCount > 0) ? static_cast<float>(fragmentInvocations) / static_cast<float>(splatCount) : 0.0f;
+
+						ImGui::Text("Shading Load: %.2fx", shadingLoad);
+						ImGui::SameLine();
+						ImGui::TextDisabled("(?)");
+						if (ImGui::IsItemHovered())
+						{
+							ImGui::BeginTooltip();
+							ImGui::Text("Fragment Invocations: %llu", static_cast<unsigned long long>(fragmentInvocations));
+							ImGui::Text("Shading Load: Shader runs / Screen Pixels");
+							ImGui::Text("Includes discarded fragments (~1.27x inflation from quad corners)");
+							ImGui::Text("Fragments/Splat: %.1f", fragmentsPerSplat);
+							ImGui::EndTooltip();
+						}
+					}
+				}
+
+				// Memory Usage
+				ImGui::Spacing();
+				rhi::IRHIDevice *device = m_deviceManager->GetDevice();
+				auto             gpuMem = device->GetMemoryStats();
+				auto             cpuMem = profiling::GetProcessMemoryStats();
+
+				float gpuUsagePercent = (gpuMem.deviceLocalBudget > 0) ? 100.0f * static_cast<float>(gpuMem.deviceLocalUsage) /
+				                                                             static_cast<float>(gpuMem.deviceLocalBudget) :
+				                                                         0.0f;
+
+				ImGui::Text("GPU VRAM:    %.1f / %.1f MB (%.0f%%)",
+				            gpuMem.deviceLocalUsage / 1048576.0,
+				            gpuMem.deviceLocalBudget / 1048576.0,
+				            gpuUsagePercent);
+				ImGui::Text("GPU Shared:  %.1f / %.1f MB",
+				            gpuMem.hostVisibleUsage / 1048576.0,
+				            gpuMem.hostVisibleBudget / 1048576.0);
+				ImGui::Text("CPU RSS:     %.1f MB", cpuMem.workingSetBytes / 1048576.0);
+				ImGui::Text("CPU Private: %.1f MB", cpuMem.privateBytes / 1048576.0);
+			}
+		}
 
 		ImGui::Spacing();
 		ImGui::Separator();

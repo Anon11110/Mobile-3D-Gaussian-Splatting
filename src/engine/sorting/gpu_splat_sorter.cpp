@@ -74,6 +74,18 @@ void GpuSplatSorter::Initialize(uint32_t totalSplatCount)
 
 	CreateDescriptorSets();
 
+	// Create timestamp query pool for GPU timing
+	rhi::QueryPoolDesc timestampDesc{};
+	timestampDesc.queryType  = rhi::QueryType::TIMESTAMP;
+	timestampDesc.queryCount = 2 * TimingFrameLatency;        // begin + end per frame
+	timestampQueryPool       = device->CreateQueryPool(timestampDesc);
+
+	if (timestampQueryPool)
+	{
+		timestampPeriod = device->GetTimestampPeriod();
+		LOG_INFO("GpuSplatSorter: GPU timing enabled, period = {} ns", timestampPeriod);
+	}
+
 	isInitialized = true;
 }
 
@@ -665,6 +677,16 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 		return;
 	}
 
+	// Reset and record begin timestamp
+	uint32_t frameSlot       = timingFrameIndex % TimingFrameLatency;
+	uint32_t timestampOffset = frameSlot * 2;        // 2 timestamps per frame
+
+	if (timestampQueryPool)
+	{
+		cmdList->ResetQueryPool(timestampQueryPool.Get(), timestampOffset, 2);
+		cmdList->WriteTimestamp(timestampQueryPool.Get(), timestampOffset, rhi::StageMask::ComputeShader);
+	}
+
 	// Upload camera data
 	lastViewMatrix = camera.GetViewMatrix();
 	device->UpdateBuffer(cameraUBO.Get(), &lastViewMatrix, sizeof(math::mat4), 0);
@@ -692,6 +714,14 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 	{
 		RecordRadixSortPrescan(cmdList);
 	}
+
+	// Record end timestamp for GPU timing
+	if (timestampQueryPool)
+	{
+		cmdList->WriteTimestamp(timestampQueryPool.Get(), timestampOffset + 1, rhi::StageMask::ComputeShader);
+	}
+
+	timingFrameIndex++;
 }
 
 void GpuSplatSorter::RecordDepthCalculation(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera)
@@ -1939,6 +1969,34 @@ bool GpuSplatSorter::VerifySortOrder()
 	verificationSortedKeys->Unmap();
 
 	return isOrdered;
+}
+
+void GpuSplatSorter::ReadTimingResults()
+{
+	if (!timestampQueryPool || timingFrameIndex < TimingFrameLatency)
+	{
+		return;
+	}
+
+	// Read from the oldest frame slot (N frames ago)
+	uint32_t readFrameIndex  = (timingFrameIndex - TimingFrameLatency) % TimingFrameLatency;
+	uint32_t timestampOffset = readFrameIndex * 2;
+
+	uint64_t timestamps[2];
+	bool     valid = device->GetQueryPoolResults(
+        timestampQueryPool.Get(),
+        timestampOffset,
+        2,
+        timestamps,
+        sizeof(timestamps),
+        sizeof(uint64_t),
+        rhi::QueryResultFlags::WAIT);
+
+	if (valid)
+	{
+		double ticks   = static_cast<double>(timestamps[1] - timestamps[0]);
+		lastSortTimeMs = (ticks * timestampPeriod) / 1000000.0;
+	}
 }
 
 }        // namespace msplat::engine

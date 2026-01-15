@@ -43,6 +43,9 @@ set(CORE_HEADERS
 
     # Memory headers
     ${MSPLAT_ROOT}/include/msplat/core/memory/frame_arena.h
+
+    # Profiling headers
+    ${MSPLAT_ROOT}/include/msplat/core/profiling/memory_profiler.h
 )
 
 set(CORE_SOURCES
@@ -64,6 +67,9 @@ set(CORE_SOURCES
 
     # Container sources
     ${MSPLAT_ROOT}/src/core/containers/filesystem.cpp
+
+    # Profiling sources
+    ${MSPLAT_ROOT}/src/core/profiling/memory_profiler.cpp
 
     # Third-party sources
     ${MSPLAT_ROOT}/third-party/mimalloc/src/static.c
@@ -160,6 +166,11 @@ endif()
 
 # Link GLM (header-only, so just for interface)
 target_link_libraries(core PUBLIC)
+
+# Link psapi for memory profiling on Windows
+if(WIN32)
+    target_link_libraries(core PUBLIC psapi)
+endif()
 
 # Set target properties
 set_target_properties(core PROPERTIES

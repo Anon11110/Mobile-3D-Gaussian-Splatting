@@ -24,6 +24,7 @@ class VulkanFence;
 class VulkanDescriptorSetLayout;
 class VulkanDescriptorSet;
 class VulkanSampler;
+class VulkanQueryPool;
 
 // Vulkan Buffer implementation
 class VulkanBuffer final : public RefCounter<IRHIBuffer>
@@ -274,13 +275,15 @@ class VulkanCommandList final : public RefCounter<IRHICommandList>
 	PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
 	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
 	PFN_vkCmdPipelineBarrier2  vkCmdPipelineBarrier2;
+	PFN_vkCmdWriteTimestamp2   vkCmdWriteTimestamp2;
 
   public:
 	VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType, uint32_t queueFamily,
 	                  uint32_t graphicsFamily, uint32_t computeFamily, uint32_t transferFamily,
 	                  PFN_vkCmdBeginRenderingKHR beginFunc,
 	                  PFN_vkCmdEndRenderingKHR   endFunc,
-	                  PFN_vkCmdPipelineBarrier2  barrier2Func);
+	                  PFN_vkCmdPipelineBarrier2  barrier2Func,
+	                  PFN_vkCmdWriteTimestamp2   timestamp2Func);
 	~VulkanCommandList() override = default;
 
 	VulkanCommandList(const VulkanCommandList &)            = delete;
@@ -333,6 +336,19 @@ class VulkanCommandList final : public RefCounter<IRHICommandList>
 	    QueueType                          srcQueue,
 	    std::span<const BufferTransition>  buffer_transitions,
 	    std::span<const TextureTransition> texture_transitions) override;
+
+	void ResetQueryPool(IRHIQueryPool *queryPool, uint32_t firstQuery, uint32_t queryCount) override;
+	void WriteTimestamp(IRHIQueryPool *queryPool, uint32_t query, StageMask stage = StageMask::AllCommands) override;
+	void BeginQuery(IRHIQueryPool *queryPool, uint32_t query) override;
+	void EndQuery(IRHIQueryPool *queryPool, uint32_t query) override;
+	void CopyQueryPoolResults(
+	    IRHIQueryPool   *queryPool,
+	    uint32_t         firstQuery,
+	    uint32_t         queryCount,
+	    IRHIBuffer      *dstBuffer,
+	    size_t           dstOffset,
+	    size_t           stride,
+	    QueryResultFlags flags = QueryResultFlags::WAIT) override;
 
 #ifdef RHI_VULKAN
 	void *GetNativeCommandBuffer() override
@@ -536,6 +552,40 @@ class VulkanCompositeFence final : public RefCounter<IRHIFence>
 	bool IsSignaled() const override;
 };
 
+// Vulkan Query Pool implementation
+class VulkanQueryPool final : public RefCounter<IRHIQueryPool>
+{
+  private:
+	VkDevice               device;
+	VkQueryPool            queryPool;
+	QueryType              queryType;
+	uint32_t               queryCount;
+	PipelineStatisticFlags statisticsFlags;
+
+  public:
+	VulkanQueryPool(VkDevice device, const QueryPoolDesc &desc);
+	~VulkanQueryPool() override;
+
+	VulkanQueryPool(const VulkanQueryPool &)            = delete;
+	VulkanQueryPool &operator=(const VulkanQueryPool &) = delete;
+	VulkanQueryPool(VulkanQueryPool &&other) noexcept;
+	VulkanQueryPool &operator=(VulkanQueryPool &&other) noexcept;
+
+	QueryType GetQueryType() const override
+	{
+		return queryType;
+	}
+	uint32_t GetQueryCount() const override
+	{
+		return queryCount;
+	}
+
+	[[nodiscard]] VkQueryPool GetHandle() const
+	{
+		return queryPool;
+	}
+};
+
 // Utility functions
 VkFormat              TextureFormatToVulkan(TextureFormat format);
 VkFormat              VertexFormatToVulkan(VertexFormat format);
@@ -572,5 +622,10 @@ VkPipelineStageFlags2 StageMaskToVulkan2(StageMask mask);
 VkAccessFlags2        AccessMaskToVulkan2(AccessMask mask);
 void                  GetVulkanStagesAndAccess2(ResourceState state, PipelineScope scope,
                                                 VkPipelineStageFlags2 &stages, VkAccessFlags2 &access);
+
+// Query-related conversions
+VkQueryType                   QueryTypeToVulkan(QueryType type);
+VkQueryPipelineStatisticFlags PipelineStatisticFlagsToVulkan(PipelineStatisticFlags flags);
+VkQueryResultFlags            QueryResultFlagsToVulkan(QueryResultFlags flags);
 
 }        // namespace rhi::vulkan

@@ -74,6 +74,15 @@ class GpuSplatSorter
 	// Simple verification: Only checks if final sorted keys are in ascending order
 	bool VerifySortOrder();
 
+	// GPU Timing
+	double GetLastSortTimeMs() const
+	{
+		return lastSortTimeMs;
+	}
+
+	// Called after GPU work completes to read timing results
+	void ReadTimingResults();
+
   private:
 	void CreateInitialIndicesBuffer(uint32_t totalSplatCount);
 	void CreateComputePipelines();
@@ -154,6 +163,13 @@ class GpuSplatSorter
 
 	// Store last view matrix for verification
 	math::mat4 lastViewMatrix = math::mat4(1.0f);
+
+	// GPU Timing infrastructure
+	static constexpr uint32_t TimingFrameLatency = 3;        // N-frame latency for reading results
+	rhi::QueryPoolHandle      timestampQueryPool;
+	double                    timestampPeriod  = 1.0;        // nanoseconds per tick
+	uint32_t                  timingFrameIndex = 0;          // Rolling frame index
+	double                    lastSortTimeMs   = 0.0;        // Last measured sort time in ms
 };
 
 }        // namespace msplat::engine

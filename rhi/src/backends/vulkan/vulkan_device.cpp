@@ -47,9 +47,13 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 	PFN_vkCmdBeginRenderingKHR vkCmdBeginRenderingKHR;
 	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
 	PFN_vkCmdPipelineBarrier2  vkCmdPipelineBarrier2;
+	PFN_vkCmdWriteTimestamp2   vkCmdWriteTimestamp2;
 
 	// Device feature flags
 	bool hasDynamicRendering;
+
+	// Timestamp period for GPU profiling (nanoseconds)
+	float timestampPeriod;
 
 	// Deferred deletion for async uploads
 	struct DeferredDeletion
@@ -234,7 +238,7 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		VulkanCommandList *cmdList     = new VulkanCommandList(device, commandPool, queueType, queueFamily,
 		                                                       graphicsQueueFamily, computeQueueFamily, transferQueueFamily,
 		                                                       vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR,
-		                                                       vkCmdPipelineBarrier2);
+		                                                       vkCmdPipelineBarrier2, vkCmdWriteTimestamp2);
 		return RefCntPtr<IRHICommandList>::Create(cmdList);
 	}
 
@@ -343,6 +347,85 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 
 		VulkanDescriptorSet *descriptorSetObj = new VulkanDescriptorSet(device, vkLayout, pool, descriptorSet);
 		return RefCntPtr<IRHIDescriptorSet>::Create(descriptorSetObj);
+	}
+
+	QueryPoolHandle CreateQueryPool(const QueryPoolDesc &desc) override
+	{
+		VulkanQueryPool *queryPool = new VulkanQueryPool(device, desc);
+		return RefCntPtr<IRHIQueryPool>::Create(queryPool);
+	}
+
+	double GetTimestampPeriod() const override
+	{
+		return static_cast<double>(timestampPeriod);
+	}
+
+	bool GetQueryPoolResults(
+	    IRHIQueryPool   *queryPool,
+	    uint32_t         firstQuery,
+	    uint32_t         queryCount,
+	    void            *data,
+	    size_t           dataSize,
+	    size_t           stride,
+	    QueryResultFlags flags = QueryResultFlags::WAIT) override
+	{
+		auto              *vkQueryPool = static_cast<VulkanQueryPool *>(queryPool);
+		VkQueryResultFlags vkFlags     = QueryResultFlagsToVulkan(flags) | VK_QUERY_RESULT_64_BIT;
+
+		VkResult result = vkGetQueryPoolResults(
+		    device,
+		    vkQueryPool->GetHandle(),
+		    firstQuery,
+		    queryCount,
+		    dataSize,
+		    data,
+		    stride,
+		    vkFlags);
+
+		return result == VK_SUCCESS;
+	}
+
+	GpuMemoryStats GetMemoryStats() const override
+	{
+		GpuMemoryStats stats{};
+		VmaBudget      budgets[VK_MAX_MEMORY_HEAPS];
+		vmaGetHeapBudgets(allocator, budgets);
+
+		VkPhysicalDeviceMemoryProperties memProps;
+		vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+
+		for (uint32_t i = 0; i < memProps.memoryHeapCount; i++)
+		{
+			bool isDeviceLocal = (memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0;
+
+			// Check if any memory type in this heap is host-visible
+			// A heap can be both device-local AND host-visible (resizable BAR, integrated GPUs)
+			bool hasHostVisibleType = false;
+			for (uint32_t j = 0; j < memProps.memoryTypeCount; j++)
+			{
+				if (memProps.memoryTypes[j].heapIndex == i &&
+				    (memProps.memoryTypes[j].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
+				{
+					hasHostVisibleType = true;
+					break;
+				}
+			}
+
+			if (isDeviceLocal)
+			{
+				stats.deviceLocalUsage += budgets[i].usage;
+				stats.deviceLocalBudget += budgets[i].budget;
+			}
+			if (hasHostVisibleType)
+			{
+				stats.hostVisibleUsage += budgets[i].usage;
+				stats.hostVisibleBudget += budgets[i].budget;
+			}
+
+			stats.totalUsage += budgets[i].usage;
+			stats.totalBudget += budgets[i].budget;
+		}
+		return stats;
 	}
 
 	void UpdateBuffer(IRHIBuffer *buffer, const void *data, size_t size, size_t offset = 0) override
@@ -882,6 +965,11 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		// Pick first suitable device (can be improved)
 		physicalDevice = devices[0];
 
+		// Query device properties for timestamp period
+		VkPhysicalDeviceProperties deviceProperties;
+		vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+		timestampPeriod = deviceProperties.limits.timestampPeriod;
+
 		// Find queue families
 		uint32_t queueFamilyCount = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
@@ -955,6 +1043,7 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		}
 
 		VkPhysicalDeviceFeatures deviceFeatures{};
+		deviceFeatures.pipelineStatisticsQuery = VK_TRUE;
 
 		// Check if Vulkan 1.3 is supported (dynamic rendering is core in 1.3)
 		VkPhysicalDeviceProperties deviceProperties;
@@ -1457,12 +1546,19 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 			vkCmdEndRenderingKHR   = nullptr;
 		}
 
-		// Load synchronization2 function
+		// Load synchronization2 functions
 		vkCmdPipelineBarrier2 = (PFN_vkCmdPipelineBarrier2) vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier2");
 		if (!vkCmdPipelineBarrier2)
 		{
 			// Fall back to KHR extension function
 			vkCmdPipelineBarrier2 = (PFN_vkCmdPipelineBarrier2) vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier2KHR");
+		}
+
+		vkCmdWriteTimestamp2 = (PFN_vkCmdWriteTimestamp2) vkGetDeviceProcAddr(device, "vkCmdWriteTimestamp2");
+		if (!vkCmdWriteTimestamp2)
+		{
+			// Fall back to KHR extension function
+			vkCmdWriteTimestamp2 = (PFN_vkCmdWriteTimestamp2) vkGetDeviceProcAddr(device, "vkCmdWriteTimestamp2KHR");
 		}
 	}
 };

@@ -46,6 +46,7 @@ target_sources(RHI PRIVATE
     src/backends/vulkan/vulkan_commandlist.cpp
     src/backends/vulkan/vulkan_descriptorset.cpp
     src/backends/vulkan/vulkan_conversions.cpp
+    src/backends/vulkan/vulkan_query.cpp
     src/backends/vulkan/vma_implementation.cpp
 )
 target_compile_definitions(RHI PUBLIC RHI_VULKAN=1)

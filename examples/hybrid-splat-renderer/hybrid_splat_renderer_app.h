@@ -9,6 +9,7 @@
 #include "shaders/shaderio.h"
 #include <array>
 #include <cstdlib>
+#include <deque>
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
 #if defined(__ANDROID__)
@@ -30,6 +31,7 @@ class IRHIPipeline;
 class IRHISemaphore;
 class IRHIFence;
 class IRHICommandList;
+class IRHIQueryPool;
 }        // namespace rhi
 
 namespace msplat
@@ -198,6 +200,35 @@ class HybridSplatRendererApp : public app::IApplication
 	static constexpr size_t             FPS_HISTORY_SIZE  = 120;
 	std::array<float, FPS_HISTORY_SIZE> m_fpsHistory      = {};
 	size_t                              m_fpsHistoryIndex = 0;
+
+	// Profiling infrastructure (GPU timing + memory, disabled by default)
+	bool                      m_profilingEnabled         = false;
+	bool                      m_profilingJustEnabled     = false;        // Skip queries for rest of frame when enabled mid-frame
+	static constexpr uint32_t TIMESTAMPS_PER_FRAME       = 2;            // render_begin, render_end (sort timing from backend)
+	uint32_t                  m_gpuProfilingFrameLatency = 0;            // Set from swapchain image count
+	rhi::QueryPoolHandle      m_timestampQueryPool;
+	rhi::QueryPoolHandle      m_pipelineStatsQueryPool;
+	double                    m_timestampPeriod     = 1.0;        // nanoseconds per tick
+	uint32_t                  m_profilingFrameIndex = 0;          // Rolling frame index for query slots
+
+	// Buffered GPU timing results
+	struct GpuTimingResults
+	{
+		double   sortTimeMs          = 0.0;
+		double   renderTimeMs        = 0.0;
+		uint64_t fragmentInvocations = 0;
+		bool     valid               = false;
+	};
+	std::deque<GpuTimingResults> m_gpuTimingHistory;
+	GpuTimingResults             m_currentGpuTiming;
+
+	void InitGpuProfiling();
+	void ShutdownGpuProfiling();
+	void BeginGpuFrame(rhi::IRHICommandList *cmdList);
+	void RecordRenderTimestamp(rhi::IRHICommandList *cmdList, bool begin);
+	void BeginPipelineStatsQuery(rhi::IRHICommandList *cmdList);
+	void EndPipelineStatsQuery(rhi::IRHICommandList *cmdList);
+	void ReadGpuTimingResults();
 
 	void InitImGui();
 	void ShutdownImGui();

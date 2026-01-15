@@ -9,8 +9,9 @@ VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool,
                                      uint32_t graphicsFamily, uint32_t computeFamily, uint32_t transferFamily,
                                      PFN_vkCmdBeginRenderingKHR beginFunc,
                                      PFN_vkCmdEndRenderingKHR   endFunc,
-                                     PFN_vkCmdPipelineBarrier2  barrier2Func) :
-    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), queueType(queueType), queueFamily(queueFamily), graphicsQueueFamily(graphicsFamily), computeQueueFamily(computeFamily), transferQueueFamily(transferFamily), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc), vkCmdPipelineBarrier2(barrier2Func)
+                                     PFN_vkCmdPipelineBarrier2  barrier2Func,
+                                     PFN_vkCmdWriteTimestamp2   timestamp2Func) :
+    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), queueType(queueType), queueFamily(queueFamily), graphicsQueueFamily(graphicsFamily), computeQueueFamily(computeFamily), transferQueueFamily(transferFamily), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc), vkCmdPipelineBarrier2(barrier2Func), vkCmdWriteTimestamp2(timestamp2Func)
 {
 	// Allocate command buffer
 	VkCommandBufferAllocateInfo allocInfo{};
@@ -908,6 +909,56 @@ void VulkanCommandList::AcquireFromQueue(
 
 		vkCmdPipelineBarrier2(commandBuffer, &depInfo);
 	}
+}
+
+void VulkanCommandList::ResetQueryPool(IRHIQueryPool *queryPool, uint32_t firstQuery, uint32_t queryCount)
+{
+	auto *vkQueryPool = static_cast<VulkanQueryPool *>(queryPool);
+	vkCmdResetQueryPool(commandBuffer, vkQueryPool->GetHandle(), firstQuery, queryCount);
+}
+
+void VulkanCommandList::WriteTimestamp(IRHIQueryPool *queryPool, uint32_t query, StageMask stage)
+{
+	auto *vkQueryPool = static_cast<VulkanQueryPool *>(queryPool);
+
+	VkPipelineStageFlags2 vkStage = StageMaskToVulkan2(stage);
+	vkCmdWriteTimestamp2(commandBuffer, vkStage, vkQueryPool->GetHandle(), query);
+}
+
+void VulkanCommandList::BeginQuery(IRHIQueryPool *queryPool, uint32_t query)
+{
+	auto *vkQueryPool = static_cast<VulkanQueryPool *>(queryPool);
+	vkCmdBeginQuery(commandBuffer, vkQueryPool->GetHandle(), query, 0);
+}
+
+void VulkanCommandList::EndQuery(IRHIQueryPool *queryPool, uint32_t query)
+{
+	auto *vkQueryPool = static_cast<VulkanQueryPool *>(queryPool);
+	vkCmdEndQuery(commandBuffer, vkQueryPool->GetHandle(), query);
+}
+
+void VulkanCommandList::CopyQueryPoolResults(
+    IRHIQueryPool   *queryPool,
+    uint32_t         firstQuery,
+    uint32_t         queryCount,
+    IRHIBuffer      *dstBuffer,
+    size_t           dstOffset,
+    size_t           stride,
+    QueryResultFlags flags)
+{
+	auto              *vkQueryPool = static_cast<VulkanQueryPool *>(queryPool);
+	auto              *vkBuffer    = static_cast<VulkanBuffer *>(dstBuffer);
+	VkQueryResultFlags vkFlags     = QueryResultFlagsToVulkan(flags) | VK_QUERY_RESULT_64_BIT;
+
+	vkCmdCopyQueryPoolResults(
+	    commandBuffer,
+	    vkQueryPool->GetHandle(),
+	    firstQuery,
+	    queryCount,
+	    vkBuffer->GetHandle(),
+	    dstOffset,
+	    stride,
+	    vkFlags);
 }
 
 }        // namespace rhi::vulkan

@@ -63,6 +63,9 @@ void GpuSplatSortBackend::Update(const app::Camera &camera)
 	std::array<rhi::IRHICommandList *, 1> cmdLists = {m_cmdList.Get()};
 	m_device->SubmitCommandLists(cmdLists, rhi::QueueType::COMPUTE);
 	m_device->WaitIdle();
+
+	// Read GPU timing results from previous frames
+	m_sorter->ReadTimingResults();
 }
 
 bool GpuSplatSortBackend::IsSortComplete() const
@@ -73,9 +76,8 @@ bool GpuSplatSortBackend::IsSortComplete() const
 
 SortMetrics GpuSplatSortBackend::GetMetrics() const
 {
-	// TODO: Add GPU timing queries for accurate metrics
 	return SortMetrics{
-	    .sortDurationMs   = 0.0f,
+	    .sortDurationMs   = m_sorter ? static_cast<float>(m_sorter->GetLastSortTimeMs()) : 0.0f,
 	    .uploadDurationMs = 0.0f,
 	    .sortComplete     = true};
 }

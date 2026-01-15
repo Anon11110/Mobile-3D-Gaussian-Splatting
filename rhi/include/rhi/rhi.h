@@ -19,6 +19,7 @@ class IRHISemaphore;
 class IRHIFence;
 class IRHIDescriptorSetLayout;
 class IRHIDescriptorSet;
+class IRHIQueryPool;
 
 // Handle typedefs (forward declarations)
 typedef RefCntPtr<IRHIDevice>              DeviceHandle;
@@ -34,6 +35,7 @@ typedef RefCntPtr<IRHISemaphore>           SemaphoreHandle;
 typedef RefCntPtr<IRHIFence>               FenceHandle;
 typedef RefCntPtr<IRHIDescriptorSetLayout> DescriptorSetLayoutHandle;
 typedef RefCntPtr<IRHIDescriptorSet>       DescriptorSetHandle;
+typedef RefCntPtr<IRHIQueryPool>           QueryPoolHandle;
 
 // Main device interface
 class IRHIDevice : public IRefCounted
@@ -57,6 +59,7 @@ class IRHIDevice : public IRefCounted
 	virtual DescriptorSetLayoutHandle CreateDescriptorSetLayout(const DescriptorSetLayoutDesc &desc) = 0;
 	virtual DescriptorSetHandle       CreateDescriptorSet(IRHIDescriptorSetLayout *layout,
 	                                                      QueueType                queueType = QueueType::GRAPHICS) = 0;
+	virtual QueryPoolHandle           CreateQueryPool(const QueryPoolDesc &desc)                     = 0;
 
 	// Buffer operations
 	virtual void UpdateBuffer(IRHIBuffer *buffer, const void *RHI_RESTRICT data, size_t size, size_t offset = 0) = 0;
@@ -90,6 +93,20 @@ class IRHIDevice : public IRefCounted
 
 	// Frame retirement for GPU resource lifetime management
 	virtual void RetireCompletedFrame() = 0;
+
+	// Query pool operations
+	virtual double GetTimestampPeriod() const = 0;
+	virtual bool   GetQueryPoolResults(
+	      IRHIQueryPool   *queryPool,
+	      uint32_t         firstQuery,
+	      uint32_t         queryCount,
+	      void            *data,
+	      size_t           dataSize,
+	      size_t           stride,
+	      QueryResultFlags flags = QueryResultFlags::WAIT) = 0;
+
+	// Memory statistics
+	virtual GpuMemoryStats GetMemoryStats() const = 0;
 
 #ifdef RHI_VULKAN
 	// Vulkan-specific accessors for ImGui integration
@@ -210,6 +227,20 @@ class IRHICommandList : public IRefCounted
 	    std::span<const TextureTransition> texture_transitions,
 	    std::span<const MemoryBarrier>     memory_barriers = {}) = 0;
 
+	// Query operations
+	virtual void ResetQueryPool(IRHIQueryPool *queryPool, uint32_t firstQuery, uint32_t queryCount)                 = 0;
+	virtual void WriteTimestamp(IRHIQueryPool *queryPool, uint32_t query, StageMask stage = StageMask::AllCommands) = 0;
+	virtual void BeginQuery(IRHIQueryPool *queryPool, uint32_t query)                                               = 0;
+	virtual void EndQuery(IRHIQueryPool *queryPool, uint32_t query)                                                 = 0;
+	virtual void CopyQueryPoolResults(
+	    IRHIQueryPool   *queryPool,
+	    uint32_t         firstQuery,
+	    uint32_t         queryCount,
+	    IRHIBuffer      *dstBuffer,
+	    size_t           dstOffset,
+	    size_t           stride,
+	    QueryResultFlags flags = QueryResultFlags::WAIT) = 0;
+
 	virtual void ReleaseToQueue(
 	    QueueType                          dstQueue,
 	    std::span<const BufferTransition>  buffer_transitions,
@@ -295,6 +326,15 @@ class IRHIDescriptorSet : public IRefCounted
 };
 
 typedef RefCntPtr<IRHIDescriptorSet> DescriptorSetHandle;
+
+// Query pool interface
+class IRHIQueryPool : public IRefCounted
+{
+  public:
+	virtual ~IRHIQueryPool()                = default;
+	virtual QueryType GetQueryType() const  = 0;
+	virtual uint32_t  GetQueryCount() const = 0;
+};
 
 // Device creation function
 DeviceHandle CreateRHIDevice();

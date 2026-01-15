@@ -950,4 +950,113 @@ struct SubmitInfo
 	IRHIFence                         *signalFence = nullptr;
 };
 
+// Query types for GPU profiling
+enum class QueryType : uint8_t
+{
+	TIMESTAMP,
+	PIPELINE_STATISTICS,
+	OCCLUSION
+};
+
+enum class PipelineStatisticFlags : uint32_t
+{
+	NONE                        = 0,
+	INPUT_ASSEMBLY_VERTICES     = 1 << 0,
+	INPUT_ASSEMBLY_PRIMITIVES   = 1 << 1,
+	VERTEX_SHADER_INVOCATIONS   = 1 << 2,
+	CLIPPING_INVOCATIONS        = 1 << 3,
+	CLIPPING_PRIMITIVES         = 1 << 4,
+	FRAGMENT_SHADER_INVOCATIONS = 1 << 5,
+	COMPUTE_SHADER_INVOCATIONS  = 1 << 6,
+};
+
+constexpr inline PipelineStatisticFlags operator|(PipelineStatisticFlags lhs, PipelineStatisticFlags rhs)
+{
+	return static_cast<PipelineStatisticFlags>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
+}
+
+constexpr inline PipelineStatisticFlags operator&(PipelineStatisticFlags lhs, PipelineStatisticFlags rhs)
+{
+	return static_cast<PipelineStatisticFlags>(static_cast<uint32_t>(lhs) & static_cast<uint32_t>(rhs));
+}
+
+constexpr inline PipelineStatisticFlags operator~(PipelineStatisticFlags flags)
+{
+	return static_cast<PipelineStatisticFlags>(~static_cast<uint32_t>(flags));
+}
+
+inline PipelineStatisticFlags &operator|=(PipelineStatisticFlags &lhs, PipelineStatisticFlags rhs)
+{
+	lhs = lhs | rhs;
+	return lhs;
+}
+
+inline PipelineStatisticFlags &operator&=(PipelineStatisticFlags &lhs, PipelineStatisticFlags rhs)
+{
+	lhs = lhs & rhs;
+	return lhs;
+}
+
+constexpr inline bool operator!(PipelineStatisticFlags flags)
+{
+	return static_cast<uint32_t>(flags) == 0;
+}
+
+enum class QueryResultFlags : uint32_t
+{
+	NONE              = 0,
+	WAIT              = 1 << 0,
+	WITH_AVAILABILITY = 1 << 1,
+	PARTIAL           = 1 << 2,
+};
+
+constexpr inline QueryResultFlags operator|(QueryResultFlags lhs, QueryResultFlags rhs)
+{
+	return static_cast<QueryResultFlags>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
+}
+
+constexpr inline QueryResultFlags operator&(QueryResultFlags lhs, QueryResultFlags rhs)
+{
+	return static_cast<QueryResultFlags>(static_cast<uint32_t>(lhs) & static_cast<uint32_t>(rhs));
+}
+
+constexpr inline QueryResultFlags operator~(QueryResultFlags flags)
+{
+	return static_cast<QueryResultFlags>(~static_cast<uint32_t>(flags));
+}
+
+inline QueryResultFlags &operator|=(QueryResultFlags &lhs, QueryResultFlags rhs)
+{
+	lhs = lhs | rhs;
+	return lhs;
+}
+
+inline QueryResultFlags &operator&=(QueryResultFlags &lhs, QueryResultFlags rhs)
+{
+	lhs = lhs & rhs;
+	return lhs;
+}
+
+constexpr inline bool operator!(QueryResultFlags flags)
+{
+	return static_cast<uint32_t>(flags) == 0;
+}
+
+struct QueryPoolDesc
+{
+	QueryType              queryType;
+	uint32_t               queryCount;
+	PipelineStatisticFlags statisticsFlags = PipelineStatisticFlags::NONE;
+};
+
+struct GpuMemoryStats
+{
+	uint64_t deviceLocalUsage  = 0;        // GPU-only memory used (bytes)
+	uint64_t deviceLocalBudget = 0;        // GPU-only memory available
+	uint64_t hostVisibleUsage  = 0;        // CPU-accessible memory used
+	uint64_t hostVisibleBudget = 0;        // CPU-accessible memory available
+	uint64_t totalUsage        = 0;        // Sum of all heaps
+	uint64_t totalBudget       = 0;        // Sum of all budgets
+};
+
 }        // namespace rhi
