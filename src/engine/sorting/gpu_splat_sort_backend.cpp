@@ -23,11 +23,11 @@ bool GpuSplatSortBackend::Initialize(
 
 	m_cmdList = device->CreateCommandList(rhi::QueueType::COMPUTE);
 
-	// Create GPU sorter
+	m_computeDoneSemaphore = device->CreateSemaphore();
+
 	m_sorter = container::make_unique<GpuSplatSorter>(device, vfs);
 	m_sorter->Initialize(totalSplatCount);
 
-	// Set default sort method
 	m_sorter->SetSortMethod(
 	    static_cast<GpuSplatSorter::SortMethod>(m_currentMethod));
 
@@ -57,12 +57,25 @@ void GpuSplatSortBackend::Update(const app::Camera &camera)
 	std::array<rhi::BufferCopy, 1> regions = {copyRegion};
 	m_cmdList->CopyBuffer(sorterOutput.Get(), m_targetBuffer.Get(), regions);
 
+	// Release sorted indices buffer to graphics queue for cross-queue synchronization
+	rhi::BufferTransition releaseTransition{};
+	releaseTransition.buffer = m_targetBuffer.Get();
+	releaseTransition.before = rhi::ResourceState::CopyDestination;
+	releaseTransition.after  = rhi::ResourceState::GeneralRead;
+	m_cmdList->ReleaseToQueue(rhi::QueueType::GRAPHICS, {&releaseTransition, 1}, {});
+
 	m_cmdList->End();
 
-	// Submit and wait for completion
+	// Submit compute work and signal semaphore when done
 	std::array<rhi::IRHICommandList *, 1> cmdLists = {m_cmdList.Get()};
-	m_device->SubmitCommandLists(cmdLists, rhi::QueueType::COMPUTE);
-	m_device->WaitIdle();
+	m_device->SubmitCommandLists(cmdLists, rhi::QueueType::COMPUTE,
+	                             nullptr,
+	                             m_computeDoneSemaphore.Get(),
+	                             nullptr);
+
+	// Mark that semaphore was signaled to prevents waiting on unsignaled semaphore
+	// after mid-frame backend switch
+	m_semaphoreSignaledThisFrame = true;
 
 	// Read GPU timing results from previous frames
 	m_sorter->ReadTimingResults();

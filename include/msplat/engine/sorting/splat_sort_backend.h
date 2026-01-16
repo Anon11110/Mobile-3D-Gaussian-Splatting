@@ -120,6 +120,20 @@ class ISplatSortBackend
 	{
 		(void) positions;
 	}
+
+	/// Get semaphore that signals when compute sort is complete (GPU backend only)
+	/// Used for cross-queue synchronization between compute and graphics
+	/// @return Semaphore to wait on before using sorted indices, or nullptr if not applicable
+	virtual rhi::IRHISemaphore *GetComputeSemaphore() const
+	{
+		return nullptr;
+	}
+
+	/// Get the sorted indices buffer for queue ownership transfer
+	virtual rhi::IRHIBuffer *GetSortedIndicesBuffer() const
+	{
+		return nullptr;
+	}
 };
 
 /// GPU backend implementation using GpuSplatSorter
@@ -163,6 +177,18 @@ class GpuSplatSortBackend : public ISplatSortBackend
 		return m_sorter.get();
 	}
 
+	rhi::IRHISemaphore *GetComputeSemaphore() const override
+	{
+		// Only return semaphore if Update() was called this frame (semaphore was signaled)
+		// to prevent waiting on unsignaled semaphore after backend switch mid-frame
+		return m_semaphoreSignaledThisFrame ? m_computeDoneSemaphore.Get() : nullptr;
+	}
+
+	rhi::IRHIBuffer *GetSortedIndicesBuffer() const override
+	{
+		return m_targetBuffer.Get();
+	}
+
   private:
 	rhi::IRHIDevice  *m_device = nullptr;
 	Scene            *m_scene  = nullptr;
@@ -173,6 +199,8 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	int                                   m_currentMethod = 1;        // Default: IntegratedScan
 
 	rhi::CommandListHandle m_cmdList;
+	rhi::SemaphoreHandle   m_computeDoneSemaphore;
+	mutable bool           m_semaphoreSignaledThisFrame = false;
 
 	// Verification state
 	bool                                 m_prepareVerification  = false;

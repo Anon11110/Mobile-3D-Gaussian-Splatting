@@ -527,6 +527,16 @@ void HybridSplatRendererApp::OnRender()
 		m_fpsCounter.reset();
 	}
 
+	// Acquire sorted indices buffer from compute queue (GPU backend only)
+	if (m_backend && m_sortingEnabled && m_backend->GetComputeSemaphore())
+	{
+		rhi::BufferTransition acquireTransition{};
+		acquireTransition.buffer = m_backend->GetSortedIndicesBuffer();
+		acquireTransition.before = rhi::ResourceState::CopyDestination;
+		acquireTransition.after  = rhi::ResourceState::GeneralRead;
+		cmdList->AcquireFromQueue(rhi::QueueType::COMPUTE, {&acquireTransition, 1}, {});
+	}
+
 	rhi::IRHITexture *backBuffer = swapchain->GetBackBuffer(imageIndex);
 
 	// Transition to render target
@@ -610,19 +620,35 @@ void HybridSplatRendererApp::OnRender()
 	submitInfo.signalFence     = m_inFlightFence.Get();
 
 	// Use explicit arrays to avoid std::span brace-initialization issues on Android release builds
-	rhi::SemaphoreWaitInfo waitInfoArray[1];
+	rhi::SemaphoreWaitInfo waitInfoArray[2];
 	rhi::IRHISemaphore    *signalSemArray[1];
+	uint32_t               numWaitSemaphores = 0;
+
+	// Wait for compute sort to complete (GPU backend only)
+	rhi::IRHISemaphore *computeSemaphore = m_backend ? m_backend->GetComputeSemaphore() : nullptr;
+	if (computeSemaphore && m_sortingEnabled)
+	{
+		waitInfoArray[numWaitSemaphores].semaphore = computeSemaphore;
+		waitInfoArray[numWaitSemaphores].waitStage = rhi::StageMask::VertexInput;
+		numWaitSemaphores++;
+	}
 
 	if (!m_vsyncBypassMode)
 	{
 		// Normal mode: wait for image available and signal when rendering is done
-		waitInfoArray[0].semaphore = m_imageAvailableSemaphores[acquireSemIndex].Get();
-		waitInfoArray[0].waitStage = rhi::StageMask::RenderTarget;
+		waitInfoArray[numWaitSemaphores].semaphore = m_imageAvailableSemaphores[acquireSemIndex].Get();
+		waitInfoArray[numWaitSemaphores].waitStage = rhi::StageMask::RenderTarget;
+		numWaitSemaphores++;
 
 		signalSemArray[0] = m_renderFinishedSemaphores[imageIndex].Get();
 
-		submitInfo.waitSemaphores   = std::span<const rhi::SemaphoreWaitInfo>(waitInfoArray, 1);
+		submitInfo.waitSemaphores   = std::span<const rhi::SemaphoreWaitInfo>(waitInfoArray, numWaitSemaphores);
 		submitInfo.signalSemaphores = std::span<rhi::IRHISemaphore *const>(signalSemArray, 1);
+	}
+	else if (numWaitSemaphores > 0)
+	{
+		// Vsync bypass but still need to wait for compute
+		submitInfo.waitSemaphores = std::span<const rhi::SemaphoreWaitInfo>(waitInfoArray, numWaitSemaphores);
 	}
 
 	rhi::IRHICommandList *cmdListArray[1] = {cmdList};

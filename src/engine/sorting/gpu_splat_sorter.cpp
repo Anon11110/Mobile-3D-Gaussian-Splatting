@@ -705,7 +705,6 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 	// Select sorting method:
 	// - IntegratedScan (default): Computes prefix sums inline during scatter
 	// - Prescan: Avoid redundant prefix sum calculations in each workgroup,
-	//            but has a known bug that causes random failures with large element counts
 	if (sortMethod == SortMethod::IntegratedScan)
 	{
 		RecordRadixSortIntegrated(cmdList);
