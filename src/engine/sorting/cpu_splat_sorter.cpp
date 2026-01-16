@@ -41,6 +41,9 @@ class CpuSplatSorter::Impl
 	// Data for the worker
 	container::vector<math::vec3> m_worker_positions;
 	math::mat4                    m_worker_view_matrix;
+
+	uint32_t *m_lastSortedBuffer = nullptr;
+	size_t    m_lastSortedCount  = 0;
 };
 
 CpuSplatSorter::Impl::Impl(uint32_t max_splats)
@@ -120,18 +123,38 @@ void CpuSplatSorter::Impl::SortWorker()
 
 		const size_t count = m_worker_positions.size();
 
+		// Check if we can reuse previous frame's sorted indices
+		const bool usePreviousIndices = (m_lastSortedBuffer != nullptr && m_lastSortedCount == count);
+
 		// 1. Calculate depths in parallel
 		// Uses ParallelFor to distribute depth computation across multiple threads.
 		// Each chunk writes to disjoint ranges of m_depths and m_producerBuffer.
-		core::ParallelFor(
-		    static_cast<size_t>(0), count, static_cast<size_t>(0),        // 0 = use default grain size
-		    [this](size_t begin, size_t end) {
-			    for (size_t i = begin; i < end; ++i)
-			    {
-				    m_depths[i]         = ComputeViewSpaceDepth(m_worker_positions[i], m_worker_view_matrix);
-				    m_producerBuffer[i] = static_cast<uint32_t>(i);
-			    }
-		    });
+		if (usePreviousIndices)
+		{
+			// Seed with previous frame's sorted indices for faster sorting
+			core::ParallelFor(
+			    static_cast<size_t>(0), count, static_cast<size_t>(0),
+			    [this](size_t begin, size_t end) {
+				    for (size_t i = begin; i < end; ++i)
+				    {
+					    m_depths[i]         = ComputeViewSpaceDepth(m_worker_positions[i], m_worker_view_matrix);
+					    m_producerBuffer[i] = m_lastSortedBuffer[i];
+				    }
+			    });
+		}
+		else
+		{
+			// First frame or count changed, use sequential indices
+			core::ParallelFor(
+			    static_cast<size_t>(0), count, static_cast<size_t>(0),
+			    [this](size_t begin, size_t end) {
+				    for (size_t i = begin; i < end; ++i)
+				    {
+					    m_depths[i]         = ComputeViewSpaceDepth(m_worker_positions[i], m_worker_view_matrix);
+					    m_producerBuffer[i] = static_cast<uint32_t>(i);
+				    }
+			    });
+		}
 
 		// 2. Sort indices based on depths (back to front)
 		// Uses ParallelSort which leverages std::execution::par_unseq when available.
@@ -141,7 +164,11 @@ void CpuSplatSorter::Impl::SortWorker()
 
 		// 3. Mark as complete and swap to the other buffer for next sort
 		uint32_t *completedBuffer = m_producerBuffer;
-		m_producerBuffer          = (completedBuffer == m_indices_A.data()) ? m_indices_B.data() : m_indices_A.data();
+
+		m_lastSortedBuffer = completedBuffer;
+		m_lastSortedCount  = count;
+
+		m_producerBuffer = (completedBuffer == m_indices_A.data()) ? m_indices_B.data() : m_indices_A.data();
 		m_consumerBuffer.store(completedBuffer);
 
 		// Reset request flag (needs lock for synchronization with RequestSort)
