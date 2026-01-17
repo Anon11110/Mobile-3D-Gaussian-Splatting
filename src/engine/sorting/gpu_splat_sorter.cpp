@@ -13,7 +13,7 @@ GpuSplatSorter::GpuSplatSorter(rhi::IRHIDevice *device, container::shared_ptr<vf
 {
 }
 
-void GpuSplatSorter::Initialize(uint32_t totalSplatCount)
+void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer)
 {
 	if (isInitialized)
 	{
@@ -36,10 +36,12 @@ void GpuSplatSorter::Initialize(uint32_t totalSplatCount)
 	splatIndicesOriginal = device->CreateBuffer(bufferDesc);
 
 	// Sort buffers (ping-pong)
+	// With RadixPasses=4, the final pass writes to buffer B.
+	// Use the caller's output buffer as sortIndicesB so results are written directly.
 	sortKeysA    = device->CreateBuffer(bufferDesc);
 	sortKeysB    = device->CreateBuffer(bufferDesc);
 	sortIndicesA = device->CreateBuffer(bufferDesc);
-	sortIndicesB = device->CreateBuffer(bufferDesc);
+	sortIndicesB = std::move(outputBuffer);
 
 	// Histogram buffer for radix sort
 	// Each workgroup generates a histogram with 256 bins for each of the 4 passes

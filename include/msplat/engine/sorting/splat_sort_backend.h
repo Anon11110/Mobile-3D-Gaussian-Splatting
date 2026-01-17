@@ -49,6 +49,17 @@ class ISplatSortBackend
 	/// @param camera Camera providing view matrix and position
 	virtual void Update(const app::Camera &camera) = 0;
 
+	/// Update with external command list (single queue mode)
+	/// Records sort commands directly into provided command list
+	/// Caller manages Begin/End/Submit
+	/// @param camera Camera providing view matrix and position
+	/// @param cmdList Command list to record into (must be in recording state)
+	virtual void Update(const app::Camera &camera, rhi::IRHICommandList *cmdList)
+	{
+		(void) camera;
+		(void) cmdList;
+	}
+
 	/// Check if the most recent sort operation has completed
 	/// CPU backend: May return false while async sort is in progress
 	/// GPU backend: Always returns true (synchronous within frame)
@@ -134,6 +145,18 @@ class ISplatSortBackend
 	{
 		return nullptr;
 	}
+
+	/// Enable or disable async compute (GPU backend only)
+	/// When disabled, sorting uses graphics queue to avoid queue transfer overhead
+	virtual void SetAsyncCompute(bool enabled)
+	{
+		(void) enabled;
+	}
+
+	virtual bool IsAsyncComputeEnabled() const
+	{
+		return false;
+	}
 };
 
 /// GPU backend implementation using GpuSplatSorter
@@ -151,6 +174,7 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	    container::shared_ptr<vfs::IFileSystem> vfs = nullptr) override;
 
 	void Update(const app::Camera &camera) override;
+	void Update(const app::Camera &camera, rhi::IRHICommandList *cmdList) override;
 
 	bool        IsSortComplete() const override;
 	SortMetrics GetMetrics() const override;
@@ -179,14 +203,38 @@ class GpuSplatSortBackend : public ISplatSortBackend
 
 	rhi::IRHISemaphore *GetComputeSemaphore() const override
 	{
-		// Only return semaphore if Update() was called this frame (semaphore was signaled)
-		// to prevent waiting on unsignaled semaphore after backend switch mid-frame
-		return m_semaphoreSignaledThisFrame ? m_computeDoneSemaphore.Get() : nullptr;
+		// Only return semaphore if:
+		// 1. Async compute is enabled, using separate compute queue
+		// 2. Update() was called this frame (semaphore was signaled)
+		if (!m_asyncComputeEnabled || !m_semaphoreSignaledThisFrame)
+		{
+			return nullptr;
+		}
+		return m_computeDoneSemaphore.Get();
 	}
 
 	rhi::IRHIBuffer *GetSortedIndicesBuffer() const override
 	{
 		return m_targetBuffer.Get();
+	}
+
+	void SetAsyncCompute(bool enabled) override
+	{
+		if (m_asyncComputeEnabled != enabled && m_device)
+		{
+			m_device->WaitIdle();
+
+			// Recreate semaphore to ensure it starts in unsignaled state
+			// since previous semaphore may have been signaled but not waited on
+			m_computeDoneSemaphore       = m_device->CreateSemaphore();
+			m_semaphoreSignaledThisFrame = false;
+		}
+		m_asyncComputeEnabled = enabled;
+	}
+
+	bool IsAsyncComputeEnabled() const override
+	{
+		return m_asyncComputeEnabled;
 	}
 
   private:
@@ -198,9 +246,11 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	container::unique_ptr<GpuSplatSorter> m_sorter;
 	int                                   m_currentMethod = 1;        // Default: IntegratedScan
 
-	rhi::CommandListHandle m_cmdList;
+	rhi::CommandListHandle m_computeCmdList;
+	rhi::CommandListHandle m_graphicsCmdList;
 	rhi::SemaphoreHandle   m_computeDoneSemaphore;
 	mutable bool           m_semaphoreSignaledThisFrame = false;
+	bool                   m_asyncComputeEnabled        = false;
 
 	// Verification state
 	bool                                 m_prepareVerification  = false;

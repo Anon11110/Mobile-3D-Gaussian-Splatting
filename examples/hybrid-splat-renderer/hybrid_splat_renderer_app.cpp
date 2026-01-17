@@ -39,8 +39,13 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_shaderFactory = container::make_unique<engine::ShaderFactory>(device, vfs);
 	m_scene         = container::make_unique<engine::Scene>(device);
 
-	m_camera.SetPosition(math::vec3(0.0f, 0.0f, 5.0f));
+	m_camera.SetPosition(math::vec3(0.0f, 0.0f, 3.0f));
 	m_camera.SetTarget(math::vec3(0.0f, 0.0f, 0.0f));
+
+#if defined(__ANDROID__)
+	m_orbitTarget   = math::vec3(0.0f, 0.0f, 0.0f);
+	m_orbitDistance = math::Length(m_camera.GetPosition() - m_orbitTarget);
+#endif
 
 	int width, height;
 	deviceManager->GetPlatformAdapter()->GetFramebufferSize(&width, &height);
@@ -305,6 +310,8 @@ void HybridSplatRendererApp::SwitchBackend(BackendType newType)
 		return;
 	}
 
+	m_backend->SetAsyncCompute(m_asyncComputeEnabled);
+
 	m_currentBackendType = newType;
 	LOG_INFO("Switched to {} backend ({})", m_backend->GetName(), m_backend->GetMethodName());
 }
@@ -344,6 +351,13 @@ void HybridSplatRendererApp::OnRender()
 		m_framebufferResized = false;
 		RecreateSwapchain();
 		return;
+	}
+
+	// Backend switch must happen before command recording
+	if (m_pendingBackendSwitch)
+	{
+		m_pendingBackendSwitch = false;
+		SwitchBackend(m_pendingBackendType);
 	}
 
 	// Acquire next image (skip in vsync bypass mode)
@@ -470,7 +484,15 @@ void HybridSplatRendererApp::OnRender()
 			m_checkVerificationResults = false;
 		}
 
-		m_backend->Update(m_camera);
+		if (m_currentBackendType == BackendType::GPU && !m_asyncComputeEnabled)
+		{
+			// GPU backend, single queue mode: record sort commands directly into graphics command list
+			m_backend->Update(m_camera, cmdList);
+		}
+		else
+		{
+			m_backend->Update(m_camera);
+		}
 
 		// Prepare verification if requested
 		if (m_verifyNextSort)
@@ -772,15 +794,10 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 				break;
 
 			case GLFW_KEY_C:
-				// Switch between CPU and GPU backends
-				if (m_currentBackendType == BackendType::GPU)
-				{
-					SwitchBackend(BackendType::CPU);
-				}
-				else
-				{
-					SwitchBackend(BackendType::GPU);
-				}
+				// Switch between CPU and GPU backends in the next frame
+				m_pendingBackendSwitch = true;
+				m_pendingBackendType   = (m_currentBackendType == BackendType::GPU) ? BackendType::CPU : BackendType::GPU;
+				LOG_INFO("Backend switch to {} scheduled", m_pendingBackendType == BackendType::GPU ? "GPU" : "CPU");
 				break;
 
 			case GLFW_KEY_H:
@@ -1674,12 +1691,6 @@ void HybridSplatRendererApp::RenderImGui()
 		{
 			LOG_INFO("Sorting {}", m_sortingEnabled ? "enabled" : "disabled");
 		}
-		ImGui::SameLine();
-		ImGui::TextDisabled("(?)");
-		if (ImGui::IsItemHovered())
-		{
-			ImGui::SetTooltip("Toggle depth sorting of splats\nDisabling may improve performance but reduce quality");
-		}
 
 		// Backend selection
 		ImGui::Text("Sort Backend:");
@@ -1687,7 +1698,8 @@ void HybridSplatRendererApp::RenderImGui()
 		const char *backends[]   = {"GPU", "CPU"};
 		if (ImGui::Combo("##Backend", &backendIndex, backends, 2))
 		{
-			SwitchBackend(static_cast<BackendType>(backendIndex));
+			m_pendingBackendSwitch = true;
+			m_pendingBackendType   = static_cast<BackendType>(backendIndex);
 		}
 
 		// Backend-specific info
@@ -1729,8 +1741,15 @@ void HybridSplatRendererApp::RenderImGui()
 				{
 					ImGui::BeginTooltip();
 					ImGui::Text("Portable: Works on all GPUs");
-					ImGui::Text("SubgroupOptimized: Faster, requires reliable subgroup ops (Fail on Qualcomm Adreno)");
+					ImGui::Text("SubgroupOptimized: Requires reliable subgroup ops (Fail on Qualcomm Adreno)");
 					ImGui::EndTooltip();
+				}
+
+				// Async compute toggle
+				if (ImGui::Checkbox("Async Compute", &m_asyncComputeEnabled))
+				{
+					m_backend->SetAsyncCompute(m_asyncComputeEnabled);
+					LOG_INFO("Async compute {}", m_asyncComputeEnabled ? "enabled" : "disabled");
 				}
 			}
 		}

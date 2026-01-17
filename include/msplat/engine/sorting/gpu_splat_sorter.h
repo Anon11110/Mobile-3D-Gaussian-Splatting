@@ -33,7 +33,11 @@ class GpuSplatSorter
 	GpuSplatSorter(GpuSplatSorter &&) noexcept            = default;
 	GpuSplatSorter &operator=(GpuSplatSorter &&) noexcept = default;
 
-	void Initialize(uint32_t totalSplatCount);
+	/// Initialize the sorter
+	/// @param totalSplatCount Number of splats to sort
+	/// @param outputBuffer Buffer where final sorted indices are written.
+	///        Must be large enough for totalSplatCount * sizeof(uint32_t).
+	void Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer);
 	void Sort(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera);
 
 	rhi::BufferHandle GetSortedIndices() const;

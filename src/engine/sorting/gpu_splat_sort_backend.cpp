@@ -21,12 +21,13 @@ bool GpuSplatSortBackend::Initialize(
 	m_targetBuffer = sortedIndicesBuffer;
 	m_splatCount   = totalSplatCount;
 
-	m_cmdList = device->CreateCommandList(rhi::QueueType::COMPUTE);
+	m_computeCmdList  = device->CreateCommandList(rhi::QueueType::COMPUTE);
+	m_graphicsCmdList = device->CreateCommandList(rhi::QueueType::GRAPHICS);
 
 	m_computeDoneSemaphore = device->CreateSemaphore();
 
 	m_sorter = container::make_unique<GpuSplatSorter>(device, vfs);
-	m_sorter->Initialize(totalSplatCount);
+	m_sorter->Initialize(totalSplatCount, sortedIndicesBuffer);
 
 	m_sorter->SetSortMethod(
 	    static_cast<GpuSplatSorter::SortMethod>(m_currentMethod));
@@ -42,40 +43,66 @@ void GpuSplatSortBackend::Update(const app::Camera &camera)
 		return;
 	}
 
-	m_cmdList->Begin();
+	m_semaphoreSignaledThisFrame = false;
 
-	// Execute GPU sort - pass camera directly
-	m_sorter->Sort(m_cmdList.Get(), *m_scene, camera);
+	rhi::IRHICommandList *cmdList = m_asyncComputeEnabled ? m_computeCmdList.Get() : m_graphicsCmdList.Get();
 
-	// Copy result from sorter's internal buffer to app-owned target buffer
-	rhi::BufferHandle sorterOutput = m_sorter->GetSortedIndices();
-	rhi::BufferCopy   copyRegion{};
-	copyRegion.srcOffset = 0;
-	copyRegion.dstOffset = 0;
-	copyRegion.size      = static_cast<uint64_t>(m_splatCount) * sizeof(uint32_t);
+	cmdList->Begin();
 
-	std::array<rhi::BufferCopy, 1> regions = {copyRegion};
-	m_cmdList->CopyBuffer(sorterOutput.Get(), m_targetBuffer.Get(), regions);
+	m_sorter->Sort(cmdList, *m_scene, camera);
 
-	// Release sorted indices buffer to graphics queue for cross-queue synchronization
-	rhi::BufferTransition releaseTransition{};
-	releaseTransition.buffer = m_targetBuffer.Get();
-	releaseTransition.before = rhi::ResourceState::CopyDestination;
-	releaseTransition.after  = rhi::ResourceState::GeneralRead;
-	m_cmdList->ReleaseToQueue(rhi::QueueType::GRAPHICS, {&releaseTransition, 1}, {});
+	// Barrier to transition buffer from compute write to graphics read
+	rhi::BufferTransition transition{};
+	transition.buffer = m_targetBuffer.Get();
+	transition.before = rhi::ResourceState::ShaderReadWrite;
+	transition.after  = rhi::ResourceState::GeneralRead;
 
-	m_cmdList->End();
+	if (m_asyncComputeEnabled)
+	{
+		// Async compute mode: Release buffer to graphics queue for cross-queue synchronization
+		cmdList->ReleaseToQueue(rhi::QueueType::GRAPHICS, {&transition, 1}, {});
 
-	// Submit compute work and signal semaphore when done
-	std::array<rhi::IRHICommandList *, 1> cmdLists = {m_cmdList.Get()};
-	m_device->SubmitCommandLists(cmdLists, rhi::QueueType::COMPUTE,
-	                             nullptr,
-	                             m_computeDoneSemaphore.Get(),
-	                             nullptr);
+		cmdList->End();
 
-	// Mark that semaphore was signaled to prevents waiting on unsignaled semaphore
-	// after mid-frame backend switch
-	m_semaphoreSignaledThisFrame = true;
+		std::array<rhi::IRHICommandList *, 1> cmdLists = {cmdList};
+		m_device->SubmitCommandLists(cmdLists, rhi::QueueType::COMPUTE,
+		                             nullptr,
+		                             m_computeDoneSemaphore.Get(),
+		                             nullptr);
+
+		m_semaphoreSignaledThisFrame = true;
+	}
+	else
+	{
+		// Single queue mode: Simple barrier to transition buffer state
+		cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Graphics, {&transition, 1}, {}, {});
+
+		cmdList->End();
+
+		std::array<rhi::IRHICommandList *, 1> cmdLists = {cmdList};
+		m_device->SubmitCommandLists(cmdLists, rhi::QueueType::GRAPHICS);
+		m_device->WaitIdle();
+	}
+
+	// Read GPU timing results from previous frames
+	m_sorter->ReadTimingResults();
+}
+
+void GpuSplatSortBackend::Update(const app::Camera &camera, rhi::IRHICommandList *cmdList)
+{
+	if (!m_sorter || m_splatCount == 0)
+	{
+		return;
+	}
+
+	m_sorter->Sort(cmdList, *m_scene, camera);
+
+	// Barrier to transition buffer from compute write to graphics read
+	rhi::BufferTransition transition{};
+	transition.buffer = m_targetBuffer.Get();
+	transition.before = rhi::ResourceState::ShaderReadWrite;
+	transition.after  = rhi::ResourceState::GeneralRead;
+	cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Graphics, {&transition, 1}, {}, {});
 
 	// Read GPU timing results from previous frames
 	m_sorter->ReadTimingResults();

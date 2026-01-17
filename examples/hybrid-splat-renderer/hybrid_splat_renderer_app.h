@@ -159,6 +159,7 @@ class HybridSplatRendererApp : public app::IApplication
 	timer::Timer      m_applicationTimer;
 	timer::FPSCounter m_fpsCounter;
 	bool              m_sortingEnabled              = true;
+	bool              m_asyncComputeEnabled         = false;
 	bool              m_verifyNextSort              = false;
 	bool              m_checkVerificationResults    = false;
 	bool              m_useSimpleVerification       = true;
@@ -167,7 +168,9 @@ class HybridSplatRendererApp : public app::IApplication
 	bool              m_crossBackendVerifyEnabled   = false;        // Cross-backend verification mode
 	bool              m_crossBackendVerifyRequested = false;        // Run verification on next frame
 	container::string m_crossBackendVerifyResult;                   // Last verification result
-	uint32_t          m_frameCount = 0;
+	bool              m_pendingBackendSwitch = false;               // Defer backend switch to next frame
+	BackendType       m_pendingBackendType   = BackendType::GPU;
+	uint32_t          m_frameCount           = 0;
 
 	container::vector<math::vec3> m_testSplatPositions;
 
