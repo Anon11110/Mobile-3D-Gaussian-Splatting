@@ -353,11 +353,36 @@ void HybridSplatRendererApp::OnRender()
 		return;
 	}
 
-	// Backend switch must happen before command recording
+	// Backend switch and async compute toggle must happen before any rendering/sorting
 	if (m_pendingBackendSwitch)
 	{
 		m_pendingBackendSwitch = false;
 		SwitchBackend(m_pendingBackendType);
+
+		// Reset profiling frame index to avoid reading stale timestamps from the old backend.
+		// Different backends write different timestamps, which could cause hangs with WAIT flag.
+		if (m_profilingEnabled)
+		{
+			m_profilingFrameIndex = 0;
+			m_currentGpuTiming    = {};
+		}
+	}
+
+	if (m_pendingAsyncComputeToggle && m_backend)
+	{
+		m_pendingAsyncComputeToggle = false;
+		m_backend->SetAsyncCompute(m_asyncComputeEnabled);
+
+		// Reset profiling frame index to avoid reading stale timestamps from the old mode.
+		// When switching modes, the timestamps from N frames ago were written under a different
+		// mode, which would cause hangs with WAIT flag.
+		if (m_profilingEnabled)
+		{
+			m_profilingFrameIndex = 0;
+			m_currentGpuTiming    = {};
+		}
+
+		LOG_INFO("Async compute {}", m_asyncComputeEnabled ? "enabled" : "disabled");
 	}
 
 	// Acquire next image (skip in vsync bypass mode)
@@ -484,13 +509,22 @@ void HybridSplatRendererApp::OnRender()
 			m_checkVerificationResults = false;
 		}
 
-		if (m_currentBackendType == BackendType::GPU && !m_asyncComputeEnabled)
+		const bool backendIsAsync = m_backend && m_backend->IsAsyncComputeEnabled();
+		if (m_currentBackendType == BackendType::GPU && !backendIsAsync)
 		{
 			// GPU backend, single queue mode: record sort commands directly into graphics command list
+			RecordSortTimestamp(cmdList, true);        // sort_begin
 			m_backend->Update(m_camera, cmdList);
+			RecordSortTimestamp(cmdList, false);        // sort_end
+		}
+		else if (m_currentBackendType == BackendType::GPU && backendIsAsync)
+		{
+			// GPU backend, async compute mode: sorter manages its own timing on compute queue
+			m_backend->Update(m_camera);
 		}
 		else
 		{
+			// CPU backend
 			m_backend->Update(m_camera);
 		}
 
@@ -549,14 +583,44 @@ void HybridSplatRendererApp::OnRender()
 		m_fpsCounter.reset();
 	}
 
-	// Acquire sorted indices buffer from compute queue (GPU backend only)
-	if (m_backend && m_sortingEnabled && m_backend->GetComputeSemaphore())
+	// Acquire sorted indices buffer from compute queue (GPU backend async compute only)
+	// During warmup: use the buffer directly (WaitIdle already synced)
+	// During pipelined: use previous frame's buffer with semaphore sync
+	rhi::IRHIBuffer    *sortedIndicesForRendering = m_sortedIndices.Get();
+	rhi::IRHISemaphore *computeSemaphore          = m_backend ? m_backend->GetComputeSemaphore() : nullptr;
+
+	if (m_backend && m_sortingEnabled && m_backend->IsAsyncComputeEnabled())
 	{
-		rhi::BufferTransition acquireTransition{};
-		acquireTransition.buffer = m_backend->GetSortedIndicesBuffer();
-		acquireTransition.before = rhi::ResourceState::CopyDestination;
-		acquireTransition.after  = rhi::ResourceState::GeneralRead;
-		cmdList->AcquireFromQueue(rhi::QueueType::COMPUTE, {&acquireTransition, 1}, {});
+		sortedIndicesForRendering = m_backend->GetSortedIndicesBuffer();
+
+		// Only do QFOT acquire if pipeline is warmed up and using semaphore sync
+		// During warmup: buffer sync is via WaitIdle, no QFOT needed
+		// During pipelined: semaphore wait + QFOT acquire
+		// And rebind descriptor set with the correct buffer for current frame
+		if (computeSemaphore)
+		{
+			if (auto *gpuBackend = dynamic_cast<engine::GpuSplatSortBackend *>(m_backend.get());
+			    gpuBackend && gpuBackend->IsPipelineWarmedUp())
+			{
+				rhi::BufferTransition acquireTransition{};
+				acquireTransition.buffer = sortedIndicesForRendering;
+				acquireTransition.before = rhi::ResourceState::ShaderReadWrite;
+				acquireTransition.after  = rhi::ResourceState::GeneralRead;
+				cmdList->AcquireFromQueue(rhi::QueueType::COMPUTE, {&acquireTransition, 1}, {});
+			}
+		}
+
+		rhi::BufferBinding indicesBinding{};
+		indicesBinding.buffer = sortedIndicesForRendering;
+		indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(5, indicesBinding);
+	}
+	else if (m_backend && m_sortingEnabled)
+	{
+		rhi::BufferBinding indicesBinding{};
+		indicesBinding.buffer = m_sortedIndices.Get();
+		indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(5, indicesBinding);
 	}
 
 	rhi::IRHITexture *backBuffer = swapchain->GetBackBuffer(imageIndex);
@@ -647,7 +711,6 @@ void HybridSplatRendererApp::OnRender()
 	uint32_t               numWaitSemaphores = 0;
 
 	// Wait for compute sort to complete (GPU backend only)
-	rhi::IRHISemaphore *computeSemaphore = m_backend ? m_backend->GetComputeSemaphore() : nullptr;
 	if (computeSemaphore && m_sortingEnabled)
 	{
 		waitInfoArray[numWaitSemaphores].semaphore = computeSemaphore;
@@ -1210,6 +1273,20 @@ void HybridSplatRendererApp::BeginGpuFrame(rhi::IRHICommandList *cmdList)
 	}
 }
 
+void HybridSplatRendererApp::RecordSortTimestamp(rhi::IRHICommandList *cmdList, bool begin)
+{
+	if (!m_profilingEnabled || !m_timestampQueryPool || m_profilingJustEnabled)
+	{
+		return;
+	}
+
+	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
+	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
+	uint32_t queryIndex      = timestampOffset + (begin ? TIMESTAMP_SORT_BEGIN : TIMESTAMP_SORT_END);
+
+	cmdList->WriteTimestamp(m_timestampQueryPool.Get(), queryIndex, rhi::StageMask::ComputeShader);
+}
+
 void HybridSplatRendererApp::RecordRenderTimestamp(rhi::IRHICommandList *cmdList, bool begin)
 {
 	if (!m_profilingEnabled || !m_timestampQueryPool || m_profilingJustEnabled)
@@ -1219,7 +1296,7 @@ void HybridSplatRendererApp::RecordRenderTimestamp(rhi::IRHICommandList *cmdList
 
 	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
 	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
-	uint32_t queryIndex      = timestampOffset + (begin ? 0 : 1);        // 0 = render_begin, 1 = render_end
+	uint32_t queryIndex      = timestampOffset + (begin ? TIMESTAMP_RENDER_BEGIN : TIMESTAMP_RENDER_END);
 
 	cmdList->WriteTimestamp(m_timestampQueryPool.Get(), queryIndex, rhi::StageMask::RenderTarget);
 }
@@ -1265,36 +1342,71 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 	uint32_t readFrameIndex  = (m_profilingFrameIndex - m_gpuProfilingFrameLatency) % m_gpuProfilingFrameLatency;
 	uint32_t timestampOffset = readFrameIndex * TIMESTAMPS_PER_FRAME;
 
-	// Read render pass timestamp results (indices 0 and 1)
-	uint64_t timestamps[TIMESTAMPS_PER_FRAME];
-	bool     timestampsValid = device->GetQueryPoolResults(
-        m_timestampQueryPool.Get(),
-        timestampOffset,
-        TIMESTAMPS_PER_FRAME,
-        timestamps,
-        sizeof(timestamps),
-        sizeof(uint64_t),
-        rhi::QueryResultFlags::WAIT);
-
 	GpuTimingResults results{};
-	results.valid = timestampsValid;
 
-	if (timestampsValid)
-	{
-		// timestamps: [0]=render_begin, [1]=render_end
-		double renderTicks   = static_cast<double>(timestamps[1] - timestamps[0]);
-		results.renderTimeMs = (renderTicks * m_timestampPeriod) / 1000000.0;        // ns to ms
-	}
+	// Determine if sort timestamps were written to the graphics queue.
+	// Sort timestamps are NOT written when: Sorting is disabled and GPU backend in async compute mode
+	bool backendInAsyncMode    = m_backend && m_backend->IsAsyncComputeEnabled();
+	bool sortTimestampsWritten = m_sortingEnabled && m_currentBackendType == BackendType::GPU && !backendInAsyncMode;
 
-	// Get sort time from the sorting backend
-	if (m_backend && m_sortingEnabled)
+	if (!sortTimestampsWritten)
 	{
-		auto metrics       = m_backend->GetMetrics();
-		results.sortTimeMs = metrics.sortDurationMs;
+		// Sorting disabled, async compute mode, or CPU backend only read render timestamps
+		uint64_t renderTimestamps[2];
+		bool     renderTimestampsValid = device->GetQueryPoolResults(
+            m_timestampQueryPool.Get(),
+            timestampOffset + TIMESTAMP_RENDER_BEGIN,
+            2,        // Only render_begin and render_end
+            renderTimestamps,
+            sizeof(renderTimestamps),
+            sizeof(uint64_t),
+            rhi::QueryResultFlags::NONE);
+
+		results.valid = renderTimestampsValid;
+
+		if (renderTimestampsValid)
+		{
+			double renderTicks   = static_cast<double>(renderTimestamps[1] - renderTimestamps[0]);
+			results.renderTimeMs = (renderTicks * m_timestampPeriod) / 1000000.0;
+
+			if (m_backend && m_sortingEnabled)
+			{
+				auto metrics       = m_backend->GetMetrics();
+				results.sortTimeMs = metrics.sortDurationMs;
+			}
+		}
 	}
 	else
 	{
-		results.sortTimeMs = 0.0;
+		// GPU backend, single queue mode with sorting enabled: read all 4 timestamps
+		// Use non-blocking instead of WAIT to avoid hanging on queries that were never written.
+		// This can occur when switching modes/backends while frames are still in flight, because older
+		// frames may have recorded a different query layout
+		uint64_t timestamps[TIMESTAMPS_PER_FRAME];
+		bool     timestampsValid = device->GetQueryPoolResults(
+            m_timestampQueryPool.Get(),
+            timestampOffset,
+            TIMESTAMPS_PER_FRAME,
+            timestamps,
+            sizeof(timestamps),
+            sizeof(uint64_t),
+            rhi::QueryResultFlags::NONE);
+
+		results.valid = timestampsValid;
+
+		if (timestampsValid)
+		{
+			// timestamps: [0]=sort_begin, [1]=sort_end, [2]=render_begin, [3]=render_end
+			double renderTicks   = static_cast<double>(timestamps[TIMESTAMP_RENDER_END] - timestamps[TIMESTAMP_RENDER_BEGIN]);
+			results.renderTimeMs = (renderTicks * m_timestampPeriod) / 1000000.0;
+
+			double sortTicks   = static_cast<double>(timestamps[TIMESTAMP_SORT_END] - timestamps[TIMESTAMP_SORT_BEGIN]);
+			results.sortTimeMs = (sortTicks * m_timestampPeriod) / 1000000.0;
+		}
+		else
+		{
+			results.sortTimeMs = 0.0;
+		}
 	}
 
 	// Read pipeline statistics if available
@@ -1308,7 +1420,7 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
             &fragmentInvocations,
             sizeof(fragmentInvocations),
             sizeof(uint64_t),
-            rhi::QueryResultFlags::WAIT);
+            rhi::QueryResultFlags::NONE);
 
 		if (statsValid)
 		{
@@ -1316,7 +1428,10 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 		}
 	}
 
-	m_currentGpuTiming = results;
+	if (results.valid)
+	{
+		m_currentGpuTiming = results;
+	}
 }
 
 void HybridSplatRendererApp::PerformCrossBackendVerification()
@@ -1570,7 +1685,6 @@ void HybridSplatRendererApp::UpdateFpsHistory()
 
 void HybridSplatRendererApp::RenderImGui()
 {
-	// Start the Dear ImGui frame
 	ImGui_ImplVulkan_NewFrame();
 
 #if defined(__ANDROID__)
@@ -1580,11 +1694,10 @@ void HybridSplatRendererApp::RenderImGui()
 #endif
 	ImGui::NewFrame();
 
-	// Create main control window
 #if defined(__ANDROID__)
 	// Scale up UI for mobile screens
 	ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowSize(ImVec2(900, 1000), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(900, 1200), ImGuiCond_FirstUseEver);
 #else
 	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowSize(ImVec2(400, 500), ImGuiCond_FirstUseEver);
@@ -1595,7 +1708,7 @@ void HybridSplatRendererApp::RenderImGui()
 		ImGui::Text("Performance");
 		ImGui::Separator();
 
-		// FPS display with current value
+		// FPS display
 		float currentFps = static_cast<float>(m_fpsCounter.getFPS());
 		ImGui::Text("FPS: %.1f", currentFps);
 
@@ -1626,36 +1739,64 @@ void HybridSplatRendererApp::RenderImGui()
 
 			if (m_profilingEnabled)
 			{
-				// GPU Timing
-				if (m_currentGpuTiming.valid)
+				if (m_currentBackendType == BackendType::GPU && m_currentGpuTiming.valid)
 				{
-					ImGui::Text("Sort Pass:   %.3f ms", m_currentGpuTiming.sortTimeMs);
+					// GPU Timing
+
+					double sortTime = m_sortingEnabled ? m_currentGpuTiming.sortTimeMs : 0.0;
+					ImGui::Text("Sort Pass:   %.3f ms", sortTime);
 					ImGui::Text("Render Pass: %.3f ms", m_currentGpuTiming.renderTimeMs);
-					ImGui::Text("Total GPU:   %.3f ms", m_currentGpuTiming.sortTimeMs + m_currentGpuTiming.renderTimeMs);
+					ImGui::Text("Total:       %.3f ms", sortTime + m_currentGpuTiming.renderTimeMs);
+				}
 
-					// Fragment shader invocations
-					if (m_pipelineStatsQueryPool && m_scene)
+				// CPU sorter backend timing
+				if (m_currentBackendType == BackendType::CPU && m_currentGpuTiming.valid)
+				{
+					float totalTime  = 0.0f;
+					float sortTime   = 0.0f;
+					float uploadTime = 0.0f;
+
+					if (m_sortingEnabled && m_backend)
 					{
-						uint64_t fragmentInvocations = m_currentGpuTiming.fragmentInvocations;
-						uint32_t splatCount          = m_scene->GetTotalSplatCount();
-						uint32_t pixelCount          = m_deviceManager->GetSwapchain()->GetBackBufferView(0)->GetWidth() *
-						                      m_deviceManager->GetSwapchain()->GetBackBufferView(0)->GetHeight();
+						auto metrics = m_backend->GetMetrics();
+						sortTime     = metrics.sortDurationMs;
+						uploadTime   = metrics.uploadDurationMs;
+						totalTime += sortTime + uploadTime;
+					}
 
-						float shadingLoad       = (pixelCount > 0) ? static_cast<float>(fragmentInvocations) / static_cast<float>(pixelCount) : 0.0f;
-						float fragmentsPerSplat = (splatCount > 0) ? static_cast<float>(fragmentInvocations) / static_cast<float>(splatCount) : 0.0f;
+					ImGui::Text("Sort Time:   %.2f ms", sortTime);
+					if (uploadTime > 0.0f)
+					{
+						ImGui::Text("Upload Time: %.2f ms", uploadTime);
+					}
 
-						ImGui::Text("Shading Load: %.2fx", shadingLoad);
-						ImGui::SameLine();
-						ImGui::TextDisabled("(?)");
-						if (ImGui::IsItemHovered())
-						{
-							ImGui::BeginTooltip();
-							ImGui::Text("Fragment Invocations: %llu", static_cast<unsigned long long>(fragmentInvocations));
-							ImGui::Text("Shading Load: Shader runs / Screen Pixels");
-							ImGui::Text("Includes discarded fragments (~1.27x inflation from quad corners)");
-							ImGui::Text("Fragments/Splat: %.1f", fragmentsPerSplat);
-							ImGui::EndTooltip();
-						}
+					totalTime += static_cast<float>(m_currentGpuTiming.renderTimeMs);
+					ImGui::Text("Render Pass: %.3f ms", m_currentGpuTiming.renderTimeMs);
+					ImGui::Text("Total:       %.3f ms", totalTime);
+				}
+
+				// Fragment shader invocations
+				if (m_pipelineStatsQueryPool && m_scene)
+				{
+					uint64_t fragmentInvocations = m_currentGpuTiming.fragmentInvocations;
+					uint32_t splatCount          = m_scene->GetTotalSplatCount();
+					uint32_t pixelCount          = m_deviceManager->GetSwapchain()->GetBackBufferView(0)->GetWidth() *
+					                      m_deviceManager->GetSwapchain()->GetBackBufferView(0)->GetHeight();
+
+					float shadingLoad       = (pixelCount > 0) ? static_cast<float>(fragmentInvocations) / static_cast<float>(pixelCount) : 0.0f;
+					float fragmentsPerSplat = (splatCount > 0) ? static_cast<float>(fragmentInvocations) / static_cast<float>(splatCount) : 0.0f;
+
+					ImGui::Text("Shading Load: %.2fx", shadingLoad);
+					ImGui::SameLine();
+					ImGui::TextDisabled("(?)");
+					if (ImGui::IsItemHovered())
+					{
+						ImGui::BeginTooltip();
+						ImGui::Text("Fragment Invocations: %llu", static_cast<unsigned long long>(fragmentInvocations));
+						ImGui::Text("Shading Load: Shader runs / Screen Pixels");
+						ImGui::Text("Includes discarded fragments (~1.27x inflation from quad corners)");
+						ImGui::Text("Fragments/Splat: %.1f", fragmentsPerSplat);
+						ImGui::EndTooltip();
 					}
 				}
 
@@ -1707,15 +1848,6 @@ void HybridSplatRendererApp::RenderImGui()
 		{
 			ImGui::Text("Method: %s", m_backend->GetMethodName());
 
-			auto metrics = m_backend->GetMetrics();
-			ImGui::Text("Sort Time: %.2f ms", metrics.sortDurationMs);
-
-			// Upload time only relevant for CPU backend
-			if (m_currentBackendType == BackendType::CPU)
-			{
-				ImGui::Text("Upload Time: %.2f ms", metrics.uploadDurationMs);
-			}
-
 			// Sort method and shader variant switching only for GPU backend
 			if (m_currentBackendType == BackendType::GPU)
 			{
@@ -1748,8 +1880,8 @@ void HybridSplatRendererApp::RenderImGui()
 				// Async compute toggle
 				if (ImGui::Checkbox("Async Compute", &m_asyncComputeEnabled))
 				{
-					m_backend->SetAsyncCompute(m_asyncComputeEnabled);
-					LOG_INFO("Async compute {}", m_asyncComputeEnabled ? "enabled" : "disabled");
+					m_pendingAsyncComputeToggle = true;
+					LOG_INFO("Async compute toggle scheduled: {}", m_asyncComputeEnabled ? "enable" : "disable");
 				}
 			}
 		}

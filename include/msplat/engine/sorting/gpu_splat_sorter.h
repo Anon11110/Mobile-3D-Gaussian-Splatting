@@ -42,6 +42,16 @@ class GpuSplatSorter
 
 	rhi::BufferHandle GetSortedIndices() const;
 
+	/// Get the primary output buffer (sortIndicesB)
+	rhi::BufferHandle GetPrimaryOutputBuffer() const;
+
+	/// Get the alternate output buffer for pipelined rendering (sortIndicesB_Alt)
+	rhi::BufferHandle GetAlternateOutputBuffer() const;
+
+	/// Change the output buffer for pipelined rendering
+	/// @param outputBuffer New buffer to write sorted indices to (must be primary or alternate buffer)
+	void SetOutputBuffer(rhi::BufferHandle outputBuffer);
+
 	// Method switching
 	void SetSortMethod(SortMethod method)
 	{
@@ -84,8 +94,31 @@ class GpuSplatSorter
 		return lastSortTimeMs;
 	}
 
-	// Called after GPU work completes to read timing results
+	// Blocking version that call after GPU work completes to read timing results
 	void ReadTimingResults();
+
+	// Non-blocking version that doesn't wait for GPU completion
+	// Returns true if timing data was successfully read, false if not yet available
+	bool ReadTimingResultsNonBlocking();
+
+	// Synchronize timing frame index with external profiling system
+	// Call this before Sort() to ensure timing data corresponds to correct frame
+	void SetTimingFrameIndex(uint32_t frameIndex)
+	{
+		timingFrameIndex = frameIndex;
+	}
+
+	// Set the frame latency for timing queries (default: 3)
+	// Should match the profiling frame latency used by the app
+	void SetTimingLatency(uint32_t latency)
+	{
+		timingFrameLatency = latency;
+	}
+
+	bool IsTimingEnabled() const
+	{
+		return timestampQueryPool != nullptr;
+	}
 
   private:
 	void CreateInitialIndicesBuffer(uint32_t totalSplatCount);
@@ -130,7 +163,8 @@ class GpuSplatSorter
 	rhi::BufferHandle sortKeysA;
 	rhi::BufferHandle sortKeysB;
 	rhi::BufferHandle sortIndicesA;
-	rhi::BufferHandle sortIndicesB;
+	rhi::BufferHandle sortIndicesB;            // Primary output buffer (index 0)
+	rhi::BufferHandle sortIndicesB_Alt;        // Secondary output buffer (index 1) for pipelined async compute
 	rhi::BufferHandle histograms;
 	rhi::BufferHandle blockSums;
 	rhi::BufferHandle verificationHistogram;
@@ -159,8 +193,11 @@ class GpuSplatSorter
 	rhi::DescriptorSetHandle histogramDescriptorSets[4];
 	rhi::DescriptorSetHandle scanDescriptorSets[4];
 	rhi::DescriptorSetHandle scanBlockSumsDescriptorSet;
-	rhi::DescriptorSetHandle scatterPairsPrescanDescriptorSets[4];           // Prescan method descriptor sets
-	rhi::DescriptorSetHandle scatterPairsIntegratedDescriptorSets[4];        // Integrated scan descriptor sets
+	// Double-buffered scatter descriptor sets for pipelined async compute
+	// Index 0: for primary output buffer, Index 1: for secondary output buffer
+	rhi::DescriptorSetHandle scatterPairsPrescanDescriptorSets[2][4];           // [bufferIdx][pass]
+	rhi::DescriptorSetHandle scatterPairsIntegratedDescriptorSets[2][4];        // [bufferIdx][pass]
+	uint32_t                 activeOutputBufferIndex = 0;
 
 	SortMethod    sortMethod    = SortMethod::IntegratedScan;
 	ShaderVariant shaderVariant = ShaderVariant::Portable;
@@ -168,12 +205,16 @@ class GpuSplatSorter
 	// Store last view matrix for verification
 	math::mat4 lastViewMatrix = math::mat4(1.0f);
 
+	// Cache for descriptor set binding, skip updates if unchanged to avoid in-use errors
+	rhi::IRHIBuffer *lastBoundPositionsBuffer = nullptr;
+	rhi::IRHIBuffer *lastBoundOutputBuffer    = nullptr;        // Track output buffer for SetOutputBuffer
+
 	// GPU Timing infrastructure
-	static constexpr uint32_t TimingFrameLatency = 3;        // N-frame latency for reading results
-	rhi::QueryPoolHandle      timestampQueryPool;
-	double                    timestampPeriod  = 1.0;        // nanoseconds per tick
-	uint32_t                  timingFrameIndex = 0;          // Rolling frame index
-	double                    lastSortTimeMs   = 0.0;        // Last measured sort time in ms
+	uint32_t             timingFrameLatency = 3;        // N-frame latency for reading results
+	rhi::QueryPoolHandle timestampQueryPool;
+	double               timestampPeriod  = 1.0;        // nanoseconds per tick
+	uint32_t             timingFrameIndex = 0;          // Rolling frame index
+	double               lastSortTimeMs   = 0.0;        // Last measured sort time in ms
 };
 
 }        // namespace msplat::engine

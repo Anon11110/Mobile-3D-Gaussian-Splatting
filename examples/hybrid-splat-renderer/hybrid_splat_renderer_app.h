@@ -168,9 +168,10 @@ class HybridSplatRendererApp : public app::IApplication
 	bool              m_crossBackendVerifyEnabled   = false;        // Cross-backend verification mode
 	bool              m_crossBackendVerifyRequested = false;        // Run verification on next frame
 	container::string m_crossBackendVerifyResult;                   // Last verification result
-	bool              m_pendingBackendSwitch = false;               // Defer backend switch to next frame
-	BackendType       m_pendingBackendType   = BackendType::GPU;
-	uint32_t          m_frameCount           = 0;
+	bool              m_pendingBackendSwitch      = false;          // Defer backend switch to next frame
+	BackendType       m_pendingBackendType        = BackendType::GPU;
+	bool              m_pendingAsyncComputeToggle = false;        // Defer async compute toggle to next frame
+	uint32_t          m_frameCount                = 0;
 
 	container::vector<math::vec3> m_testSplatPositions;
 
@@ -205,14 +206,23 @@ class HybridSplatRendererApp : public app::IApplication
 	size_t                              m_fpsHistoryIndex = 0;
 
 	// Profiling infrastructure (GPU timing + memory, disabled by default)
-	bool                      m_profilingEnabled         = false;
-	bool                      m_profilingJustEnabled     = false;        // Skip queries for rest of frame when enabled mid-frame
-	static constexpr uint32_t TIMESTAMPS_PER_FRAME       = 2;            // render_begin, render_end (sort timing from backend)
-	uint32_t                  m_gpuProfilingFrameLatency = 0;            // Set from swapchain image count
-	rhi::QueryPoolHandle      m_timestampQueryPool;
-	rhi::QueryPoolHandle      m_pipelineStatsQueryPool;
-	double                    m_timestampPeriod     = 1.0;        // nanoseconds per tick
-	uint32_t                  m_profilingFrameIndex = 0;          // Rolling frame index for query slots
+	bool m_profilingEnabled     = false;
+	bool m_profilingJustEnabled = false;        // Skip queries for rest of frame when enabled mid-frame
+
+	// Timestamp indices within a frame
+	// Single queue mode: sort_begin, sort_end, render_begin, render_end
+	// Async compute mode: render_begin, render_end only (sort timing from backend's compute queue)
+	static constexpr uint32_t TIMESTAMP_SORT_BEGIN   = 0;
+	static constexpr uint32_t TIMESTAMP_SORT_END     = 1;
+	static constexpr uint32_t TIMESTAMP_RENDER_BEGIN = 2;
+	static constexpr uint32_t TIMESTAMP_RENDER_END   = 3;
+	static constexpr uint32_t TIMESTAMPS_PER_FRAME   = 4;        // sort_begin, sort_end, render_begin, render_end
+
+	uint32_t             m_gpuProfilingFrameLatency = 0;        // Set from swapchain image count
+	rhi::QueryPoolHandle m_timestampQueryPool;
+	rhi::QueryPoolHandle m_pipelineStatsQueryPool;
+	double               m_timestampPeriod     = 1.0;        // nanoseconds per tick
+	uint32_t             m_profilingFrameIndex = 0;          // Rolling frame index for query slots
 
 	// Buffered GPU timing results
 	struct GpuTimingResults
@@ -228,6 +238,7 @@ class HybridSplatRendererApp : public app::IApplication
 	void InitGpuProfiling();
 	void ShutdownGpuProfiling();
 	void BeginGpuFrame(rhi::IRHICommandList *cmdList);
+	void RecordSortTimestamp(rhi::IRHICommandList *cmdList, bool begin);
 	void RecordRenderTimestamp(rhi::IRHICommandList *cmdList, bool begin);
 	void BeginPipelineStatsQuery(rhi::IRHICommandList *cmdList);
 	void EndPipelineStatsQuery(rhi::IRHICommandList *cmdList);

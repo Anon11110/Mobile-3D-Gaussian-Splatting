@@ -157,6 +157,20 @@ class ISplatSortBackend
 	{
 		return false;
 	}
+
+	/// Synchronize timing frame index with app's profiling system (GPU backend only)
+	/// Call this before Update() to ensure sort timing corresponds to the same frame as render timing
+	virtual void SetTimingFrameIndex(uint32_t frameIndex)
+	{
+		(void) frameIndex;
+	}
+
+	/// Set the frame latency for timing queries (GPU backend only)
+	/// Should match the profiling frame latency used by the app
+	virtual void SetTimingLatency(uint32_t latency)
+	{
+		(void) latency;
+	}
 };
 
 /// GPU backend implementation using GpuSplatSorter
@@ -203,39 +217,67 @@ class GpuSplatSortBackend : public ISplatSortBackend
 
 	rhi::IRHISemaphore *GetComputeSemaphore() const override
 	{
-		// Only return semaphore if:
-		// 1. Async compute is enabled, using separate compute queue
-		// 2. Update() was called this frame (semaphore was signaled)
+		// Only return a semaphore if we actually signaled one this frame
 		if (!m_asyncComputeEnabled || !m_semaphoreSignaledThisFrame)
 		{
 			return nullptr;
 		}
-		return m_computeDoneSemaphore.Get();
+
+		// In pipelined mode, graphics waits on the semaphore from the PREVIOUS pipelined frame.
+		// Warmup frames 0-1 don't signal semaphores.
+		// Frame 2 is the first pipelined frame (signals sem[0]), m_pipelineFrameIndex becomes 3 after Update.
+		// Frame 3 is the second pipelined frame (signals sem[1]), m_pipelineFrameIndex becomes 4 after Update.
+		// We can only wait on a valid previous semaphore starting from frame 3.
+		if (m_pipelineFrameIndex < 4)
+		{
+			return nullptr;
+		}
+
+		// readIndex matches the writeIndex from the previous frame
+		// Frame 3 (after Update, idx=4): readIndex=0, wait on sem[0] signaled on frame 2
+		// Frame 4 (after Update, idx=5): readIndex=1, wait on sem[1] signaled on frame 3
+		uint32_t readIndex = m_pipelineFrameIndex % 2;
+		return m_pipelineSemaphores[readIndex].Get();
 	}
 
 	rhi::IRHIBuffer *GetSortedIndicesBuffer() const override
 	{
-		return m_targetBuffer.Get();
-	}
-
-	void SetAsyncCompute(bool enabled) override
-	{
-		if (m_asyncComputeEnabled != enabled && m_device)
+		if (!m_asyncComputeEnabled)
 		{
-			m_device->WaitIdle();
-
-			// Recreate semaphore to ensure it starts in unsignaled state
-			// since previous semaphore may have been signaled but not waited on
-			m_computeDoneSemaphore       = m_device->CreateSemaphore();
-			m_semaphoreSignaledThisFrame = false;
+			// Single queue mode: use app-provided buffer
+			return m_targetBuffer.Get();
 		}
-		m_asyncComputeEnabled = enabled;
+
+		if (m_warmupComplete)
+		{
+			// Pipelined mode: return the READ buffer (previous frame's result)
+			uint32_t readIndex = m_pipelineFrameIndex % 2;
+			return m_pipelineBuffers[readIndex].Get();
+		}
+		else
+		{
+			// Frame 0 warmup: return current frame's buffer (serial rendering)
+			uint32_t currentIndex = (m_pipelineFrameIndex - 1) % 2;
+			return m_pipelineBuffers[currentIndex].Get();
+		}
 	}
+
+	/// Check if pipelined async compute is warmed up, which means it has valid previous frame result with semaphore
+	bool IsPipelineWarmedUp() const
+	{
+		// Need m_pipelineFrameIndex >= 4 for QFOT acquire
+		return m_asyncComputeEnabled && m_pipelineFrameIndex >= 4;
+	}
+
+	void SetAsyncCompute(bool enabled) override;
 
 	bool IsAsyncComputeEnabled() const override
 	{
 		return m_asyncComputeEnabled;
 	}
+
+	void SetTimingFrameIndex(uint32_t frameIndex) override;
+	void SetTimingLatency(uint32_t latency) override;
 
   private:
 	rhi::IRHIDevice  *m_device = nullptr;
@@ -246,11 +288,17 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	container::unique_ptr<GpuSplatSorter> m_sorter;
 	int                                   m_currentMethod = 1;        // Default: IntegratedScan
 
-	rhi::CommandListHandle m_computeCmdList;
+	rhi::CommandListHandle m_computeCmdLists[2];        // Double-buffered for async compute
 	rhi::CommandListHandle m_graphicsCmdList;
-	rhi::SemaphoreHandle   m_computeDoneSemaphore;
-	mutable bool           m_semaphoreSignaledThisFrame = false;
-	bool                   m_asyncComputeEnabled        = false;
+
+	// Pipelined async compute: double-buffered output for true N+1 parallelism
+	// Frame N: Sort into buffer[N%2], render using buffer[(N-1)%2]
+	rhi::BufferHandle    m_pipelineBuffers[2];                        // Double-buffered sorted indices
+	rhi::SemaphoreHandle m_pipelineSemaphores[2];                     // Semaphore per buffer
+	uint32_t             m_pipelineFrameIndex         = 0;            // Current write buffer index
+	bool                 m_warmupComplete             = false;        // First frame has no previous result
+	bool                 m_asyncComputeEnabled        = false;
+	mutable bool         m_semaphoreSignaledThisFrame = false;        // Track if semaphore was signaled in Update
 
 	// Verification state
 	bool                                 m_prepareVerification  = false;

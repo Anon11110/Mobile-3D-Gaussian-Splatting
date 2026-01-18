@@ -38,10 +38,11 @@ void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outp
 	// Sort buffers (ping-pong)
 	// With RadixPasses=4, the final pass writes to buffer B.
 	// Use the caller's output buffer as sortIndicesB so results are written directly.
-	sortKeysA    = device->CreateBuffer(bufferDesc);
-	sortKeysB    = device->CreateBuffer(bufferDesc);
-	sortIndicesA = device->CreateBuffer(bufferDesc);
-	sortIndicesB = std::move(outputBuffer);
+	sortKeysA        = device->CreateBuffer(bufferDesc);
+	sortKeysB        = device->CreateBuffer(bufferDesc);
+	sortIndicesA     = device->CreateBuffer(bufferDesc);
+	sortIndicesB     = std::move(outputBuffer);
+	sortIndicesB_Alt = device->CreateBuffer(bufferDesc);
 
 	// Histogram buffer for radix sort
 	// Each workgroup generates a histogram with 256 bins for each of the 4 passes
@@ -76,10 +77,13 @@ void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outp
 
 	CreateDescriptorSets();
 
+	// Initialize cache to match the buffer bound in CreateDescriptorSets
+	lastBoundOutputBuffer = sortIndicesB.Get();
+
 	// Create timestamp query pool for GPU timing
 	rhi::QueryPoolDesc timestampDesc{};
 	timestampDesc.queryType  = rhi::QueryType::TIMESTAMP;
-	timestampDesc.queryCount = 2 * TimingFrameLatency;        // begin + end per frame
+	timestampDesc.queryCount = 2 * timingFrameLatency;        // begin + end per frame
 	timestampQueryPool       = device->CreateQueryPool(timestampDesc);
 
 	if (timestampQueryPool)
@@ -533,141 +537,156 @@ void GpuSplatSorter::CreateDescriptorSets()
 		scanBlockSumsDescriptorSet->BindBuffer(1, blockSumDataBinding);
 	}
 
-	// Create descriptor sets for prescan scatter operations (one per pass)
+	// Create descriptor sets for prescan scatter operations (one per pass, double-buffered for async compute)
 	{
 		uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 
-		for (uint32_t pass = 0; pass < RadixPasses; ++pass)
+		// bufferIdx 0 uses sortIndicesB, bufferIdx 1 uses sortIndicesB_Alt
+		for (uint32_t bufferIdx = 0; bufferIdx < 2; ++bufferIdx)
 		{
-			bool useA = (pass % 2 == 0);
+			rhi::IRHIBuffer *outputIndicesB = (bufferIdx == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
 
-			scatterPairsPrescanDescriptorSets[pass] = device->CreateDescriptorSet(scatterPairsSetLayout.Get(), rhi::QueueType::COMPUTE);
-
-			// Binding 0: Input depth keys
-			rhi::BufferBinding keysInBinding = {};
-			if (pass == 0)
+			for (uint32_t pass = 0; pass < RadixPasses; ++pass)
 			{
-				keysInBinding.buffer = splatDepths.Get();
-			}
-			else
-			{
-				// Read from the buffer the previous pass wrote to
-				keysInBinding.buffer = useA ? sortKeysB.Get() : sortKeysA.Get();
-			}
-			keysInBinding.offset = 0;
-			keysInBinding.range  = 0;
-			keysInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-			scatterPairsPrescanDescriptorSets[pass]->BindBuffer(0, keysInBinding);
+				bool useA = (pass % 2 == 0);
 
-			// Binding 1: Input splat indices
-			rhi::BufferBinding valuesInBinding = {};
-			if (pass == 0)
-			{
-				valuesInBinding.buffer = splatIndicesOriginal.Get();
+				scatterPairsPrescanDescriptorSets[bufferIdx][pass] = device->CreateDescriptorSet(scatterPairsSetLayout.Get(), rhi::QueueType::COMPUTE);
+
+				// Binding 0: Input depth keys
+				rhi::BufferBinding keysInBinding = {};
+				if (pass == 0)
+				{
+					keysInBinding.buffer = splatDepths.Get();
+				}
+				else
+				{
+					keysInBinding.buffer = useA ? sortKeysB.Get() : sortKeysA.Get();
+				}
+				keysInBinding.offset = 0;
+				keysInBinding.range  = 0;
+				keysInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+				scatterPairsPrescanDescriptorSets[bufferIdx][pass]->BindBuffer(0, keysInBinding);
+
+				// Binding 1: Input splat indices
+				rhi::BufferBinding valuesInBinding = {};
+				if (pass == 0)
+				{
+					valuesInBinding.buffer = splatIndicesOriginal.Get();
+				}
+				else
+				{
+					// Read from the buffer the previous pass wrote to
+					// For pass 2+, we read from the output of the previous pass
+					valuesInBinding.buffer = useA ? outputIndicesB : sortIndicesA.Get();
+				}
+				valuesInBinding.offset = 0;
+				valuesInBinding.range  = 0;
+				valuesInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+				scatterPairsPrescanDescriptorSets[bufferIdx][pass]->BindBuffer(1, valuesInBinding);
+
+				// Binding 2: Output depth keys
+				rhi::BufferBinding keysOutBinding = {};
+				keysOutBinding.buffer             = useA ? sortKeysA.Get() : sortKeysB.Get();
+				keysOutBinding.offset             = 0;
+				keysOutBinding.range              = 0;
+				keysOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+				scatterPairsPrescanDescriptorSets[bufferIdx][pass]->BindBuffer(2, keysOutBinding);
+
+				// Binding 3: Output splat indices
+				rhi::BufferBinding valuesOutBinding = {};
+				valuesOutBinding.buffer             = useA ? sortIndicesA.Get() : outputIndicesB;
+				valuesOutBinding.offset             = 0;
+				valuesOutBinding.range              = 0;
+				valuesOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+				scatterPairsPrescanDescriptorSets[bufferIdx][pass]->BindBuffer(3, valuesOutBinding);
+
+				// Binding 4: Scanned histograms
+				rhi::BufferBinding histPairsBinding = {};
+				histPairsBinding.buffer             = histograms.Get();
+				histPairsBinding.offset             = pass * histogramSizePerPass;
+				histPairsBinding.range              = histogramSizePerPass;
+				histPairsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+				scatterPairsPrescanDescriptorSets[bufferIdx][pass]->BindBuffer(4, histPairsBinding);
 			}
-			else
-			{
-				// Read from the buffer the previous pass wrote to
-				valuesInBinding.buffer = useA ? sortIndicesB.Get() : sortIndicesA.Get();
-			}
-			valuesInBinding.offset = 0;
-			valuesInBinding.range  = 0;
-			valuesInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-			scatterPairsPrescanDescriptorSets[pass]->BindBuffer(1, valuesInBinding);
-
-			// Binding 2: Output depth keys
-			rhi::BufferBinding keysOutBinding = {};
-			keysOutBinding.buffer             = useA ? sortKeysA.Get() : sortKeysB.Get();
-			keysOutBinding.offset             = 0;
-			keysOutBinding.range              = 0;
-			keysOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-			scatterPairsPrescanDescriptorSets[pass]->BindBuffer(2, keysOutBinding);
-
-			// Binding 3: Output splat indices
-			rhi::BufferBinding valuesOutBinding = {};
-			valuesOutBinding.buffer             = useA ? sortIndicesA.Get() : sortIndicesB.Get();
-			valuesOutBinding.offset             = 0;
-			valuesOutBinding.range              = 0;
-			valuesOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-			scatterPairsPrescanDescriptorSets[pass]->BindBuffer(3, valuesOutBinding);
-
-			// Binding 4: Scanned histograms
-			rhi::BufferBinding histPairsBinding = {};
-			histPairsBinding.buffer             = histograms.Get();
-			histPairsBinding.offset             = pass * histogramSizePerPass;
-			histPairsBinding.range              = histogramSizePerPass;
-			histPairsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-			scatterPairsPrescanDescriptorSets[pass]->BindBuffer(4, histPairsBinding);
 		}
 	}
 
-	// Create descriptor sets for integrated scan scatter operations (one per pass)
+	// Create descriptor sets for integrated scan scatter operations (one per pass, double-buffered for async compute)
+	// bufferIdx 0 uses sortIndicesB, bufferIdx 1 uses sortIndicesB_Alt
 	{
 		uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 
-		for (uint32_t pass = 0; pass < RadixPasses; ++pass)
+		for (uint32_t bufferIdx = 0; bufferIdx < 2; ++bufferIdx)
 		{
-			bool useA = (pass % 2 == 0);
+			// Use primary or alternate output buffer based on index
+			rhi::IRHIBuffer *outputIndicesB = (bufferIdx == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
 
-			scatterPairsIntegratedDescriptorSets[pass] = device->CreateDescriptorSet(scatterPairsIntegratedSetLayout.Get(), rhi::QueueType::COMPUTE);
-
-			// Binding 0: Input depth keys
-			rhi::BufferBinding keysInBinding = {};
-			if (pass == 0)
+			for (uint32_t pass = 0; pass < RadixPasses; ++pass)
 			{
-				keysInBinding.buffer = splatDepths.Get();
-			}
-			else
-			{
-				// Read from the buffer the previous pass wrote to
-				keysInBinding.buffer = useA ? sortKeysB.Get() : sortKeysA.Get();
-			}
-			keysInBinding.offset = 0;
-			keysInBinding.range  = 0;
-			keysInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-			scatterPairsIntegratedDescriptorSets[pass]->BindBuffer(0, keysInBinding);
+				bool useA = (pass % 2 == 0);
 
-			// Binding 1: Input splat indices
-			rhi::BufferBinding valuesInBinding = {};
-			if (pass == 0)
-			{
-				valuesInBinding.buffer = splatIndicesOriginal.Get();
+				scatterPairsIntegratedDescriptorSets[bufferIdx][pass] = device->CreateDescriptorSet(scatterPairsIntegratedSetLayout.Get(), rhi::QueueType::COMPUTE);
+
+				// Binding 0: Input depth keys
+				rhi::BufferBinding keysInBinding = {};
+				if (pass == 0)
+				{
+					keysInBinding.buffer = splatDepths.Get();
+				}
+				else
+				{
+					// Read from the buffer the previous pass wrote to
+					keysInBinding.buffer = useA ? sortKeysB.Get() : sortKeysA.Get();
+				}
+				keysInBinding.offset = 0;
+				keysInBinding.range  = 0;
+				keysInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+				scatterPairsIntegratedDescriptorSets[bufferIdx][pass]->BindBuffer(0, keysInBinding);
+
+				// Binding 1: Input splat indices
+				rhi::BufferBinding valuesInBinding = {};
+				if (pass == 0)
+				{
+					valuesInBinding.buffer = splatIndicesOriginal.Get();
+				}
+				else
+				{
+					// Read from the buffer the previous pass wrote to
+					// For pass 2+, we read from the output of the previous pass
+					// If previous pass wrote to sortIndicesB/Alt (useA was false), we read from it
+					valuesInBinding.buffer = useA ? outputIndicesB : sortIndicesA.Get();
+				}
+				valuesInBinding.offset = 0;
+				valuesInBinding.range  = 0;
+				valuesInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+				scatterPairsIntegratedDescriptorSets[bufferIdx][pass]->BindBuffer(1, valuesInBinding);
+
+				// Binding 2: Output depth keys
+				rhi::BufferBinding keysOutBinding = {};
+				keysOutBinding.buffer             = useA ? sortKeysA.Get() : sortKeysB.Get();
+				keysOutBinding.offset             = 0;
+				keysOutBinding.range              = 0;
+				keysOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+				scatterPairsIntegratedDescriptorSets[bufferIdx][pass]->BindBuffer(2, keysOutBinding);
+
+				// Binding 3: Output splat indices
+				rhi::BufferBinding valuesOutBinding = {};
+				valuesOutBinding.buffer             = useA ? sortIndicesA.Get() : outputIndicesB;
+				valuesOutBinding.offset             = 0;
+				valuesOutBinding.range              = 0;
+				valuesOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+				scatterPairsIntegratedDescriptorSets[bufferIdx][pass]->BindBuffer(3, valuesOutBinding);
+
+				// Binding 4: Raw histograms (not scanned)
+				rhi::BufferBinding histPairsBinding = {};
+				histPairsBinding.buffer             = histograms.Get();
+				histPairsBinding.offset             = pass * histogramSizePerPass;
+				histPairsBinding.range              = histogramSizePerPass;
+				histPairsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+				scatterPairsIntegratedDescriptorSets[bufferIdx][pass]->BindBuffer(4, histPairsBinding);
 			}
-			else
-			{
-				// Read from the buffer the previous pass wrote to
-				valuesInBinding.buffer = useA ? sortIndicesB.Get() : sortIndicesA.Get();
-			}
-			valuesInBinding.offset = 0;
-			valuesInBinding.range  = 0;
-			valuesInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-			scatterPairsIntegratedDescriptorSets[pass]->BindBuffer(1, valuesInBinding);
-
-			// Binding 2: Output depth keys
-			rhi::BufferBinding keysOutBinding = {};
-			keysOutBinding.buffer             = useA ? sortKeysA.Get() : sortKeysB.Get();
-			keysOutBinding.offset             = 0;
-			keysOutBinding.range              = 0;
-			keysOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-			scatterPairsIntegratedDescriptorSets[pass]->BindBuffer(2, keysOutBinding);
-
-			// Binding 3: Output splat indices
-			rhi::BufferBinding valuesOutBinding = {};
-			valuesOutBinding.buffer             = useA ? sortIndicesA.Get() : sortIndicesB.Get();
-			valuesOutBinding.offset             = 0;
-			valuesOutBinding.range              = 0;
-			valuesOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-			scatterPairsIntegratedDescriptorSets[pass]->BindBuffer(3, valuesOutBinding);
-
-			// Binding 4: Raw histograms (not scanned)
-			rhi::BufferBinding histPairsBinding = {};
-			histPairsBinding.buffer             = histograms.Get();
-			histPairsBinding.offset             = pass * histogramSizePerPass;
-			histPairsBinding.range              = histogramSizePerPass;
-			histPairsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-			scatterPairsIntegratedDescriptorSets[pass]->BindBuffer(4, histPairsBinding);
 		}
 	}
 }
@@ -680,7 +699,7 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 	}
 
 	// Reset and record begin timestamp
-	uint32_t frameSlot       = timingFrameIndex % TimingFrameLatency;
+	uint32_t frameSlot       = timingFrameIndex % timingFrameLatency;
 	uint32_t timestampOffset = frameSlot * 2;        // 2 timestamps per frame
 
 	if (timestampQueryPool)
@@ -693,14 +712,19 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 	lastViewMatrix = camera.GetViewMatrix();
 	device->UpdateBuffer(cameraUBO.Get(), &lastViewMatrix, sizeof(math::mat4), 0);
 
-	// Update depth calc descriptor set
-	const Scene::GpuData &gpuData = scene.GetGpuData();
+	// Update depth calc descriptor set - only bind if buffer changed to avoid in-use validation errors
+	const Scene::GpuData &gpuData         = scene.GetGpuData();
+	rhi::IRHIBuffer      *positionsBuffer = gpuData.positions.Get();
 
-	// Binding 0: Positions buffer
-	rhi::BufferBinding positionsBinding = {};
-	positionsBinding.buffer             = gpuData.positions.Get();
-	positionsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-	depthCalcDescriptorSet->BindBuffer(0, positionsBinding);
+	if (positionsBuffer != lastBoundPositionsBuffer)
+	{
+		// Binding 0: Positions buffer
+		rhi::BufferBinding positionsBinding = {};
+		positionsBinding.buffer             = positionsBuffer;
+		positionsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		depthCalcDescriptorSet->BindBuffer(0, positionsBinding);
+		lastBoundPositionsBuffer = positionsBuffer;
+	}
 
 	RecordDepthCalculation(cmdList, scene, camera);
 
@@ -917,7 +941,7 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 
 		// --- Pass 5: SCATTER ---
 		cmdList->SetPipeline(scatterPairsPrescanPipeline.Get());
-		cmdList->BindDescriptorSet(0, scatterPairsPrescanDescriptorSets[pass].Get());
+		cmdList->BindDescriptorSet(0, scatterPairsPrescanDescriptorSets[activeOutputBufferIndex][pass].Get());
 
 		cmdList->PushConstants(
 		    rhi::ShaderStageFlags::COMPUTE,
@@ -933,9 +957,11 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		scatterTransitions[0].before = rhi::ResourceState::ShaderReadWrite;
 		scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
 
-		scatterTransitions[1].buffer = useA ? sortIndicesA.Get() : sortIndicesB.Get();
-		scatterTransitions[1].before = rhi::ResourceState::ShaderReadWrite;
-		scatterTransitions[1].after  = rhi::ResourceState::GeneralRead;
+		// For indices, when useA is false we use the active output buffer (sortIndicesB or sortIndicesB_Alt)
+		rhi::IRHIBuffer *activeOutputIndices = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+		scatterTransitions[1].buffer         = useA ? sortIndicesA.Get() : activeOutputIndices;
+		scatterTransitions[1].before         = rhi::ResourceState::ShaderReadWrite;
+		scatterTransitions[1].after          = rhi::ResourceState::GeneralRead;
 
 		// Transition histogram back to read-write for next pass
 		scatterTransitions[2].buffer = histograms.Get();
@@ -1008,7 +1034,7 @@ void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList)
 
 		// --- Pass 2: SCATTER with integrated prefix sum ---
 		cmdList->SetPipeline(scatterPairsPipeline.Get());
-		cmdList->BindDescriptorSet(0, scatterPairsIntegratedDescriptorSets[pass].Get());
+		cmdList->BindDescriptorSet(0, scatterPairsIntegratedDescriptorSets[activeOutputBufferIndex][pass].Get());
 
 		cmdList->PushConstants(
 		    rhi::ShaderStageFlags::COMPUTE,
@@ -1024,9 +1050,11 @@ void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList)
 		scatterTransitions[0].before = rhi::ResourceState::ShaderReadWrite;
 		scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
 
-		scatterTransitions[1].buffer = useA ? sortIndicesA.Get() : sortIndicesB.Get();
-		scatterTransitions[1].before = rhi::ResourceState::ShaderReadWrite;
-		scatterTransitions[1].after  = rhi::ResourceState::GeneralRead;
+		// For indices, when useA is false we use the active output buffer (sortIndicesB or sortIndicesB_Alt)
+		rhi::IRHIBuffer *activeOutputIndices = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+		scatterTransitions[1].buffer         = useA ? sortIndicesA.Get() : activeOutputIndices;
+		scatterTransitions[1].before         = rhi::ResourceState::ShaderReadWrite;
+		scatterTransitions[1].after          = rhi::ResourceState::GeneralRead;
 
 		// Transition histogram back to read-write for next pass
 		scatterTransitions[2].buffer = histograms.Get();
@@ -1047,6 +1075,50 @@ rhi::BufferHandle GpuSplatSorter::GetSortedIndices() const
 	// Since we use ping-pong buffers, the final result depends on the number of passes
 	bool lastPassUsedA = ((RadixPasses - 1) % 2 == 0);
 	return lastPassUsedA ? sortIndicesA : sortIndicesB;
+}
+
+rhi::BufferHandle GpuSplatSorter::GetPrimaryOutputBuffer() const
+{
+	return sortIndicesB;
+}
+
+rhi::BufferHandle GpuSplatSorter::GetAlternateOutputBuffer() const
+{
+	return sortIndicesB_Alt;
+}
+
+void GpuSplatSorter::SetOutputBuffer(rhi::BufferHandle outputBuffer)
+{
+	// With double-buffered descriptor sets, we just switch activeOutputBufferIndex
+	// based on which buffer is being used (sortIndicesB at index 0, sortIndicesB_Alt at index 1)
+	// No descriptor set updates needed - they were pre-created for both buffers.
+
+	rhi::IRHIBuffer *targetBuffer = outputBuffer.Get();
+
+	// Skip if already using this buffer
+	if (targetBuffer == lastBoundOutputBuffer)
+	{
+		return;
+	}
+
+	lastBoundOutputBuffer = targetBuffer;
+
+	// Determine which buffer index to use
+	if (targetBuffer == sortIndicesB.Get())
+	{
+		activeOutputBufferIndex = 0;
+	}
+	else if (targetBuffer == sortIndicesB_Alt.Get())
+	{
+		activeOutputBufferIndex = 1;
+	}
+	else
+	{
+		// External buffer - store it as sortIndicesB and use index 0
+		// This maintains backward compatibility for single-queue mode
+		sortIndicesB            = std::move(outputBuffer);
+		activeOutputBufferIndex = 0;
+	}
 }
 
 void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
@@ -1974,13 +2046,13 @@ bool GpuSplatSorter::VerifySortOrder()
 
 void GpuSplatSorter::ReadTimingResults()
 {
-	if (!timestampQueryPool || timingFrameIndex < TimingFrameLatency)
+	if (!timestampQueryPool || timingFrameIndex < timingFrameLatency)
 	{
 		return;
 	}
 
 	// Read from the oldest frame slot (N frames ago)
-	uint32_t readFrameIndex  = (timingFrameIndex - TimingFrameLatency) % TimingFrameLatency;
+	uint32_t readFrameIndex  = (timingFrameIndex - timingFrameLatency) % timingFrameLatency;
 	uint32_t timestampOffset = readFrameIndex * 2;
 
 	uint64_t timestamps[2];
@@ -1998,6 +2070,37 @@ void GpuSplatSorter::ReadTimingResults()
 		double ticks   = static_cast<double>(timestamps[1] - timestamps[0]);
 		lastSortTimeMs = (ticks * timestampPeriod) / 1000000.0;
 	}
+}
+
+bool GpuSplatSorter::ReadTimingResultsNonBlocking()
+{
+	if (!timestampQueryPool || timingFrameIndex < timingFrameLatency)
+	{
+		return false;
+	}
+
+	// Read from the oldest frame slot (N frames ago)
+	uint32_t readFrameIndex  = (timingFrameIndex - timingFrameLatency) % timingFrameLatency;
+	uint32_t timestampOffset = readFrameIndex * 2;
+
+	uint64_t timestamps[2];
+	bool     valid = device->GetQueryPoolResults(
+        timestampQueryPool.Get(),
+        timestampOffset,
+        2,
+        timestamps,
+        sizeof(timestamps),
+        sizeof(uint64_t),
+        rhi::QueryResultFlags::NONE);
+
+	if (valid)
+	{
+		double ticks   = static_cast<double>(timestamps[1] - timestamps[0]);
+		lastSortTimeMs = (ticks * timestampPeriod) / 1000000.0;
+		return true;
+	}
+
+	return false;
 }
 
 }        // namespace msplat::engine
