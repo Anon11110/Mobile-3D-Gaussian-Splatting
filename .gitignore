@@ -90,7 +90,6 @@ AGENTS.md
 
 # Ignore all compiled SPIR-V shader binaries
 shaders/compiled/*.spv
-examples/naive-splat-cpu/shaders/compiled/*.spv
 examples/particles/shaders/compiled/*.spv
 
 # Large asset files, downloaded automatically by scripts/download_assets.py

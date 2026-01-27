@@ -87,8 +87,7 @@ python3 scripts/configure.py build --target triangle --verbose
 - `particles` - GPU particle simulation with compute shaders
 - `splat-loader` - 3D Gaussian Splatting PLY file loader
 - `scene-test` - Scene management system test example
-- `naive-splat-cpu` - CPU-based naive Gaussian splatting renderer with async sorting
-- `gpu-sorting-renderer` - GPU-based sorting renderer with hierarchical radix sort (NEW)
+- `hybrid-splat-renderer` - Gaussian splat renderer supporting both CPU and GPU sorting modes
 - `unit-tests` - Core library unit tests
 - `perf-tests` - Performance benchmarks
 - `rhi-tests` - RHI unit tests (only available when configured with --tests)
@@ -357,8 +356,7 @@ Abstraction layer for GPU rendering located in `/rhi/`:
   /particles/           - GPU particle simulation
   /splat-loader/        - PLY file loading example
   /scene-test/          - Scene management test example
-  /naive-splat-cpu/     - CPU-based naive Gaussian splatting renderer
-  /gpu-sorting-renderer/ - GPU-based sorting renderer with hierarchical radix sort
+  /hybrid-splat-renderer/ - Gaussian splat renderer supporting both CPU and GPU sorting modes
   /unit-tests/          - Unit tests
   /perf-tests/          - Performance benchmarks
 /docs/                  - Design and implementation documentation
@@ -401,8 +399,7 @@ When working with this codebase:
 - `/examples/triangle/main.cpp` - Vulkan rendering example with RHI
 - `/examples/particles/main.cpp` - GPU compute shader example
 - `/examples/splat-loader/main.cpp` - PLY loading and analysis example
-- `/examples/naive-splat-cpu/main.cpp` - CPU-based naive Gaussian splatting renderer
-- `/examples/gpu-sorting-renderer/main.cpp` - GPU-based sorting renderer implementation
+- `/examples/hybrid-splat-renderer/main.cpp` - Hybrid renderer with CPU/GPU sorting modes
 - `/shaders/depth_calc.comp` - Compute shader for splat depth calculation
 - `/shaders/radix_histogram.comp` - Histogram generation for radix sort
 - `/shaders/radix_prefix_scan.comp` - Hierarchical prefix scan implementation

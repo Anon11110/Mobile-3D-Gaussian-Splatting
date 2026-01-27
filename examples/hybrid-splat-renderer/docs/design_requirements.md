@@ -1,6 +1,6 @@
 # Hybrid Splat Renderer (CPU + GPU Sorting)
 
-Design for a single example target under `examples/hybrid-splat-renderer` that merges `naive-splat-cpu` and `gpu-sorting-renderer` into one switchable app while keeping legacy examples intact for reference.
+Design for a single example target under `examples/hybrid-splat-renderer` that combines CPU and GPU sorting into one switchable app.
 
 ---
 
@@ -29,7 +29,6 @@ Design for a single example target under `examples/hybrid-splat-renderer` that m
 
 ### Non-goals
 - No engine-level refactors beyond hosting both backends (keep `engine::Scene`, `GpuSplatSorter`, shader I/O, RHI APIs).
-- Do not modify or delete `naive-splat-cpu` or `gpu-sorting-renderer`; they remain as references.
 - No new shader work; reuse `splat_raster.vert/frag` and the current descriptor layout.
 
 ---
@@ -518,13 +517,6 @@ if (!gpuBackend->Initialize(...)) {
 | `cmake/engine.cmake` | Add backend source files to engine library | **DONE** |
 | `include/msplat/engine/scene.h` | Add CPU backend helper methods | **DONE** |
 | `src/engine/scene.cpp` | Implement helper methods | **DONE** |
-
-### Reference Files (Copy Patterns From)
-
-| Source File | What to Copy |
-|-------------|--------------|
-| `examples/gpu-sorting-renderer/gpu_sorting_renderer_app.cpp` | ImGui setup (~100 lines), FPS graph (~50 lines), verification UI (~50 lines), keyboard handling (~30 lines) |
-| `examples/naive-splat-cpu/naive_splat_cpu_app.cpp` | Scene setup (~50 lines), descriptor layout (~40 lines), UBO management (~30 lines) |
 
 ---
 
