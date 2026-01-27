@@ -48,6 +48,7 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 	PFN_vkCmdEndRenderingKHR   vkCmdEndRenderingKHR;
 	PFN_vkCmdPipelineBarrier2  vkCmdPipelineBarrier2;
 	PFN_vkCmdWriteTimestamp2   vkCmdWriteTimestamp2;
+	PFN_vkQueueSubmit2         vkQueueSubmit2;
 
 	// Device feature flags
 	bool hasDynamicRendering;
@@ -504,12 +505,17 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		VkFence      vkFenceHandle = fence->GetHandle();
 
 		// Submit the command buffer, signaling the fence
-		VkSubmitInfo submitInfo{};
-		submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers    = &copyCmd;
+		VkCommandBufferSubmitInfo cmdBufferInfo{};
+		cmdBufferInfo.sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+		cmdBufferInfo.commandBuffer = copyCmd;
+		cmdBufferInfo.deviceMask    = 0;
 
-		if (vkQueueSubmit(transferQueue, 1, &submitInfo, vkFenceHandle) != VK_SUCCESS)
+		VkSubmitInfo2 submitInfo{};
+		submitInfo.sType                  = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+		submitInfo.commandBufferInfoCount = 1;
+		submitInfo.pCommandBufferInfos    = &cmdBufferInfo;
+
+		if (vkQueueSubmit2(transferQueue, 1, &submitInfo, vkFenceHandle) != VK_SUCCESS)
 		{
 			vkFreeCommandBuffers(device, transferCommandPool, 1, &copyCmd);
 			vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
@@ -556,51 +562,68 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 	                        QueueType                         queueType,
 	                        const SubmitInfo                 &submitInfo) override
 	{
-		std::vector<VkCommandBuffer> commandBuffers(cmdLists.size());
+		std::vector<VkCommandBufferSubmitInfo> cmdBufferInfos(cmdLists.size());
 		for (size_t i = 0; i < cmdLists.size(); i++)
 		{
-			auto *vkCmdList   = static_cast<VulkanCommandList *>(cmdLists[i]);
-			commandBuffers[i] = vkCmdList->GetHandle();
+			auto *vkCmdList                 = static_cast<VulkanCommandList *>(cmdLists[i]);
+			cmdBufferInfos[i].sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+			cmdBufferInfos[i].pNext         = nullptr;
+			cmdBufferInfos[i].commandBuffer = vkCmdList->GetHandle();
+			cmdBufferInfos[i].deviceMask    = 0;
 		}
 
-		VkSubmitInfo vkSubmitInfo{};
-		vkSubmitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		vkSubmitInfo.commandBufferCount = static_cast<uint32_t>(cmdLists.size());
-		vkSubmitInfo.pCommandBuffers    = commandBuffers.data();
-
-		std::vector<VkSemaphore>          waitSemaphores;
-		std::vector<VkPipelineStageFlags> waitStages;
+		std::vector<VkSemaphoreSubmitInfo> waitSemaphoreInfos;
 		if (!submitInfo.waitSemaphores.empty())
 		{
-			waitSemaphores.reserve(submitInfo.waitSemaphores.size());
-			waitStages.reserve(submitInfo.waitSemaphores.size());
+			waitSemaphoreInfos.reserve(submitInfo.waitSemaphores.size());
 
 			for (const auto &waitInfo : submitInfo.waitSemaphores)
 			{
 				auto *vkSemaphore = static_cast<VulkanSemaphore *>(waitInfo.semaphore);
-				waitSemaphores.push_back(vkSemaphore->GetHandle());
-				waitStages.push_back(StageMaskToVulkan(waitInfo.waitStage));
-			}
 
-			vkSubmitInfo.waitSemaphoreCount = static_cast<uint32_t>(submitInfo.waitSemaphores.size());
-			vkSubmitInfo.pWaitSemaphores    = waitSemaphores.data();
-			vkSubmitInfo.pWaitDstStageMask  = waitStages.data();
+				VkSemaphoreSubmitInfo semInfo{};
+				semInfo.sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+				semInfo.pNext       = nullptr;
+				semInfo.semaphore   = vkSemaphore->GetHandle();
+				semInfo.value       = 0;        // Binary semaphore
+				semInfo.stageMask   = StageMaskToVulkan2(waitInfo.waitStage);
+				semInfo.deviceIndex = 0;
+
+				waitSemaphoreInfos.push_back(semInfo);
+			}
 		}
 
-		std::vector<VkSemaphore> signalSemaphores;
+		std::vector<VkSemaphoreSubmitInfo> signalSemaphoreInfos;
 		if (!submitInfo.signalSemaphores.empty())
 		{
-			signalSemaphores.reserve(submitInfo.signalSemaphores.size());
+			signalSemaphoreInfos.reserve(submitInfo.signalSemaphores.size());
 
 			for (auto *semaphore : submitInfo.signalSemaphores)
 			{
 				auto *vkSemaphore = static_cast<VulkanSemaphore *>(semaphore);
-				signalSemaphores.push_back(vkSemaphore->GetHandle());
-			}
 
-			vkSubmitInfo.signalSemaphoreCount = static_cast<uint32_t>(submitInfo.signalSemaphores.size());
-			vkSubmitInfo.pSignalSemaphores    = signalSemaphores.data();
+				VkSemaphoreSubmitInfo semInfo{};
+				semInfo.sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+				semInfo.pNext       = nullptr;
+				semInfo.semaphore   = vkSemaphore->GetHandle();
+				semInfo.value       = 0;        // Binary semaphore
+				semInfo.stageMask   = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+				semInfo.deviceIndex = 0;
+
+				signalSemaphoreInfos.push_back(semInfo);
+			}
 		}
+
+		VkSubmitInfo2 vkSubmitInfo{};
+		vkSubmitInfo.sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+		vkSubmitInfo.pNext                    = nullptr;
+		vkSubmitInfo.flags                    = 0;
+		vkSubmitInfo.waitSemaphoreInfoCount   = static_cast<uint32_t>(waitSemaphoreInfos.size());
+		vkSubmitInfo.pWaitSemaphoreInfos      = waitSemaphoreInfos.empty() ? nullptr : waitSemaphoreInfos.data();
+		vkSubmitInfo.commandBufferInfoCount   = static_cast<uint32_t>(cmdBufferInfos.size());
+		vkSubmitInfo.pCommandBufferInfos      = cmdBufferInfos.data();
+		vkSubmitInfo.signalSemaphoreInfoCount = static_cast<uint32_t>(signalSemaphoreInfos.size());
+		vkSubmitInfo.pSignalSemaphoreInfos    = signalSemaphoreInfos.empty() ? nullptr : signalSemaphoreInfos.data();
 
 		VkFence fence = VK_NULL_HANDLE;
 		if (submitInfo.signalFence)
@@ -610,7 +633,7 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		}
 
 		VkQueue queue = GetQueue(queueType);
-		if (vkQueueSubmit(queue, 1, &vkSubmitInfo, fence) != VK_SUCCESS)
+		if (vkQueueSubmit2(queue, 1, &vkSubmitInfo, fence) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to submit command buffer");
 		}
@@ -1317,14 +1340,19 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		vkEndCommandBuffer(copyCmd);
 
 		// Submit and wait
-		VkSubmitInfo submitInfo{};
-		submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers    = &copyCmd;
+		VkCommandBufferSubmitInfo cmdBufferInfo{};
+		cmdBufferInfo.sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+		cmdBufferInfo.commandBuffer = copyCmd;
+		cmdBufferInfo.deviceMask    = 0;
+
+		VkSubmitInfo2 submitInfo{};
+		submitInfo.sType                  = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+		submitInfo.commandBufferInfoCount = 1;
+		submitInfo.pCommandBufferInfos    = &cmdBufferInfo;
 
 		// TODO: Async transfer? Because this is a one-time setup cost that happens when the
 		// user is already waiting for buffer creation, using vkQueueWaitIdle may be acceptable
-		vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueSubmit2(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
 		vkQueueWaitIdle(transferQueue);
 
 		vkFreeCommandBuffers(device, transferCommandPool, 1, &copyCmd);
@@ -1431,14 +1459,19 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		vkEndCommandBuffer(copyCmd);
 
 		// Submit and wait
-		VkSubmitInfo submitInfo{};
-		submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers    = &copyCmd;
+		VkCommandBufferSubmitInfo cmdBufferInfo{};
+		cmdBufferInfo.sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+		cmdBufferInfo.commandBuffer = copyCmd;
+		cmdBufferInfo.deviceMask    = 0;
+
+		VkSubmitInfo2 submitInfo{};
+		submitInfo.sType                  = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+		submitInfo.commandBufferInfoCount = 1;
+		submitInfo.pCommandBufferInfos    = &cmdBufferInfo;
 
 		// TODO: Async transfer? Same as buffer, because this is a one-time setup cost that happens when
 		// the user is already waiting for buffer creation, using vkQueueWaitIdle may be acceptable
-		vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueSubmit2(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
 		vkQueueWaitIdle(transferQueue);
 
 		vkFreeCommandBuffers(device, transferCommandPool, 1, &copyCmd);
@@ -1559,6 +1592,13 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		{
 			// Fall back to KHR extension function
 			vkCmdWriteTimestamp2 = (PFN_vkCmdWriteTimestamp2) vkGetDeviceProcAddr(device, "vkCmdWriteTimestamp2KHR");
+		}
+
+		vkQueueSubmit2 = (PFN_vkQueueSubmit2) vkGetDeviceProcAddr(device, "vkQueueSubmit2");
+		if (!vkQueueSubmit2)
+		{
+			// Fall back to KHR extension function
+			vkQueueSubmit2 = (PFN_vkQueueSubmit2) vkGetDeviceProcAddr(device, "vkQueueSubmit2KHR");
 		}
 	}
 };

@@ -87,7 +87,12 @@ VulkanDescriptorSet::VulkanDescriptorSet(VkDevice device, VulkanDescriptorSetLay
 {}
 
 VulkanDescriptorSet::~VulkanDescriptorSet()
-{}
+{
+	if (descriptorSet != VK_NULL_HANDLE && sourcePool != VK_NULL_HANDLE)
+	{
+		vkFreeDescriptorSets(device, sourcePool, 1, &descriptorSet);
+	}
+}
 
 VulkanDescriptorSet::VulkanDescriptorSet(VulkanDescriptorSet &&other) noexcept :
     device(other.device),
@@ -105,6 +110,11 @@ VulkanDescriptorSet &VulkanDescriptorSet::operator=(VulkanDescriptorSet &&other)
 {
 	if (this != &other)
 	{
+		if (descriptorSet != VK_NULL_HANDLE && sourcePool != VK_NULL_HANDLE)
+		{
+			vkFreeDescriptorSets(device, sourcePool, 1, &descriptorSet);
+		}
+
 		device        = other.device;
 		descriptorSet = other.descriptorSet;
 		sourcePool    = other.sourcePool;
