@@ -44,7 +44,7 @@ endif()
 # Use the improved shader compilation system
 include(${CMAKE_SOURCE_DIR}/cmake/compileshaders.cmake)
 # Compile shaders from the main shaders directory
-add_shader_directory(hybrid-splat-renderer ${CMAKE_SOURCE_DIR}/shaders)
+add_hlsl_shader_directory(hybrid-splat-renderer ${CMAKE_SOURCE_DIR}/shaders)
 
 # Setup asset downloading and copying
 include(${CMAKE_SOURCE_DIR}/cmake/copy_assets.cmake)

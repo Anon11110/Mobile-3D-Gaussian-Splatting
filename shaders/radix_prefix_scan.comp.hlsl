@@ -1,48 +1,37 @@
-#version 460
-
 #define WORKGROUP_SIZE 256
 #define ELEMENTS_PER_THREAD 4
 
-layout (local_size_x = WORKGROUP_SIZE) in;
-
-layout (push_constant) uniform PushConstants
+struct PushConstants
 {
     uint numElements;
-    uint passType;           // 0 = scan blocks, 1 = scan block sums, 2 = add offsets
-} pc;
+    uint passType;  // 0 = scan blocks, 1 = scan block sums, 2 = add offsets
+};
+[[vk::push_constant]] PushConstants pc;
 
 // Main data buffer for input/output.
 // Pass 0(scan blocks): Reads from Histograms, writes intermediate scan to Histograms.
 // Pass 1(scan block sums): Reads/writes BlockSums in-place.
 // Pass 2(add offsets): Reads BlockSums, adds to Histograms in-place.
-layout (std430, set = 0, binding = 0) buffer DataBuffer
-{
-    uint data[];
-};
+[[vk::binding(0, 0)]] RWStructuredBuffer<uint> data;
 
-// Block sums for hierarchical scan
-layout (std430, set = 0, binding = 1) buffer BlockSums
-{
-    uint blockSums[];
-};
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> blockSums;
 
-shared uint threadSums[WORKGROUP_SIZE];
-shared uint scanTemp[WORKGROUP_SIZE * 2];  // Double buffer for Blelloch scan
-shared uint blockTotalSum;
+groupshared uint threadSums[WORKGROUP_SIZE];
+groupshared uint scanTemp[WORKGROUP_SIZE * 2];  // Double buffer for Blelloch scan
+groupshared uint blockTotalSum;
 
-void SharedMemoryExclusiveScan()
+void SharedMemoryExclusiveScan(uint lID)
 {
-    uint lID = gl_LocalInvocationID.x;
     uint n = WORKGROUP_SIZE;
 
     scanTemp[lID] = threadSums[lID];
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 
     // Up-sweep phase
     uint offset = 1;
     for (uint d = n >> 1; d > 0; d >>= 1)
     {
-        barrier();
+        GroupMemoryBarrierWithGroupSync();
         if (lID < d)
         {
             uint ai = offset * (2 * lID + 1) - 1;
@@ -57,13 +46,13 @@ void SharedMemoryExclusiveScan()
         blockTotalSum = scanTemp[n - 1];
         scanTemp[n - 1] = 0;
     }
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 
     // Down-sweep phase
     for (uint d = 1; d < n; d *= 2)
     {
         offset >>= 1;
-        barrier();
+        GroupMemoryBarrierWithGroupSync();
         if (lID < d)
         {
             uint ai = offset * (2 * lID + 1) - 1;
@@ -73,24 +62,22 @@ void SharedMemoryExclusiveScan()
             scanTemp[bi] += temp;
         }
     }
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 
     threadSums[lID] = scanTemp[lID];
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 }
 
 // Generic block scanning function used by Pass 0 and 1
-void ScanElements()
+void ScanElements(uint lID, uint wID)
 {
-    uint lID = gl_LocalInvocationID.x;
-    uint wID = gl_WorkGroupID.x;
-
     uint elementsPerWorkgroup = WORKGROUP_SIZE * ELEMENTS_PER_THREAD;
     uint blockStart = wID * elementsPerWorkgroup;
 
     uint values[ELEMENTS_PER_THREAD];
     uint threadSum = 0;
 
+    [unroll]
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i)
     {
         uint idx = blockStart + lID * ELEMENTS_PER_THREAD + i;
@@ -99,16 +86,14 @@ void ScanElements()
     }
 
     threadSums[lID] = threadSum;
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 
-    // Perform exclusive scan on thread sums
-    SharedMemoryExclusiveScan();
+    SharedMemoryExclusiveScan(lID);
 
     uint threadPrefix = threadSums[lID];
-
-    // Compute and write final prefix for each element
     uint currentPrefix = threadPrefix;
 
+    [unroll]
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i)
     {
         uint idx = blockStart + lID * ELEMENTS_PER_THREAD + i;
@@ -119,7 +104,6 @@ void ScanElements()
         }
     }
 
-    // Pass 0 is the only pass that writes out the block sum
     if (lID == 0 && pc.passType == 0)
     {
         blockSums[wID] = blockTotalSum;
@@ -127,18 +111,13 @@ void ScanElements()
 }
 
 // Pass 2 function to add the scanned block offsets
-void AddBlockOffsets()
+void AddBlockOffsets(uint lID, uint wID)
 {
-    uint lID = gl_LocalInvocationID.x;
-    uint wID = gl_WorkGroupID.x;
-
     uint elementsPerWorkgroup = WORKGROUP_SIZE * ELEMENTS_PER_THREAD;
     uint blockStart = wID * elementsPerWorkgroup;
 
-    // Read the scanned offset for this block from the BlockSums buffer
     uint offset = blockSums[wID];
 
-    // Add offset to all elements in the block (in-place)
     for (uint i = lID; i < elementsPerWorkgroup; i += WORKGROUP_SIZE)
     {
         uint idx = blockStart + i;
@@ -149,17 +128,21 @@ void AddBlockOffsets()
     }
 }
 
-void main()
+[numthreads(WORKGROUP_SIZE, 1, 1)]
+void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 {
+    uint lID = groupThreadId.x;
+    uint wID = groupId.x;
+
     if (pc.passType == 0 || pc.passType == 1)
     {
         // Pass 0: Scans blocks of histogram data.
         // Pass 1: Reused to scan the block sums themselves.
-        ScanElements();
+        ScanElements(lID, wID);
     }
     else if (pc.passType == 2)
     {
         // Pass 2: Adds the scanned block offsets back to each block.
-        AddBlockOffsets();
+        AddBlockOffsets(lID, wID);
     }
 }

@@ -15,7 +15,7 @@ set(ENGINE_HEADERS
     # Rendering
     ${MSPLAT_ROOT}/include/msplat/engine/rendering/shader_factory.h
     ${MSPLAT_ROOT}/include/msplat/engine/rendering/mesh_generator.h
-    # Shader IO
+    # Shader IO (shared between C++ and HLSL)
     ${MSPLAT_ROOT}/shaders/shaderio.h
 )
 
@@ -40,10 +40,10 @@ set(ENGINE_SOURCES
 add_library(engine STATIC ${ENGINE_SOURCES} ${ENGINE_HEADERS})
 
 target_include_directories(engine PUBLIC
+    ${MSPLAT_ROOT}
     ${MSPLAT_ROOT}/include
     ${MSPLAT_ROOT}/third-party/miniply
     ${MSPLAT_ROOT}/rhi/include
-    ${MSPLAT_ROOT}/shaders
 )
 
 target_link_libraries(engine PUBLIC core RHI)

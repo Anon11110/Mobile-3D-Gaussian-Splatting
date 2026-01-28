@@ -1,42 +1,32 @@
-#version 460
-
 #define WORKGROUP_SIZE 256
 #define RADIX_SORT_BINS 256
 
-layout (local_size_x = WORKGROUP_SIZE) in;
-
-layout(push_constant) uniform PushConstants
+struct PushConstants
 {
     uint numElements;
     uint shift;
     uint numWorkgroups;
     uint numBlocksPerWorkgroup;
-} pc;
-
-layout(std430, set = 0, binding = 0) readonly buffer DepthKeys
-{
-    uint depthKeys[];
 };
+[[vk::push_constant]] PushConstants pc;
 
-layout(std430, set = 0, binding = 1) buffer Histograms
-{
-    uint histograms[];
-};
+[[vk::binding(0, 0)]] StructuredBuffer<uint> depthKeys;
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> histograms;
 
 // Final per-WG histogram (256 bins)
-// LDS space: 256 bins * 4 bytes = 1024 bytes
-shared uint ldsHist[RADIX_SORT_BINS];
+groupshared uint ldsHist[RADIX_SORT_BINS];
 
-void main()
+[numthreads(WORKGROUP_SIZE, 1, 1)]
+void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 {
-    const uint lid = gl_LocalInvocationID.x;
-    const uint wid = gl_WorkGroupID.x;
+    const uint lid = groupThreadId.x;
+    const uint wid = groupId.x;
 
     if (lid < RADIX_SORT_BINS)
     {
         ldsHist[lid] = 0u;
     }
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 
     const uint wgSpan = pc.numBlocksPerWorkgroup * WORKGROUP_SIZE;
     const uint baseElem = wid * wgSpan + lid;
@@ -50,10 +40,11 @@ void main()
         {
             const uint key = depthKeys[elemId];
             const uint bin = (key >> pc.shift) & mask;
-            atomicAdd(ldsHist[bin], 1u);
+            uint original;
+            InterlockedAdd(ldsHist[bin], 1u, original);
         }
     }
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 
     if (lid < RADIX_SORT_BINS)
     {

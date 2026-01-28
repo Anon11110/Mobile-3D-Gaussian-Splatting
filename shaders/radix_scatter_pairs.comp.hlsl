@@ -1,68 +1,47 @@
-#version 460
-
-#extension GL_KHR_shader_subgroup_basic: enable
-#extension GL_KHR_shader_subgroup_arithmetic: enable
-#extension GL_KHR_shader_subgroup_ballot: enable
-
 #define WORKGROUP_SIZE 256
 #define RADIX_SORT_BINS 256
 #define SUBGROUP_SIZE 32
 
-layout (local_size_x = WORKGROUP_SIZE) in;
-
-layout (push_constant) uniform PushConstants
+struct PushConstants
 {
     uint numElements;
     uint shift;
     uint numWorkgroups;
     uint numBlocksPerWorkgroup;
-} pc;
+};
+[[vk::push_constant]] PushConstants pc;
 
 // Input: Depth keys and splat indices from previous pass (or original)
-layout (std430, set = 0, binding = 0) readonly buffer InputDepthKeys
-{
-    uint inputDepthKeys[];
-};
-
-layout (std430, set = 0, binding = 1) readonly buffer InputSplatIndices
-{
-    uint inputSplatIndices[];
-};
+[[vk::binding(0, 0)]] StructuredBuffer<uint> inputDepthKeys;
+[[vk::binding(1, 0)]] StructuredBuffer<uint> inputSplatIndices;
 
 // Output: Sorted depth keys and splat indices
-layout (std430, set = 0, binding = 2) writeonly buffer OutputDepthKeys
-{
-    uint outputDepthKeys[];
-};
-
-layout (std430, set = 0, binding = 3) writeonly buffer OutputSplatIndices
-{
-    uint outputSplatIndices[];
-};
+[[vk::binding(2, 0)]] RWStructuredBuffer<uint> outputDepthKeys;
+[[vk::binding(3, 0)]] RWStructuredBuffer<uint> outputSplatIndices;
 
 // Histograms from histogram pass
 // Layout: [bin0: WG0..WGn | bin1: WG0..WGn | ... ]
-layout (std430, set = 0, binding = 4) readonly buffer Histograms
-{
-    uint histograms[]; // RADIX_SORT_BINS * numWorkgroups
-};
+[[vk::binding(4, 0)]] StructuredBuffer<uint> histograms;
 
-shared uint[RADIX_SORT_BINS / SUBGROUP_SIZE] sums; // subgroup reductions
-shared uint[RADIX_SORT_BINS] globalOffsets; // global exclusive scan (prefix sum)
+groupshared uint sums[RADIX_SORT_BINS / SUBGROUP_SIZE];
+groupshared uint globalOffsets[RADIX_SORT_BINS];
 
 struct BinFlags
 {
     uint flags[WORKGROUP_SIZE / 32];
 };
-shared BinFlags[RADIX_SORT_BINS] binFlags;
+groupshared BinFlags binFlags[RADIX_SORT_BINS];
 
-void main()
+[numthreads(WORKGROUP_SIZE, 1, 1)]
+void main(uint3 dispatchThreadId : SV_DispatchThreadID,
+          uint3 groupThreadId : SV_GroupThreadID,
+          uint3 groupId : SV_GroupID)
 {
-    uint gID = gl_GlobalInvocationID.x;
-    uint lID = gl_LocalInvocationID.x;
-    uint wID = gl_WorkGroupID.x;
-    uint sID = gl_SubgroupID;
-    uint lsID = gl_SubgroupInvocationID;
+    uint gID = dispatchThreadId.x;
+    uint lID = groupThreadId.x;
+    uint wID = groupId.x;
+    uint waveId = lID / WaveGetLaneCount();
+    uint laneId = WaveGetLaneIndex();
 
     uint localHistogram = 0;
     uint prefixSum = 0;
@@ -81,51 +60,48 @@ void main()
         }
         histogramCount = count;
 
-        // Subgroup-level reduction and prefix sum
-        const uint sum = subgroupAdd(histogramCount);
-        prefixSum = subgroupExclusiveAdd(histogramCount);
+        // Wave-level reduction and prefix sum
+        const uint sum = WaveActiveSum(histogramCount);
+        prefixSum = WavePrefixSum(histogramCount);
 
-        if (subgroupElect())
+        if (WaveIsFirstLane())
         {
-            sums[sID] = sum;
+            sums[waveId] = sum;
         }
     }
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 
     // Complete the global prefix sum
     if (lID < RADIX_SORT_BINS)
     {
         uint sumsPrefixSum = 0;
 
-        // First, have subgroup 0 scan the sums array
-        if (sID == 0)
+        // First, have wave 0 scan the sums array
+        if (waveId == 0)
         {
-            // Each thread in subgroup 0 loads one sum value if it exists
             uint mySum = 0;
-            if (lsID < (RADIX_SORT_BINS / SUBGROUP_SIZE))
+            if (laneId < (RADIX_SORT_BINS / SUBGROUP_SIZE))
             {
-                mySum = sums[lsID];
+                mySum = sums[laneId];
             }
 
-            // Do exclusive prefix sum across the subgroup
-            uint scannedSum = subgroupExclusiveAdd(mySum);
+            uint scannedSum = WavePrefixSum(mySum);
 
-            if (lsID < (RADIX_SORT_BINS / SUBGROUP_SIZE))
+            if (laneId < (RADIX_SORT_BINS / SUBGROUP_SIZE))
             {
-                sums[lsID] = scannedSum;
+                sums[laneId] = scannedSum;
             }
         }
-        barrier();
+        GroupMemoryBarrierWithGroupSync();
 
         // Now read the scanned sum for our subgroup
-        sumsPrefixSum = sums[sID];
-
+        sumsPrefixSum = sums[waveId];
         const uint globalHistogram = sumsPrefixSum + prefixSum;
         globalOffsets[lID] = globalHistogram + localHistogram;
     }
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 
-    // ==== Scatter keys and indices according to global offsets ====
+    // Scatter keys and indices according to global offsets
     const uint flagsBin = lID / 32;
     const uint flagsBit = 1u << (lID % 32);
 
@@ -136,12 +112,13 @@ void main()
         // Initialize bin flags
         if (lID < RADIX_SORT_BINS)
         {
+            [unroll]
             for (int i = 0; i < WORKGROUP_SIZE / 32; i++)
             {
                 binFlags[lID].flags[i] = 0U;
             }
         }
-        barrier();
+        GroupMemoryBarrierWithGroupSync();
 
         uint depthKey = 0;
         uint splatIdx = 0;
@@ -154,43 +131,41 @@ void main()
             splatIdx = inputSplatIndices[elementId];
             binID = uint(depthKey >> pc.shift) & uint(RADIX_SORT_BINS - 1);
 
-            // Offset for this workgroup
             binOffset = globalOffsets[binID];
 
-            // Add bit to flag
-            atomicOr(binFlags[binID].flags[flagsBin], flagsBit);
+            uint original;
+            InterlockedOr(binFlags[binID].flags[flagsBin], flagsBit, original);
         }
-        barrier();
+        GroupMemoryBarrierWithGroupSync();
 
         // Compute exclusive scan of the set flags (0..0 for thread 0, 0..1 for thread 1, 0..2 for thread 2, etc)
         uint bits = 0u;
         for (uint k = 0u; k < flagsBin; ++k)
         {
-            bits += bitCount(binFlags[binID].flags[k]);
+            bits += countbits(binFlags[binID].flags[k]);
         }
 
-        // Add partial bits from my own flag uint
         uint myFlags = binFlags[binID].flags[flagsBin];
         uint ltMask = (1u << (lID % 32)) - 1u;
-        bits += bitCount(myFlags & ltMask);
+        bits += countbits(myFlags & ltMask);
 
         if (elementId < pc.numElements)
         {
             outputDepthKeys[binOffset + bits] = depthKey;
             outputSplatIndices[binOffset + bits] = splatIdx;
         }
-        barrier();
+        GroupMemoryBarrierWithGroupSync();
 
         // Update offsets for each bin
         if (lID < RADIX_SORT_BINS)
         {
-            uint bits = 0;
+            uint binBits = 0;
             for (uint k = 0; k < WORKGROUP_SIZE / 32; k++)
             {
-                bits += bitCount(binFlags[lID].flags[k]);
+                binBits += countbits(binFlags[lID].flags[k]);
             }
-            globalOffsets[lID] += bits;
+            globalOffsets[lID] += binBits;
         }
-        barrier();
+        GroupMemoryBarrierWithGroupSync();
     }
 }

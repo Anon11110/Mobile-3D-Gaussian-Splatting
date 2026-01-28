@@ -1,49 +1,29 @@
-#version 460
-
-// Prefix scan using subgroup intrinsics
-// Requires reliable subgroup support (works on Nvidia, Samsung Xclipse, but not Qualcomm Adreno)
-
-#extension GL_KHR_shader_subgroup_arithmetic: enable
-#extension GL_KHR_shader_subgroup_basic: enable
+// Radix Prefix Scan with Wave Intrinsics
+// Requires reliable wave support (works on Nvidia, Samsung Xclipse, but not Qualcomm Adreno)
 
 #define WORKGROUP_SIZE 256
 #define SUBGROUP_SIZE 32
 #define ELEMENTS_PER_THREAD 4
 
-layout (local_size_x = WORKGROUP_SIZE) in;
-
-layout (push_constant) uniform PushConstants
+struct PushConstants
 {
     uint numElements;
-    uint passType;           // 0 = scan blocks, 1 = scan block sums, 2 = add offsets
-} pc;
-
-// Main data buffer for input/output.
-// Pass 0(scan blocks): Reads from Histograms, writes intermediate scan to Histograms.
-// Pass 1(scan block sums): Reads/writes BlockSums in-place.
-// Pass 2(add offsets): Reads BlockSums, adds to Histograms in-place.
-layout (std430, set = 0, binding = 0) buffer DataBuffer
-{
-    uint data[];
+    uint passType;  // 0 = scan blocks, 1 = scan block sums, 2 = add offsets
 };
+[[vk::push_constant]] PushConstants pc;
 
-// Block sums for hierarchical scan
-layout (std430, set = 0, binding = 1) buffer BlockSums
-{
-    uint blockSums[];
-};
+[[vk::binding(0, 0)]] RWStructuredBuffer<uint> data;
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> blockSums;
 
-shared uint subgroupSums[WORKGROUP_SIZE / SUBGROUP_SIZE];
-shared uint subgroupPrefixes[WORKGROUP_SIZE / SUBGROUP_SIZE];
-shared uint blockTotalSum;
+groupshared uint subgroupSums[WORKGROUP_SIZE / SUBGROUP_SIZE];
+groupshared uint subgroupPrefixes[WORKGROUP_SIZE / SUBGROUP_SIZE];
+groupshared uint blockTotalSum;
 
 // Generic block scanning function used by Pass 0 and 1
-void ScanElements()
+void ScanElements(uint lID, uint wID)
 {
-    uint lID = gl_LocalInvocationID.x;
-    uint wID = gl_WorkGroupID.x;
-    uint sID = gl_SubgroupID;
-    uint numSubgroups = gl_NumSubgroups;
+    uint waveId = lID / WaveGetLaneCount();
+    uint numWaves = WORKGROUP_SIZE / WaveGetLaneCount();
 
     uint elementsPerWorkgroup = WORKGROUP_SIZE * ELEMENTS_PER_THREAD;
     uint blockStart = wID * elementsPerWorkgroup;
@@ -51,6 +31,7 @@ void ScanElements()
     uint values[ELEMENTS_PER_THREAD];
     uint threadSum = 0;
 
+    [unroll]
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i)
     {
         uint idx = blockStart + lID * ELEMENTS_PER_THREAD + i;
@@ -58,33 +39,34 @@ void ScanElements()
         threadSum += values[i];
     }
 
-    // Subgroup-level exclusive scan
-    uint subgroupPrefix = subgroupExclusiveAdd(threadSum);
-    uint subgroupTotal = subgroupAdd(threadSum);
+    // Wave-level exclusive scan
+    uint wavePrefix = WavePrefixSum(threadSum);
+    uint waveTotal = WaveActiveSum(threadSum);
 
-    if (subgroupElect())
+    if (WaveIsFirstLane())
     {
-        subgroupSums[sID] = subgroupTotal;
+        subgroupSums[waveId] = waveTotal;
     }
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 
-    // Sequential scan of subgroup sums by thread 0
+    // Sequential scan of wave sums by thread 0
     if (lID == 0)
     {
         uint runningSum = 0;
-        for (uint i = 0; i < numSubgroups; ++i)
+        for (uint i = 0; i < numWaves; ++i)
         {
             subgroupPrefixes[i] = runningSum;
             runningSum += subgroupSums[i];
         }
         blockTotalSum = runningSum;
     }
-    barrier();
+    GroupMemoryBarrierWithGroupSync();
 
     // Compute and write final prefix for each element
-    uint basePrefix = subgroupPrefixes[sID] + subgroupPrefix;
+    uint basePrefix = subgroupPrefixes[waveId] + wavePrefix;
     uint currentPrefix = basePrefix;
 
+    [unroll]
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i)
     {
         uint idx = blockStart + lID * ELEMENTS_PER_THREAD + i;
@@ -103,18 +85,13 @@ void ScanElements()
 }
 
 // Pass 2 function to add the scanned block offsets
-void AddBlockOffsets()
+void AddBlockOffsets(uint lID, uint wID)
 {
-    uint lID = gl_LocalInvocationID.x;
-    uint wID = gl_WorkGroupID.x;
-
     uint elementsPerWorkgroup = WORKGROUP_SIZE * ELEMENTS_PER_THREAD;
     uint blockStart = wID * elementsPerWorkgroup;
 
-    // Read the scanned offset for this block from the BlockSums buffer
     uint offset = blockSums[wID];
 
-    // Add offset to all elements in the block (in-place)
     for (uint i = lID; i < elementsPerWorkgroup; i += WORKGROUP_SIZE)
     {
         uint idx = blockStart + i;
@@ -125,17 +102,21 @@ void AddBlockOffsets()
     }
 }
 
-void main()
+[numthreads(WORKGROUP_SIZE, 1, 1)]
+void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
 {
+    uint lID = groupThreadId.x;
+    uint wID = groupId.x;
+
     if (pc.passType == 0 || pc.passType == 1)
     {
         // Pass 0: Scans blocks of histogram data.
         // Pass 1: Reused to scan the block sums themselves.
-        ScanElements();
+        ScanElements(lID, wID);
     }
     else if (pc.passType == 2)
     {
         // Pass 2: Adds the scanned block offsets back to each block.
-        AddBlockOffsets();
+        AddBlockOffsets(lID, wID);
     }
 }
