@@ -20,6 +20,7 @@ class CpuSplatSorter::Impl
 	void                            RequestSort(const container::vector<math::vec3> &splat_positions, const math::mat4 &view_matrix);
 	bool                            IsSortComplete() const;
 	container::span<const uint32_t> GetSortedIndices();
+	size_t                          GetMemoryUsage() const;
 
   private:
 	void SortWorker();
@@ -100,6 +101,16 @@ container::span<const uint32_t> CpuSplatSorter::Impl::GetSortedIndices()
 		return {readyBuffer, m_indices_A.size()};
 	}
 	return {};
+}
+
+size_t CpuSplatSorter::Impl::GetMemoryUsage() const
+{
+	size_t total = 0;
+	total += m_indices_A.capacity() * sizeof(uint32_t);
+	total += m_indices_B.capacity() * sizeof(uint32_t);
+	total += m_depths.capacity() * sizeof(float);
+	total += m_worker_positions.capacity() * sizeof(math::vec3);
+	return total;
 }
 
 void CpuSplatSorter::Impl::SortWorker()
@@ -196,6 +207,10 @@ bool CpuSplatSorter::IsSortComplete() const
 container::span<const uint32_t> CpuSplatSorter::GetSortedIndices()
 {
 	return p_impl->GetSortedIndices();
+}
+size_t CpuSplatSorter::GetMemoryUsage() const
+{
+	return p_impl->GetMemoryUsage();
 }
 
 }        // namespace msplat::engine

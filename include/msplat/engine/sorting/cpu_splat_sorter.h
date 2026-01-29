@@ -31,6 +31,9 @@ class CpuSplatSorter
 	// Returns an empty span if no new data is ready.
 	container::span<const uint32_t> GetSortedIndices();
 
+	// Returns the CPU memory used by internal buffers
+	size_t GetMemoryUsage() const;
+
   private:
 	class Impl;
 	container::unique_ptr<Impl> p_impl;

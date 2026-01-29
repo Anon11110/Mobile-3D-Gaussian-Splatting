@@ -6,6 +6,7 @@
 #include <msplat/core/math/math.h>
 #include <msplat/core/timer.h>
 #include <msplat/core/vfs.h>
+#include <msplat/engine/sorting/gpu_splat_sorter.h>
 #include <rhi/rhi.h>
 
 namespace msplat::engine
@@ -13,7 +14,6 @@ namespace msplat::engine
 
 // Forward declarations
 class Scene;
-class GpuSplatSorter;
 
 /// Performance metrics returned by backends
 struct SortMetrics
@@ -213,6 +213,13 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	GpuSplatSorter *GetSorter() const
 	{
 		return m_sorter.get();
+	}
+
+	GpuSplatSorter::BufferInfo GetSorterBufferInfo() const
+	{
+		if (m_sorter)
+			return m_sorter->GetBufferInfo();
+		return {};
 	}
 
 	rhi::IRHISemaphore *GetComputeSemaphore() const override

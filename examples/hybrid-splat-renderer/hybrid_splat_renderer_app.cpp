@@ -263,6 +263,9 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 #endif
 	LOG_INFO("=== Initialization Complete ===");
 
+	// Log initial buffer memory breakdown
+	CollectAndLogBufferMemory();
+
 	return true;
 }
 
@@ -1434,6 +1437,103 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 	}
 }
 
+void HybridSplatRendererApp::CollectAndLogBufferMemory()
+{
+	m_memoryTracker.Clear();
+
+	// Scene buffers (all device-local except sortedIndices which is DynamicUpload for CPU sort)
+	if (m_scene)
+	{
+		const auto &gpuData = m_scene->GetGpuData();
+		m_memoryTracker.AddBuffer("positions", gpuData.positions, "Scene", MemoryType::DeviceLocal);
+		m_memoryTracker.AddBuffer("covariances3D", gpuData.covariances3D, "Scene", MemoryType::DeviceLocal);
+		m_memoryTracker.AddBuffer("colors", gpuData.colors, "Scene", MemoryType::DeviceLocal);
+		m_memoryTracker.AddBuffer("shRest", gpuData.shRest, "Scene", MemoryType::DeviceLocal);
+		m_memoryTracker.AddBuffer("sortedIndices (scene)", gpuData.sortedIndices, "Scene", MemoryType::HostVisible);
+	}
+
+	// App buffers
+	m_memoryTracker.AddBuffer("m_sortedIndices", m_sortedIndices, "App", MemoryType::DeviceLocal);
+	m_memoryTracker.AddBuffer("m_quadIndexBuffer", m_quadIndexBuffer, "App", MemoryType::DeviceLocal);
+	m_memoryTracker.AddBuffer("m_frameUboBuffer", m_frameUboBuffer, "App", MemoryType::HostVisible);
+
+	// GPU Sorter buffers (if GPU backend is active)
+	if (m_currentBackendType == BackendType::GPU && m_backend)
+	{
+		auto *gpuBackend = dynamic_cast<engine::GpuSplatSortBackend *>(m_backend.get());
+		if (gpuBackend && gpuBackend->GetSorter())
+		{
+			auto buffers = gpuBackend->GetSorterBufferInfo();
+			m_memoryTracker.AddBuffer("splatDepths", buffers.splatDepths, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("splatIndicesOriginal", buffers.splatIndicesOriginal, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("sortKeysA", buffers.sortKeysA, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("sortKeysB", buffers.sortKeysB, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("sortIndicesA", buffers.sortIndicesA, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("sortIndicesB", buffers.sortIndicesB, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("sortIndicesB_Alt", buffers.sortIndicesB_Alt, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("histograms", buffers.histograms, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("blockSums", buffers.blockSums, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("cameraUBO", buffers.cameraUBO, "Sorter", MemoryType::HostVisible);
+		}
+	}
+
+	// Swapchain images
+	if (m_deviceManager)
+	{
+		auto *swapchain = m_deviceManager->GetSwapchain();
+		if (swapchain)
+		{
+			uint32_t imageCount = swapchain->GetImageCount();
+			auto    *backBuffer = swapchain->GetBackBuffer(0);
+			if (backBuffer)
+			{
+				m_memoryTracker.AddTexture("Swapchain Images", backBuffer, "Textures", imageCount, MemoryType::DeviceLocal);
+			}
+		}
+	}
+
+	// CPU host memory
+	if (m_scene)
+	{
+		auto cpuMem = m_scene->GetCpuMemoryInfo();
+		m_memoryTracker.AddCpuMemory("SplatSoA data", cpuMem.splatDataBytes, "Scene");
+		m_memoryTracker.AddCpuMemory("splatPositions", cpuMem.splatPositionsBytes, "Scene");
+		m_memoryTracker.AddCpuMemory("lastSortedIndices", cpuMem.sortedIndicesBytes, "Scene");
+		m_memoryTracker.AddCpuMemory("CpuSplatSorter", cpuMem.cpuSorterBytes, "Sorter");
+	}
+
+	// Test verification positions (if populated)
+	if (!m_testSplatPositions.empty())
+	{
+		m_memoryTracker.AddCpuMemory("m_testSplatPositions",
+		                             m_testSplatPositions.capacity() * sizeof(math::vec3), "App");
+	}
+
+	// Shader bytecode cache
+	if (m_shaderFactory)
+	{
+		m_memoryTracker.AddCpuMemory("Shader bytecode cache",
+		                             m_shaderFactory->getBytecodeMemoryUsage(), "App");
+	}
+
+	// Get VMA-reported totals for gap analysis
+	if (m_deviceManager)
+	{
+		auto *device = m_deviceManager->GetDevice();
+		if (device)
+		{
+			auto vmaStats = device->GetMemoryStats();
+			m_memoryTracker.SetVmaStats(vmaStats.deviceLocalUsage, vmaStats.hostVisibleUsage);
+		}
+	}
+
+	// Get OS-reported CPU memory for gap analysis
+	auto cpuStats = profiling::GetProcessMemoryStats();
+	m_memoryTracker.SetCpuStats(cpuStats.workingSetBytes, cpuStats.privateBytes);
+
+	m_memoryTracker.LogMemoryReport();
+}
+
 void HybridSplatRendererApp::PerformCrossBackendVerification()
 {
 	if (m_currentBackendType != BackendType::GPU || !m_backend || !m_scene)
@@ -1734,6 +1834,8 @@ void HybridSplatRendererApp::RenderImGui()
 				m_profilingFrameIndex  = 0;
 				m_currentGpuTiming     = {};
 				m_profilingJustEnabled = true;        // Skip query writes for rest of this frame
+
+				CollectAndLogBufferMemory();
 			}
 			ImGui::Separator();
 

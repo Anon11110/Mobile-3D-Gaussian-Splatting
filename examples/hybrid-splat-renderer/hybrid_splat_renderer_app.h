@@ -19,6 +19,7 @@
 #else
 #	include <imgui_impl_glfw.h>
 #endif
+#include "buffer_memory_tracker.h"
 #include <msplat/engine/rendering/shader_factory.h>
 
 namespace rhi
@@ -243,6 +244,10 @@ class HybridSplatRendererApp : public app::IApplication
 	void BeginPipelineStatsQuery(rhi::IRHICommandList *cmdList);
 	void EndPipelineStatsQuery(rhi::IRHICommandList *cmdList);
 	void ReadGpuTimingResults();
+
+	// Buffer memory tracking
+	BufferMemoryTracker m_memoryTracker;
+	void                CollectAndLogBufferMemory();
 
 	void InitImGui();
 	void ShutdownImGui();

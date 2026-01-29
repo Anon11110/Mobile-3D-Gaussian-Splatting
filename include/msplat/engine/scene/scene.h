@@ -60,6 +60,16 @@ class Scene
 	uint32_t       GetTotalSplatCount() const;
 	bool           IsAttributeDataUploaded() const;
 
+	// CPU memory usage breakdown for profiling
+	struct CpuMemoryInfo
+	{
+		size_t splatDataBytes;             // SplatSoA data in meshes
+		size_t splatPositionsBytes;        // splatPositions vector
+		size_t sortedIndicesBytes;         // lastSortedIndices vector
+		size_t cpuSorterBytes;             // CpuSplatSorter buffers
+	};
+	CpuMemoryInfo GetCpuMemoryInfo() const;
+
 	// Backend integration helpers (for CpuSplatSortBackend)
 	bool                            IsCpuSortComplete() const;
 	container::span<const uint32_t> GetCpuSortedIndices();

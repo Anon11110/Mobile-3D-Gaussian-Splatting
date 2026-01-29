@@ -519,4 +519,34 @@ bool Scene::VerifyCpuSortOrder(const math::mat4 &viewMatrix) const
 	return allCorrect;
 }
 
+Scene::CpuMemoryInfo Scene::GetCpuMemoryInfo() const
+{
+	std::lock_guard<std::mutex> lock(meshesMutex);
+
+	CpuMemoryInfo info{};
+
+	// Sum up SplatSoA memory from all meshes
+	for (const auto &mesh : meshes)
+	{
+		if (mesh.HasCpuData())
+		{
+			info.splatDataBytes += mesh.GetSplatData()->GetCpuMemoryUsage();
+		}
+	}
+
+	// splatPositions vector
+	info.splatPositionsBytes = splatPositions.capacity() * sizeof(math::vec3);
+
+	// lastSortedIndices vector
+	info.sortedIndicesBytes = lastSortedIndices.capacity() * sizeof(uint32_t);
+
+	// CpuSplatSorter buffers
+	if (cpuSplatSorter)
+	{
+		info.cpuSorterBytes = cpuSplatSorter->GetMemoryUsage();
+	}
+
+	return info;
+}
+
 }        // namespace msplat::engine

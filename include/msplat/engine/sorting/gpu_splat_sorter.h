@@ -88,6 +88,23 @@ class GpuSplatSorter
 	// Simple verification: Only checks if final sorted keys are in ascending order
 	bool VerifySortOrder();
 
+	// Buffer information for memory tracking
+	struct BufferInfo
+	{
+		rhi::BufferHandle splatDepths;
+		rhi::BufferHandle splatIndicesOriginal;
+		rhi::BufferHandle sortKeysA;
+		rhi::BufferHandle sortKeysB;
+		rhi::BufferHandle sortIndicesA;
+		rhi::BufferHandle sortIndicesB;
+		rhi::BufferHandle sortIndicesB_Alt;
+		rhi::BufferHandle histograms;
+		rhi::BufferHandle blockSums;
+		rhi::BufferHandle cameraUBO;
+	};
+
+	BufferInfo GetBufferInfo() const;
+
 	// GPU Timing
 	double GetLastSortTimeMs() const
 	{

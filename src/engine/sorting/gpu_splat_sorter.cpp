@@ -1087,6 +1087,13 @@ rhi::BufferHandle GpuSplatSorter::GetAlternateOutputBuffer() const
 	return sortIndicesB_Alt;
 }
 
+GpuSplatSorter::BufferInfo GpuSplatSorter::GetBufferInfo() const
+{
+	return {splatDepths, splatIndicesOriginal, sortKeysA, sortKeysB,
+	        sortIndicesA, sortIndicesB, sortIndicesB_Alt, histograms,
+	        blockSums, cameraUBO};
+}
+
 void GpuSplatSorter::SetOutputBuffer(rhi::BufferHandle outputBuffer)
 {
 	// With double-buffered descriptor sets, we just switch activeOutputBufferIndex

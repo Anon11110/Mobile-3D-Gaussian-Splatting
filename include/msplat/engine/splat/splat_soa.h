@@ -143,6 +143,41 @@ struct SplatSoA
 	{
 		return numSplats == 0;
 	}
+
+	// Returns the total CPU memory used by all vectors in bytes
+	size_t GetCpuMemoryUsage() const noexcept
+	{
+		size_t total = 0;
+		// Position: 3 vectors
+		total += posX.capacity() * sizeof(float);
+		total += posY.capacity() * sizeof(float);
+		total += posZ.capacity() * sizeof(float);
+		// Scale: 3 vectors
+		total += scaleX.capacity() * sizeof(float);
+		total += scaleY.capacity() * sizeof(float);
+		total += scaleZ.capacity() * sizeof(float);
+		// Rotation: 4 vectors
+		total += rotX.capacity() * sizeof(float);
+		total += rotY.capacity() * sizeof(float);
+		total += rotZ.capacity() * sizeof(float);
+		total += rotW.capacity() * sizeof(float);
+		// Covariance: 6 vectors
+		total += cov3D_M11.capacity() * sizeof(float);
+		total += cov3D_M12.capacity() * sizeof(float);
+		total += cov3D_M13.capacity() * sizeof(float);
+		total += cov3D_M22.capacity() * sizeof(float);
+		total += cov3D_M23.capacity() * sizeof(float);
+		total += cov3D_M33.capacity() * sizeof(float);
+		// Opacity: 1 vector
+		total += opacity.capacity() * sizeof(float);
+		// DC coefficients: 3 vectors
+		total += fDc0.capacity() * sizeof(float);
+		total += fDc1.capacity() * sizeof(float);
+		total += fDc2.capacity() * sizeof(float);
+		// SH Rest coefficients
+		total += fRest.capacity() * sizeof(float);
+		return total;
+	}
 };
 
 }        // namespace msplat::engine

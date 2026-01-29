@@ -103,6 +103,20 @@ class ShaderFactory
 	 */
 	[[nodiscard]] size_t getShaderCacheSize() const;
 
+	/**
+	 * @brief Gets the total memory used by cached bytecode.
+	 * @return The total bytes used by all cached shader bytecode
+	 */
+	[[nodiscard]] size_t getBytecodeMemoryUsage() const
+	{
+		size_t total = 0;
+		for (const auto &[key, bytecode] : m_bytecodeCache)
+		{
+			total += bytecode.capacity();
+		}
+		return total;
+	}
+
   private:
 	/**
 	 * @brief Loads shader bytecode from file system.
