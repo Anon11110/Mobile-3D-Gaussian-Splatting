@@ -985,8 +985,8 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		std::vector<VkPhysicalDevice> devices(deviceCount);
 		vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
-		// Pick first suitable device (can be improved)
-		physicalDevice = devices[0];
+		// Pick last suitable device (first is usually the integrated GPU)
+		physicalDevice = devices[devices.size() - 1];
 
 		// Query device properties for timestamp period
 		VkPhysicalDeviceProperties deviceProperties;

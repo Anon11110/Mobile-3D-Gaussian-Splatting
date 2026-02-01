@@ -558,9 +558,15 @@ def print_success_instructions(args, source_dir: Path, build_dir: Path) -> None:
         print(f"  cmake --build {abs_build_dir} --config {args.build_type} --parallel")
         generator_lower = (generator_info.name or "").lower()
         if "visual studio" in generator_lower or platform.system().lower() == "windows":
+            # VS 2026+ uses .slnx format, earlier versions use .sln
+            slnx_path = build_dir / f"{project_name}.slnx"
             sln_path = build_dir / f"{project_name}.sln"
-            term.info(f"Or open the generated .sln in Visual Studio:")
-            print(f'  start "{sln_path}"')
+            if slnx_path.exists():
+                term.info("Or open the generated .slnx in Visual Studio:")
+                print(f'  start "{slnx_path}"')
+            elif sln_path.exists():
+                term.info("Or open the generated .sln in Visual Studio:")
+                print(f'  start "{sln_path}"')
         if "xcode" in generator_lower or platform.system().lower() == "darwin":
             xcodeproj_path = build_dir / f"{project_name}.xcodeproj"
             term.info(f"Or open the generated .xcodeproj in Xcode:")

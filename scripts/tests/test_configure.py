@@ -6,6 +6,7 @@ Unit tests for configure.py refactored functions.
 import unittest
 import tempfile
 import argparse
+import os
 import sys
 import subprocess
 import re
@@ -16,8 +17,8 @@ from unittest.mock import patch, MagicMock, mock_open
 sys.path.append(str(Path(__file__).parent.parent))
 
 from utils.terminal import term
-from platforms.windows import WindowsConfig
-from platforms.macos import MacOSConfig  
+from platforms.windows import WindowsConfig, detect_visual_studio_installations
+from platforms.macos import MacOSConfig
 from platforms.linux import LinuxConfig
 from utils.configure.types import (
     # Error handling and Result types
@@ -67,17 +68,258 @@ class TestBuildTypeEnum(unittest.TestCase):
         self.assertIn(BuildType.RELEASE, BuildType)
 
 
+class TestVisualStudioDetection(unittest.TestCase):
+    """Test Visual Studio detection functionality."""
+
+    def test_detect_visual_studio_no_vswhere(self):
+        """Test detection when vswhere.exe doesn't exist."""
+        with patch.dict(os.environ, {"ProgramFiles(x86)": "/nonexistent/path"}):
+            installations = detect_visual_studio_installations()
+            self.assertEqual(installations, [])
+
+    def test_detect_visual_studio_empty_program_files(self):
+        """Test detection when ProgramFiles(x86) is empty string."""
+        with patch.dict(os.environ, {"ProgramFiles(x86)": ""}):
+            installations = detect_visual_studio_installations()
+            self.assertEqual(installations, [])
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_detect_visual_studio_single_installation(self, mock_exists, mock_run):
+        """Test detection of a single VS installation."""
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = '[{"installationVersion": "17.9.34728.136"}]'
+        mock_run.return_value = mock_result
+
+        with patch.dict(
+            os.environ, {"ProgramFiles(x86)": "C:\\Program Files (x86)"}
+        ):
+            installations = detect_visual_studio_installations()
+
+        self.assertEqual(installations, [(17, 2022)])
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_detect_visual_studio_multiple_installations(self, mock_exists, mock_run):
+        """Test detection of multiple VS installations."""
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[
+            {"installationVersion": "17.9.34728.136"},
+            {"installationVersion": "18.0.12345.0"}
+        ]"""
+        mock_run.return_value = mock_result
+
+        with patch.dict(
+            os.environ, {"ProgramFiles(x86)": "C:\\Program Files (x86)"}
+        ):
+            installations = detect_visual_studio_installations()
+
+        # Should be sorted descending by major version
+        self.assertEqual(installations, [(18, 2026), (17, 2022)])
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_detect_visual_studio_filters_old_versions(self, mock_exists, mock_run):
+        """Test that VS versions below 2022 (major < 17) are filtered out."""
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[
+            {"installationVersion": "16.11.12345.0"},
+            {"installationVersion": "17.9.34728.136"},
+            {"installationVersion": "15.9.12345.0"}
+        ]"""
+        mock_run.return_value = mock_result
+
+        with patch.dict(
+            os.environ, {"ProgramFiles(x86)": "C:\\Program Files (x86)"}
+        ):
+            installations = detect_visual_studio_installations()
+
+        # Only VS 17 (2022) should be included
+        self.assertEqual(installations, [(17, 2022)])
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_detect_visual_studio_deduplicates_same_major(self, mock_exists, mock_run):
+        """Test that multiple installations of the same major version are deduplicated."""
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[
+            {"installationVersion": "17.9.34728.136"},
+            {"installationVersion": "17.8.12345.0"},
+            {"installationVersion": "17.7.54321.0"}
+        ]"""
+        mock_run.return_value = mock_result
+
+        with patch.dict(
+            os.environ, {"ProgramFiles(x86)": "C:\\Program Files (x86)"}
+        ):
+            installations = detect_visual_studio_installations()
+
+        # Should only have one entry for major version 17
+        self.assertEqual(installations, [(17, 2022)])
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_detect_visual_studio_extrapolates_future_versions(
+        self, mock_exists, mock_run
+    ):
+        """Test that unknown future VS versions are extrapolated correctly."""
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        # VS 19 would be the version after VS 18 (2026)
+        mock_result.stdout = '[{"installationVersion": "19.0.12345.0"}]'
+        mock_run.return_value = mock_result
+
+        with patch.dict(
+            os.environ, {"ProgramFiles(x86)": "C:\\Program Files (x86)"}
+        ):
+            installations = detect_visual_studio_installations()
+
+        # VS 19 should extrapolate to 2030 (2022 + (19-17)*4)
+        self.assertEqual(installations, [(19, 2030)])
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_detect_visual_studio_handles_vswhere_failure(self, mock_exists, mock_run):
+        """Test handling of vswhere.exe failure."""
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_run.return_value = mock_result
+
+        with patch.dict(
+            os.environ, {"ProgramFiles(x86)": "C:\\Program Files (x86)"}
+        ):
+            installations = detect_visual_studio_installations()
+
+        self.assertEqual(installations, [])
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_detect_visual_studio_handles_invalid_json(self, mock_exists, mock_run):
+        """Test handling of invalid JSON from vswhere."""
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "not valid json"
+        mock_run.return_value = mock_result
+
+        with patch.dict(
+            os.environ, {"ProgramFiles(x86)": "C:\\Program Files (x86)"}
+        ):
+            installations = detect_visual_studio_installations()
+
+        self.assertEqual(installations, [])
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_detect_visual_studio_handles_timeout(self, mock_exists, mock_run):
+        """Test handling of vswhere.exe timeout."""
+        mock_exists.return_value = True
+        mock_run.side_effect = subprocess.TimeoutExpired("vswhere", 10)
+
+        with patch.dict(
+            os.environ, {"ProgramFiles(x86)": "C:\\Program Files (x86)"}
+        ):
+            installations = detect_visual_studio_installations()
+
+        self.assertEqual(installations, [])
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_detect_visual_studio_handles_missing_version(self, mock_exists, mock_run):
+        """Test handling of installations with missing version info."""
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[
+            {"displayName": "Visual Studio 2022"},
+            {"installationVersion": "17.9.34728.136"}
+        ]"""
+        mock_run.return_value = mock_result
+
+        with patch.dict(
+            os.environ, {"ProgramFiles(x86)": "C:\\Program Files (x86)"}
+        ):
+            installations = detect_visual_studio_installations()
+
+        # Should only include the one with valid version
+        self.assertEqual(installations, [(17, 2022)])
+
+
 class TestPlatformGenerators(unittest.TestCase):
     """Test platform-specific generator functionality."""
 
-    def test_windows_generators(self):
-        """Test Windows platform generator configuration."""
+    @patch("platforms.windows.detect_visual_studio_installations")
+    def test_windows_generators_with_detection(self, mock_detect):
+        """Test Windows platform generator configuration with VS detection."""
+        mock_detect.return_value = [(17, 2022)]
+
         config = WindowsConfig()
         self.assertEqual(config.get_default_generator(), "Visual Studio 17 2022")
         supported = config.get_supported_generators()
         self.assertIn("Visual Studio 17 2022", supported)
         self.assertIn("Ninja", supported)
-        self.assertEqual(len(supported), 2)
+
+    @patch("platforms.windows.detect_visual_studio_installations")
+    def test_windows_generators_vs2026_detected(self, mock_detect):
+        """Test Windows platform with VS 2026 as newest installation."""
+        mock_detect.return_value = [(18, 2026), (17, 2022)]
+
+        config = WindowsConfig()
+        self.assertEqual(config.get_default_generator(), "Visual Studio 18 2026")
+        supported = config.get_supported_generators()
+        self.assertIn("Visual Studio 18 2026", supported)
+        self.assertIn("Visual Studio 17 2022", supported)
+        self.assertIn("Ninja", supported)
+
+    @patch("platforms.windows.detect_visual_studio_installations")
+    def test_windows_generators_fallback_when_detection_fails(self, mock_detect):
+        """Test Windows platform falls back to VS 2022 when detection fails."""
+        mock_detect.return_value = []
+
+        config = WindowsConfig()
+        self.assertEqual(config.get_default_generator(), "Visual Studio 17 2022")
+        supported = config.get_supported_generators()
+        self.assertIn("Visual Studio 17 2022", supported)
+        self.assertIn("Ninja", supported)
+
+    @patch("platforms.windows.detect_visual_studio_installations")
+    def test_windows_generators_always_includes_vs2022(self, mock_detect):
+        """Test that VS 2022 is always included even if not detected."""
+        # Only VS 2026 detected, but VS 2022 should still be in supported list
+        mock_detect.return_value = [(18, 2026)]
+
+        config = WindowsConfig()
+        supported = config.get_supported_generators()
+        self.assertIn("Visual Studio 17 2022", supported)
+        self.assertIn("Visual Studio 18 2026", supported)
+
+    def test_windows_generators_no_mocking(self):
+        """Test Windows platform generator without mocking (actual detection)."""
+        config = WindowsConfig()
+        default = config.get_default_generator()
+        supported = config.get_supported_generators()
+
+        # Default should be a Visual Studio generator or the fallback
+        self.assertTrue(
+            default.startswith("Visual Studio") or default == "Visual Studio 17 2022"
+        )
+
+        # Ninja should always be supported
+        self.assertIn("Ninja", supported)
+
+        # VS 2022 should always be in supported list
+        self.assertIn("Visual Studio 17 2022", supported)
 
     def test_macos_generators(self):
         """Test macOS platform generator configuration."""
@@ -98,8 +340,11 @@ class TestPlatformGenerators(unittest.TestCase):
         self.assertIn("Ninja", supported)
         self.assertEqual(len(supported), 2)
 
-    def test_generator_validation(self):
+    @patch("platforms.windows.detect_visual_studio_installations")
+    def test_generator_validation(self, mock_detect):
         """Test generator validation across platforms."""
+        mock_detect.return_value = [(17, 2022)]
+
         windows_config = WindowsConfig()
         self.assertTrue(windows_config.validate_generator("Visual Studio 17 2022"))
         self.assertTrue(windows_config.validate_generator("Ninja"))
