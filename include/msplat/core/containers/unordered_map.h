@@ -1,6 +1,6 @@
 #pragma once
 
-#if !defined(__ANDROID__)
+#ifdef MSPLAT_HAS_STD_PMR
 #	include <memory_resource>
 #endif
 #include <unordered_map>

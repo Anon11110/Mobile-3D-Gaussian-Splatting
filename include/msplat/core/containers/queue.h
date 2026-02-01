@@ -1,7 +1,7 @@
 #pragma once
 
 #include <deque>
-#if !defined(__ANDROID__)
+#ifdef MSPLAT_HAS_STD_PMR
 #	include <memory_resource>
 #endif
 #include <msplat/core/containers/memory.h>

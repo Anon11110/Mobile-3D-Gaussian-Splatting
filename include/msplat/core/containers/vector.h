@@ -6,7 +6,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <memory>
-#if !defined(__ANDROID__)
+#ifdef MSPLAT_HAS_STD_PMR
 #	include <memory_resource>
 #endif
 #include <type_traits>

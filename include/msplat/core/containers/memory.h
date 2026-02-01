@@ -5,7 +5,7 @@
 #include <memory>
 
 #include <bit>
-#if !defined(__ANDROID__)
+#ifdef MSPLAT_HAS_STD_PMR
 #	include <memory_resource>
 #	include <mimalloc.h>
 #endif
@@ -16,8 +16,10 @@
 namespace msplat::container
 {
 
-// Fallback bit_cast implementation for Android NDK
-#if defined(__ANDROID__)
+// Use std::bit_cast if available, else provide fallback
+#if defined(__cpp_lib_bit_cast) && __cpp_lib_bit_cast >= 201806L
+using std::bit_cast;
+#else
 template <typename To, typename From>
 inline To bit_cast(const From &src) noexcept
 {
@@ -28,8 +30,12 @@ inline To bit_cast(const From &src) noexcept
 	std::memcpy(&dst, &src, sizeof(To));
 	return dst;
 }
+#endif
 
-// Fallback reinterpret_pointer_cast for Android NDK
+// Use std::reinterpret_pointer_cast if available, else provide fallback
+#if __cplusplus >= 201703L && defined(__cpp_lib_shared_ptr_arrays) && __cpp_lib_shared_ptr_arrays >= 201611L
+using std::reinterpret_pointer_cast;
+#else
 template <typename T, typename U>
 std::shared_ptr<T> reinterpret_pointer_cast(const std::shared_ptr<U> &ptr) noexcept
 {
@@ -38,11 +44,6 @@ std::shared_ptr<T> reinterpret_pointer_cast(const std::shared_ptr<U> &ptr) noexc
 }
 #endif
 
-#ifdef MSPLAT_USE_STD_CONTAINERS
-// Memory utilities
-#	if !defined(__ANDROID__)
-using std::bit_cast;
-#	endif
 using std::span;
 
 // Smart pointers
@@ -51,9 +52,6 @@ using std::dynamic_pointer_cast;
 using std::enable_shared_from_this;
 using std::make_shared;
 using std::make_unique;
-#	if !defined(__ANDROID__)
-using std::reinterpret_pointer_cast;
-#	endif
 using std::shared_ptr;
 using std::static_pointer_cast;
 using std::unique_ptr;
@@ -62,40 +60,10 @@ using std::weak_ptr;
 // Utility types
 using std::aligned_storage_t;
 using std::make_pair;
-
-#else
-
-// Always use STL for now
-
-#	if !defined(__ANDROID__)
-using std::bit_cast;
-#	endif
-using std::span;
-
-// Smart pointers
-using std::const_pointer_cast;
-using std::dynamic_pointer_cast;
-using std::enable_shared_from_this;
-using std::make_shared;
-using std::make_unique;
-#	if !defined(__ANDROID__)
-using std::reinterpret_pointer_cast;
-#	endif
-using std::shared_ptr;
-using std::static_pointer_cast;
-using std::unique_ptr;
-using std::weak_ptr;
-
-// Utility types
-using std::aligned_storage_t;
-using std::make_pair;
-
-#endif
 
 }        // namespace msplat::container
 
-// std::pmr is not available on Android NDK
-#if !defined(__ANDROID__)
+#ifdef MSPLAT_HAS_STD_PMR
 namespace msplat::container::pmr
 {
 
@@ -139,4 +107,4 @@ inline std::pmr::memory_resource *GetUpstreamAllocator()
 }
 
 }        // namespace msplat::container::pmr
-#endif        // !defined(__ANDROID__)
+#endif        // MSPLAT_HAS_STD_PMR

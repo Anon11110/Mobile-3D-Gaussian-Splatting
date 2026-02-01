@@ -236,7 +236,7 @@ container::unique_ptr<IBlob> NativeFileSystem::readFile(const std::filesystem::p
 
 	// Allocate buffer for entire file
 	size_t fileSize = stream->length();
-#if defined(MSPLAT_USE_STD_CONTAINERS) || defined(__ANDROID__)
+#ifdef MSPLAT_USE_STD_CONTAINERS
 	container::vector<std::byte> buffer;
 #else
 	container::vector<std::byte> buffer(container::pmr::GetUpstreamAllocator());
@@ -333,7 +333,7 @@ void NativeFileSystem::enumerateDirectories(const std::filesystem::path &path, e
 //=========================================================================
 
 RootFileSystem::RootFileSystem()
-#if !defined(MSPLAT_USE_STD_CONTAINERS) && !defined(__ANDROID__)
+#ifndef MSPLAT_USE_STD_CONTAINERS
     :
     m_mountPoints(container::pmr::GetUpstreamAllocator())
 #endif
@@ -351,7 +351,7 @@ void RootFileSystem::mount(const std::filesystem::path &path, std::shared_ptr<IF
 	container::string pathStr = container::to_string(path);
 
 	// Remove existing mount at this path if any
-#if defined(MSPLAT_USE_STD_CONTAINERS) || defined(__ANDROID__)
+#ifdef MSPLAT_USE_STD_CONTAINERS
 	container::vector<std::pair<container::string, container::shared_ptr<IFileSystem>>> newMounts;
 #else
 	container::vector<std::pair<container::string, container::shared_ptr<IFileSystem>>> newMounts(container::pmr::GetUpstreamAllocator());
@@ -366,7 +366,7 @@ void RootFileSystem::mount(const std::filesystem::path &path, std::shared_ptr<IF
 	m_mountPoints = std::move(newMounts);
 
 	// Add new mount point
-#if defined(MSPLAT_USE_STD_CONTAINERS) || defined(__ANDROID__)
+#ifdef MSPLAT_USE_STD_CONTAINERS
 	m_mountPoints.emplace_back(container::string(pathStr), fs);
 #else
 	m_mountPoints.emplace_back(container::string(pathStr, container::pmr::GetUpstreamAllocator()), fs);
@@ -384,7 +384,7 @@ bool RootFileSystem::unmount(const std::filesystem::path &path)
 	container::string pathStr = container::to_string(path);
 
 	size_t originalSize = m_mountPoints.size();
-#if defined(MSPLAT_USE_STD_CONTAINERS) || defined(__ANDROID__)
+#ifdef MSPLAT_USE_STD_CONTAINERS
 	container::vector<std::pair<container::string, container::shared_ptr<IFileSystem>>> newMounts;
 #else
 	container::vector<std::pair<container::string, container::shared_ptr<IFileSystem>>> newMounts(container::pmr::GetUpstreamAllocator());

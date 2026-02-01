@@ -107,9 +107,40 @@ target_compile_definitions(core PRIVATE
     MI_BUILD_SHARED=OFF
 )
 
-# Container selection: use system STL if option is enabled
+# std::pmr Detection
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_FLAGS "${CMAKE_CXX_FLAGS}")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(CMAKE_REQUIRED_FLAGS "-std=c++20")
+endif()
+
+check_cxx_source_compiles("
+    #include <memory_resource>
+    int main() {
+        std::pmr::memory_resource* mr = std::pmr::get_default_resource();
+        (void)mr;
+        return 0;
+    }
+" MSPLAT_HAS_STD_PMR)
+
 if(MSPLAT_USE_STD_CONTAINERS)
+    # Explicitly requested std containers
     target_compile_definitions(core PUBLIC MSPLAT_USE_STD_CONTAINERS)
+    message(STATUS "Container mode: std containers (explicitly requested)")
+elseif(MSPLAT_HAS_STD_PMR)
+    # std::pmr available, use custom pmr containers
+    target_compile_definitions(core PUBLIC MSPLAT_HAS_STD_PMR=1)
+    message(STATUS "Container mode: pmr containers")
+else()
+    # std::pmr not available, fall back to std containers
+    target_compile_definitions(core PUBLIC MSPLAT_USE_STD_CONTAINERS)
+    # Windows static linking doesn't support malloc override, requires DLL mode
+    if(NOT WIN32)
+        target_compile_definitions(core PRIVATE MI_OVERRIDE MI_MALLOC_OVERRIDE)
+        message(STATUS "Container mode: std containers with mimalloc override (std::pmr not available)")
+    else()
+        message(STATUS "Container mode: std containers (std::pmr not available, Windows no override)")
+    endif()
 endif()
 
 # ============================================================================

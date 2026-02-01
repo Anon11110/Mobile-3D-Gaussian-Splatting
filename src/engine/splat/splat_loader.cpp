@@ -35,7 +35,7 @@ class SplatLoader::Impl
 {
   private:
 	container::queue<LoadTask> taskQueue;
-#if !defined(MSPLAT_USE_STD_CONTAINERS) && !defined(__ANDROID__)
+#ifndef MSPLAT_USE_STD_CONTAINERS
 	std::pmr::memory_resource *memoryResource;
 #endif
 
@@ -128,7 +128,7 @@ class SplatLoader::Impl
 			shCoeffsPerSplat = 0;
 		}
 
-#if defined(MSPLAT_USE_STD_CONTAINERS) || defined(__ANDROID__)
+#ifdef MSPLAT_USE_STD_CONTAINERS
 		auto data = std::make_shared<SplatSoA>();
 #else
 		auto data = std::make_shared<SplatSoA>(memoryResource);
@@ -246,7 +246,7 @@ class SplatLoader::Impl
 	}
 
   public:
-#if defined(MSPLAT_USE_STD_CONTAINERS) || defined(__ANDROID__)
+#ifdef MSPLAT_USE_STD_CONTAINERS
 	explicit Impl()
 	{
 		// Start worker thread after all members are initialized
