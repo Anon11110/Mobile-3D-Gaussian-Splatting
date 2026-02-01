@@ -41,9 +41,6 @@ set(CORE_HEADERS
     ${MSPLAT_ROOT}/include/msplat/core/containers/unordered_set.h
     ${MSPLAT_ROOT}/include/msplat/core/containers/vector.h
 
-    # Memory headers
-    ${MSPLAT_ROOT}/include/msplat/core/memory/frame_arena.h
-
     # Profiling headers
     ${MSPLAT_ROOT}/include/msplat/core/profiling/memory_profiler.h
 )

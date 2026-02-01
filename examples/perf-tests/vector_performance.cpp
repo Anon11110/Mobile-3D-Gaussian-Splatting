@@ -2,7 +2,6 @@
 #include <msplat/core/containers/memory.h>
 #include <msplat/core/containers/vector.h>
 #include <msplat/core/log.h>
-#include <msplat/core/memory/frame_arena.h>
 #include <msplat/core/timer.h>
 #include <vector>
 
@@ -59,29 +58,6 @@ int vector_performance_main()
 		         ratio, perf::performance_string(perf), perf::performance_symbol(perf));
 	}
 
-	// PMR Allocator Integration
-	perf::log_section_header("PMR Allocator Integration");
-	LOG_INFO("    ├─ Test size: {:,} | Iterations: {}", TEST_SIZE, ITERATIONS);
-	{
-		msplat::container::pmr::FrameArena frameArena;
-
-		Timer timer;
-		timer.start();
-
-		for (int i = 0; i < ITERATIONS; ++i)
-		{
-			frameArena.BeginFrame();
-			msplat::container::vector<int> vec(frameArena.Resource());
-
-			for (size_t j = 0; j < TEST_SIZE; ++j)
-			{
-				vec.push_back(static_cast<int>(j));
-			}
-		}
-
-		timer.stop();
-		LOG_INFO("    └─ FrameArena: {:.3f} ms/iteration", timer.elapsedMilliseconds() / ITERATIONS);
-	}
 #endif
 
 	perf::log_test_summary("Vector Performance", true);

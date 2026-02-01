@@ -80,7 +80,7 @@ class UpstreamAllocator : public std::pmr::memory_resource
 		if (alignment < alignof(void *))
 			alignment = alignof(void *);
 		void *p = mi_malloc_aligned(bytes == 0 ? 1 : bytes, alignment);
-		if (!p)
+		if (!p) [[unlikely]]
 			throw std::bad_alloc{};
 		return p;
 	}
@@ -92,8 +92,7 @@ class UpstreamAllocator : public std::pmr::memory_resource
 
 	bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override
 	{
-		// All UpstreamAllocators are considered equal as it's a singleton.
-		return dynamic_cast<const UpstreamAllocator *>(&other) != nullptr;
+		return this == &other;
 	}
 };
 

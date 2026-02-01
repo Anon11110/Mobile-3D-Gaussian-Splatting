@@ -31,7 +31,6 @@ inline auto make_unordered_map()
 #else
 #	include "hash.h"
 #	include "memory.h"
-#	include <msplat/core/memory/frame_arena.h>
 #	include "third-party/unordered_dense/unordered_dense.h"
 
 namespace msplat::container
@@ -65,16 +64,6 @@ inline auto make_unordered_map(std::pmr::memory_resource *resource = nullptr)
 	auto *allocator = resource ? resource : pmr::GetUpstreamAllocator();
 	return unordered_map<K, V, Hash>{
 	    std::pmr::polymorphic_allocator<std::pair<K, V>>{allocator}};
-}
-
-// Factory function for creating an unordered_map with frame arena allocation
-// Useful for temporary/per-frame data that doesn't need to persist
-template <typename K, typename V, typename Hash = msplat::container::hash<K>>
-inline auto make_frame_unordered_map(pmr::FrameArena &arena)
-    -> unordered_map<K, V, Hash>
-{
-	return unordered_map<K, V, Hash>{
-	    std::pmr::polymorphic_allocator<std::pair<K, V>>{arena.Resource()}};
 }
 
 }        // namespace msplat::container

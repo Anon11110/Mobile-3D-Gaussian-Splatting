@@ -2,7 +2,6 @@
 #include <msplat/core/containers/memory.h>
 #include <msplat/core/containers/vector.h>
 #include <msplat/core/log.h>
-#include <msplat/core/memory/frame_arena.h>
 
 // Test types
 struct NonTrivialType
@@ -383,19 +382,6 @@ TEST(vector_destructor_calls)
 
 	// All objects should be destroyed
 	return NonTrivialType::construct_count == NonTrivialType::destruct_count;
-}
-
-TEST(vector_with_frame_arena)
-{
-	msplat::container::pmr::FrameArena frameArena;
-	msplat::container::vector<int>     vec(frameArena.Resource());
-
-	for (int i = 0; i < 10; ++i)
-	{
-		vec.push_back(i);
-	}
-
-	return vec.size() == 10 && vec[9] == 9;
 }
 
 #endif        // !MSPLAT_USE_STD_CONTAINERS
