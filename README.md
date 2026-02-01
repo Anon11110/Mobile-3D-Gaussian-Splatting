@@ -214,9 +214,11 @@ open build/Mobile-3D-Gaussian-Splatting.xcodeproj
 
 ### Dependencies
 
-- **Android SDK** r25 or later
+- **Android NDK** r27 or later
   - Install via [Android Studio](https://developer.android.com/studio) or command line tools
-  - Specify path via `--sdk-path` argument, or set `ANDROID_HOME`/`ANDROID_SDK_ROOT` environment variable
+  - NDK can be installed via SDK Manager: `sdkmanager 'ndk;27.0.12077973'`
+  - Specify SDK path via `--sdk-path` argument, or set `ANDROID_HOME`/`ANDROID_SDK_ROOT` environment variable
+  - The build system automatically selects the newest installed NDK >= r27
 
 - **JDK** 17 or later
   - Specify path via `--jdk-path` argument, or set `JAVA_HOME` environment variable

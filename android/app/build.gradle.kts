@@ -2,9 +2,31 @@ plugins {
     id("com.android.application")
 }
 
+// Find the newest NDK >= r27 (version 27.x.x)
+fun findNewestNdk(minMajorVersion: Int = 27): String? {
+    val sdkDir = System.getenv("ANDROID_HOME")
+        ?: System.getenv("ANDROID_SDK_ROOT")
+        ?: return null
+    val ndkDir = File(sdkDir, "ndk")
+    if (!ndkDir.exists()) return null
+
+    return ndkDir.listFiles()
+        ?.filter { it.isDirectory }
+        ?.mapNotNull { dir ->
+            val parts = dir.name.split(".")
+            val major = parts.getOrNull(0)?.toIntOrNull()
+            if (major != null && major >= minMajorVersion) {
+                major to dir.name
+            } else null
+        }
+        ?.maxByOrNull { it.first }
+        ?.second
+}
+
 android {
     namespace = "com.msplat.gaussiansplatting"
     compileSdk = 34
+    ndkVersion = findNewestNdk(27) ?: "27.0.0"
 
     defaultConfig {
         applicationId = "com.msplat.gaussiansplatting"
