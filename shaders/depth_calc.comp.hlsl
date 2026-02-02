@@ -10,6 +10,12 @@
     float4x4 viewMatrix;
 };
 
+// Binding 3: Per-splat mesh indices for model matrix lookup
+[[vk::binding(3, 0)]] StructuredBuffer<uint> meshIndices;
+
+// Binding 4: Per-mesh model matrices
+[[vk::binding(4, 0)]] StructuredBuffer<float4x4> modelMatrices;
+
 struct PushConstants
 {
     uint numElements;
@@ -33,8 +39,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (splatID >= pc.numElements)
         return;
 
-    float3 worldPos = positions[splatID];
-    float4 viewPos = mul(viewMatrix, float4(worldPos, 1.0));
+    // Get local position and transform to world space
+    float3 localPos = positions[splatID];
+    uint meshIdx = meshIndices[splatID];
+    float4x4 modelMat = modelMatrices[meshIdx];
+    float4 worldPos4 = mul(modelMat, float4(localPos, 1.0));
+
+    float4 viewPos = mul(viewMatrix, worldPos4);
 
     // RH camera with -Z forward: farther -> larger depth value
     float depth = -viewPos.z;

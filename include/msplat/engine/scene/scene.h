@@ -32,6 +32,11 @@ class Scene
 		rhi::BufferHandle colors;               // vec4 colors[]
 		rhi::BufferHandle shRest;               // float shRest[]
 
+		// Per-splat mesh index for model matrix lookup
+		rhi::BufferHandle meshIndices;        // uint32 meshIndex[]
+		// Per-mesh model matrices for transform in shader
+		rhi::BufferHandle modelMatrices;        // mat4 modelMatrices[]
+
 		// Sorted indices for rendering
 		rhi::BufferHandle sortedIndices;
 	};
@@ -85,6 +90,12 @@ class Scene
 
 	// Get the GPU range for a specific mesh
 	const MeshGpuRange *GetMeshGpuRange(SplatMesh::ID id) const;
+
+	// Update a mesh's model matrix and upload to GPU
+	bool UpdateMeshTransform(SplatMesh::ID id, const math::mat4 &newTransform);
+
+	// Get the total number of meshes
+	size_t GetMeshCount() const;
 
 	// CPU memory usage breakdown for profiling
 	struct CpuMemoryInfo

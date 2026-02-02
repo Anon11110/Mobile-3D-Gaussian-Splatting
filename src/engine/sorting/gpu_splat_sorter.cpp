@@ -191,6 +191,18 @@ void GpuSplatSorter::CreateComputePipelines()
 		                               1,
 		                               rhi::ShaderStageFlags::COMPUTE});
 
+		// Binding 3: Per-splat mesh indices
+		layoutDesc.bindings.push_back({3,
+		                               rhi::DescriptorType::STORAGE_BUFFER,
+		                               1,
+		                               rhi::ShaderStageFlags::COMPUTE});
+
+		// Binding 4: Per-mesh model matrices
+		layoutDesc.bindings.push_back({4,
+		                               rhi::DescriptorType::STORAGE_BUFFER,
+		                               1,
+		                               rhi::ShaderStageFlags::COMPUTE});
+
 		depthCalcSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 	}
 
@@ -724,6 +736,24 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 		positionsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
 		depthCalcDescriptorSet->BindBuffer(0, positionsBinding);
 		lastBoundPositionsBuffer = positionsBuffer;
+
+		// Binding 3: Per-splat mesh indices
+		if (gpuData.meshIndices)
+		{
+			rhi::BufferBinding meshIndicesBinding = {};
+			meshIndicesBinding.buffer             = gpuData.meshIndices.Get();
+			meshIndicesBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			depthCalcDescriptorSet->BindBuffer(3, meshIndicesBinding);
+		}
+
+		// Binding 4: Per-mesh model matrices
+		if (gpuData.modelMatrices)
+		{
+			rhi::BufferBinding modelMatricesBinding = {};
+			modelMatricesBinding.buffer             = gpuData.modelMatrices.Get();
+			modelMatricesBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			depthCalcDescriptorSet->BindBuffer(4, modelMatricesBinding);
+		}
 	}
 
 	RecordDepthCalculation(cmdList, scene, camera);

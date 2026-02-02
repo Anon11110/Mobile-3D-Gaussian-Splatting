@@ -4,6 +4,7 @@
 #include "app/camera.h"
 #include "core/containers/memory.h"
 #include "core/containers/string.h"
+#include "core/containers/unordered_map.h"
 #include "core/containers/vector.h"
 #include "core/math/math.h"
 #include "core/timer.h"
@@ -210,6 +211,15 @@ class HybridSplatRendererApp : public app::IApplication
 	container::string                        m_pendingModelPath;
 	bool                                     m_pendingMeshRemoval   = false;
 	engine::SplatMesh::ID                    m_pendingMeshRemovalId = 0;
+
+	// Per-mesh transform state for ImGui controls
+	struct MeshTransformState
+	{
+		math::vec3 position = {0.0f, 0.0f, 0.0f};
+		math::vec3 rotation = {0.0f, 0.0f, 0.0f};        // Euler angles in degrees
+		float      scale    = 1.0f;
+	};
+	container::unordered_map<engine::SplatMesh::ID, MeshTransformState> m_meshTransforms;
 
 #if defined(__ANDROID__)
 

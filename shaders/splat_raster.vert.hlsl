@@ -21,6 +21,8 @@ static const float SH_C3_6 = -0.5900435899266435;
 [[vk::binding(3, 0)]] StructuredBuffer<float4> colors;
 [[vk::binding(4, 0)]] StructuredBuffer<float> shRest;
 [[vk::binding(5, 0)]] StructuredBuffer<uint> indices;
+[[vk::binding(6, 0)]] StructuredBuffer<uint> meshIndices;
+[[vk::binding(7, 0)]] StructuredBuffer<float4x4> modelMatrices;
 
 struct VSOutput
 {
@@ -278,9 +280,27 @@ VSOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
     uint splatId    = instanceId;
     uint splatIndex = indices[splatId];
 
-    float3 center    = positions[splatIndex];
-    float4 baseColor = colors[splatIndex];
-    float3x3 cov3D   = GetCovariance3D(splatIndex);
+    float3 localCenter = positions[splatIndex];
+    float4 baseColor   = colors[splatIndex];
+    float3x3 cov3D     = GetCovariance3D(splatIndex);
+
+    uint meshIdx       = meshIndices[splatIndex];
+    float4x4 modelMat  = modelMatrices[meshIdx];
+
+    // Transform position to world space
+    float4 worldPos4 = mul(modelMat, float4(localCenter, 1.0));
+    float3 center    = worldPos4.xyz;
+
+    // Transform covariance to world space
+    // For model matrix M = T * R * S (translation, rotation, scale):
+    // cov' = R * S * cov * S^T * R^T = (RS) * cov * (RS)^T
+    // Extract 3x3 rotation+scale part from model matrix
+    float3x3 modelRS = float3x3(
+        modelMat[0].xyz,
+        modelMat[1].xyz,
+        modelMat[2].xyz
+    );
+    cov3D = mul(mul(modelRS, cov3D), transpose(modelRS));
 
     // Alpha culling
     if (baseColor.a < ubo.alphaCullThreshold)

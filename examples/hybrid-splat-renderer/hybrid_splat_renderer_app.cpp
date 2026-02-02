@@ -166,6 +166,8 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	    {3, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Colors
 	    {4, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // SH Rest
 	    {5, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Sorted Indices
+	    {6, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Mesh Indices
+	    {7, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::VERTEX},              // Model Matrices
 	};
 	m_descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 
@@ -222,6 +224,24 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 		indicesBinding.buffer = m_sortedIndices.Get();
 		indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
 		m_descriptorSet->BindBuffer(5, indicesBinding);
+	}
+
+	// Binding 6: Per-splat Mesh Indices for model matrix lookup
+	if (gpuData.meshIndices)
+	{
+		rhi::BufferBinding meshIndicesBinding{};
+		meshIndicesBinding.buffer = gpuData.meshIndices.Get();
+		meshIndicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(6, meshIndicesBinding);
+	}
+
+	// Binding 7: Per-mesh Model Matrices
+	if (gpuData.modelMatrices)
+	{
+		rhi::BufferBinding modelMatricesBinding{};
+		modelMatricesBinding.buffer = gpuData.modelMatrices.Get();
+		modelMatricesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(7, modelMatricesBinding);
 	}
 
 	// Create graphics pipeline
@@ -446,6 +466,8 @@ void HybridSplatRendererApp::OnRender()
 				}
 				m_loadedMeshIds.pop_back();
 			}
+
+			m_meshTransforms.erase(m_pendingMeshRemovalId);
 		}
 	}
 
@@ -1329,6 +1351,22 @@ void HybridSplatRendererApp::RebindSceneDescriptors(uint32_t newSplatCount)
 		m_descriptorSet->BindBuffer(5, indicesBinding);
 	}
 
+	if (gpuData.meshIndices)
+	{
+		rhi::BufferBinding meshIndicesBinding{};
+		meshIndicesBinding.buffer = gpuData.meshIndices.Get();
+		meshIndicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(6, meshIndicesBinding);
+	}
+
+	if (gpuData.modelMatrices)
+	{
+		rhi::BufferBinding modelMatricesBinding{};
+		modelMatricesBinding.buffer = gpuData.modelMatrices.Get();
+		modelMatricesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(7, modelMatricesBinding);
+	}
+
 	LOG_INFO("Rebound scene descriptors to new buffers");
 }
 
@@ -2193,51 +2231,6 @@ void HybridSplatRendererApp::RenderImGui()
 		}
 
 		ImGui::Spacing();
-
-		// Verification controls
-		ImGui::Text("Verification");
-		if (ImGui::Button("Verify Sorting Result"))
-		{
-			m_verifyNextSort = true;
-			LOG_INFO("Will verify sorting on next frame");
-		}
-
-		// Cross-backend verification (only available with GPU backend)
-		if (m_currentBackendType == BackendType::GPU)
-		{
-			ImGui::SameLine();
-			if (ImGui::Checkbox("Cross-Backend", &m_crossBackendVerifyEnabled))
-			{
-				if (m_crossBackendVerifyEnabled)
-				{
-					m_crossBackendVerifyRequested = true;
-				}
-			}
-			if (ImGui::IsItemHovered())
-			{
-				ImGui::SetTooltip("Compare GPU sort results with CPU reference");
-			}
-			if (!m_crossBackendVerifyResult.empty())
-			{
-				ImGui::Text("Result: %s", m_crossBackendVerifyResult.c_str());
-			}
-		}
-
-		ImGui::Spacing();
-		ImGui::Separator();
-
-		ImGui::Text("Scene Information");
-		ImGui::Separator();
-
-		// Scene stats
-		if (m_scene)
-		{
-			ImGui::Text("Total Splats: %u", m_scene->GetTotalSplatCount());
-			ImGui::Text("Loaded Meshes: %zu", m_loadedMeshIds.size());
-		}
-		ImGui::Text("Frame Count: %u", m_frameCount);
-
-		ImGui::Spacing();
 		ImGui::Separator();
 
 		// Model Management section
@@ -2278,7 +2271,7 @@ void HybridSplatRendererApp::RenderImGui()
 			m_pendingModelPath = modelPath;
 		}
 
-		// List loaded meshes with remove buttons
+		// List loaded meshes with remove buttons and transform controls
 		if (!m_loadedMeshIds.empty())
 		{
 			ImGui::Spacing();
@@ -2287,6 +2280,12 @@ void HybridSplatRendererApp::RenderImGui()
 			{
 				engine::SplatMesh::ID meshId = m_loadedMeshIds[i];
 				const auto           *range  = m_scene->GetMeshGpuRange(meshId);
+
+				if (m_meshTransforms.find(meshId) == m_meshTransforms.end())
+				{
+					m_meshTransforms[meshId] = MeshTransformState{};
+				}
+				MeshTransformState &transform = m_meshTransforms[meshId];
 
 				char label[64];
 				if (range)
@@ -2298,18 +2297,123 @@ void HybridSplatRendererApp::RenderImGui()
 					snprintf(label, sizeof(label), "Mesh %u", meshId);
 				}
 
-				ImGui::BulletText("%s", label);
-				ImGui::SameLine();
-
-				char buttonLabel[32];
-				snprintf(buttonLabel, sizeof(buttonLabel), "Remove##%u", meshId);
-				if (ImGui::SmallButton(buttonLabel))
+				char treeLabel[64];
+				snprintf(treeLabel, sizeof(treeLabel), "%s##tree%u", label, meshId);
+				if (ImGui::TreeNode(treeLabel))
 				{
-					// Defer removal to frame boundary
-					LOG_INFO("Queuing mesh {} for removal", meshId);
-					m_pendingMeshRemoval   = true;
-					m_pendingMeshRemovalId = meshId;
+					// Remove button
+					char buttonLabel[32];
+					snprintf(buttonLabel, sizeof(buttonLabel), "Remove##%u", meshId);
+					if (ImGui::SmallButton(buttonLabel))
+					{
+						// Defer removal to frame boundary
+						LOG_INFO("Queuing mesh {} for removal", meshId);
+						m_pendingMeshRemoval   = true;
+						m_pendingMeshRemovalId = meshId;
+					}
+
+					// Transform controls
+					bool transformChanged = false;
+
+					// Position sliders
+					char posLabel[32];
+					snprintf(posLabel, sizeof(posLabel), "Position##%u", meshId);
+					if (ImGui::DragFloat3(posLabel, &transform.position.x, 0.1f, -100.0f, 100.0f, "%.2f"))
+					{
+						transformChanged = true;
+					}
+
+					// Rotation sliders
+					char rotLabel[32];
+					snprintf(rotLabel, sizeof(rotLabel), "Rotation##%u", meshId);
+					if (ImGui::DragFloat3(rotLabel, &transform.rotation.x, 1.0f, -180.0f, 180.0f, "%.1f"))
+					{
+						transformChanged = true;
+					}
+
+					// Scale slider
+					char scaleLabel[32];
+					snprintf(scaleLabel, sizeof(scaleLabel), "Scale##%u", meshId);
+					if (ImGui::DragFloat(scaleLabel, &transform.scale, 0.01f, 0.01f, 10.0f, "%.3f"))
+					{
+						transformChanged = true;
+					}
+
+					// Reset button
+					char resetLabel[32];
+					snprintf(resetLabel, sizeof(resetLabel), "Reset Transform##%u", meshId);
+					if (ImGui::SmallButton(resetLabel))
+					{
+						transform.position = math::vec3(0.0f, 0.0f, 0.0f);
+						transform.rotation = math::vec3(0.0f, 0.0f, 0.0f);
+						transform.scale    = 1.0f;
+						transformChanged   = true;
+					}
+
+					// Apply transform to scene
+					if (transformChanged)
+					{
+						float radX = math::Radians(transform.rotation.x);
+						float radY = math::Radians(transform.rotation.y);
+						float radZ = math::Radians(transform.rotation.z);
+
+						math::mat4 scaleMat     = math::Scale(math::vec3(transform.scale, transform.scale, transform.scale));
+						math::mat4 rotX         = math::RotateX(radX);
+						math::mat4 rotY         = math::RotateY(radY);
+						math::mat4 rotZ         = math::RotateZ(radZ);
+						math::mat4 translateMat = math::Translate(transform.position);
+						math::mat4 modelMatrix  = translateMat * rotZ * rotY * rotX * scaleMat;
+
+						m_scene->UpdateMeshTransform(meshId, modelMatrix);
+					}
+
+					ImGui::TreePop();
 				}
+			}
+		}
+
+		ImGui::Spacing();
+		ImGui::Separator();
+
+		ImGui::Text("Scene Information");
+		ImGui::Separator();
+
+		// Scene stats
+		if (m_scene)
+		{
+			ImGui::Text("Total Splats: %u", m_scene->GetTotalSplatCount());
+			ImGui::Text("Loaded Meshes: %zu", m_loadedMeshIds.size());
+		}
+		ImGui::Text("Frame Count: %u", m_frameCount);
+
+		ImGui::Spacing();
+
+		// Verification controls
+		ImGui::Text("Verification");
+		if (ImGui::Button("Verify Sorting Result"))
+		{
+			m_verifyNextSort = true;
+			LOG_INFO("Will verify sorting on next frame");
+		}
+
+		// Cross-backend verification (only available with GPU backend)
+		if (m_currentBackendType == BackendType::GPU)
+		{
+			ImGui::SameLine();
+			if (ImGui::Checkbox("Cross-Backend", &m_crossBackendVerifyEnabled))
+			{
+				if (m_crossBackendVerifyEnabled)
+				{
+					m_crossBackendVerifyRequested = true;
+				}
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Compare GPU sort results with CPU reference");
+			}
+			if (!m_crossBackendVerifyResult.empty())
+			{
+				ImGui::Text("Result: %s", m_crossBackendVerifyResult.c_str());
 			}
 		}
 

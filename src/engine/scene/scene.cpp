@@ -49,6 +49,8 @@ SplatMesh::ID Scene::AddMesh(container::shared_ptr<SplatSoA> splatData,
 		gpuData.colors        = nullptr;
 		gpuData.shRest        = nullptr;
 		gpuData.sortedIndices = nullptr;
+		gpuData.meshIndices   = nullptr;
+		gpuData.modelMatrices = nullptr;
 		meshGpuRanges.clear();
 
 		cpuSplatSorter.reset();
@@ -117,6 +119,8 @@ bool Scene::RemoveMesh(SplatMesh::ID id)
 		gpuData.colors        = nullptr;
 		gpuData.shRest        = nullptr;
 		gpuData.sortedIndices = nullptr;
+		gpuData.meshIndices   = nullptr;
+		gpuData.modelMatrices = nullptr;
 		meshGpuRanges.clear();
 
 		cpuSplatSorter.reset();
@@ -181,18 +185,23 @@ rhi::FenceHandle Scene::UploadAttributeDataInternal()
 		return nullptr;
 	}
 
-	container::vector<float> positions;
-	container::vector<float> covariances;
-	container::vector<float> colors;
-	container::vector<float> shRest;
+	container::vector<float>    positions;
+	container::vector<float>    covariances;
+	container::vector<float>    colors;
+	container::vector<float>    shRest;
+	container::vector<uint32_t> meshIndices;
+	container::vector<float>    modelMatrices;
 
 	positions.reserve(totalSplatCount * 4);
 	covariances.reserve(totalSplatCount * 8);        // 6 floats + 2 padding = 8 floats per splat
 	colors.reserve(totalSplatCount * 4);
 	shRest.reserve(totalShCoeffs);
+	meshIndices.reserve(totalSplatCount);
+	modelMatrices.reserve(meshes.size() * 16);        // 16 floats per mat4
 
 	meshGpuRanges.clear();
 	uint32_t currentSplatOffset = 0;
+	uint32_t meshIndex          = 0;
 
 	// Consolidate all mesh data
 	for (const auto &mesh : meshes)
@@ -210,9 +219,21 @@ rhi::FenceHandle Scene::UploadAttributeDataInternal()
 		range.transform             = mesh.GetModelMatrix();
 		meshGpuRanges[mesh.GetId()] = range;
 
+		// Store the column-major model matrix for this mesh
+		const math::mat4 &mat = mesh.GetModelMatrix();
+		for (int col = 0; col < 4; ++col)
+		{
+			for (int row = 0; row < 4; ++row)
+			{
+				modelMatrices.push_back(mat[col][row]);
+			}
+		}
+
 		// Pack attributes in SoA format
 		for (uint32_t i = 0; i < count; ++i)
 		{
+			// Store mesh index for this splat
+			meshIndices.push_back(meshIndex);
 			// Position
 			positions.push_back(splatData->posX[i]);
 			positions.push_back(splatData->posY[i]);
@@ -262,6 +283,7 @@ rhi::FenceHandle Scene::UploadAttributeDataInternal()
 		}
 
 		currentSplatOffset += count;
+		meshIndex++;
 	}
 
 	std::vector<rhi::FenceHandle> uploadFences;
@@ -306,6 +328,32 @@ rhi::FenceHandle Scene::UploadAttributeDataInternal()
 		}
 	}
 
+	// Upload mesh indices
+	if (!meshIndices.empty() && gpuData.meshIndices)
+	{
+		rhi::FenceHandle meshIndicesFence = device->UploadBufferAsync(
+		    gpuData.meshIndices.Get(),
+		    meshIndices.data(),
+		    meshIndices.size() * sizeof(uint32_t));
+		if (meshIndicesFence)
+		{
+			uploadFences.push_back(meshIndicesFence);
+		}
+	}
+
+	// Upload model matrices
+	if (!modelMatrices.empty() && gpuData.modelMatrices)
+	{
+		rhi::FenceHandle modelMatricesFence = device->UploadBufferAsync(
+		    gpuData.modelMatrices.Get(),
+		    modelMatrices.data(),
+		    modelMatrices.size() * sizeof(float));
+		if (modelMatricesFence)
+		{
+			uploadFences.push_back(modelMatricesFence);
+		}
+	}
+
 	attributeDataUploaded = true;
 	gpuBuffersAllocated   = true;
 
@@ -339,6 +387,8 @@ rhi::FenceHandle Scene::ReallocateAndUpload()
 	gpuData.colors        = nullptr;
 	gpuData.shRest        = nullptr;
 	gpuData.sortedIndices = nullptr;
+	gpuData.meshIndices   = nullptr;
+	gpuData.modelMatrices = nullptr;
 
 	meshGpuRanges.clear();
 
@@ -485,6 +535,24 @@ void Scene::AllocateGpuBuffersInternal()
 		desc.resourceUsage    = ResourceUsage::DynamicUpload;
 		desc.size             = totalSplatCount * sizeof(uint32_t);
 		gpuData.sortedIndices = device->CreateBuffer(desc);
+	}
+
+	// Per-splat mesh indices buffer (maps splat index -> mesh index for model matrix lookup)
+	{
+		BufferDesc desc{};
+		desc.usage          = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage  = ResourceUsage::Static;
+		desc.size           = totalSplatCount * sizeof(uint32_t);
+		gpuData.meshIndices = device->CreateBuffer(desc);
+	}
+
+	// Per-mesh model matrices buffer
+	{
+		BufferDesc desc{};
+		desc.usage            = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
+		desc.resourceUsage    = ResourceUsage::DynamicUpload;
+		desc.size             = std::max(meshes.size(), size_t(1)) * sizeof(float) * 16;        // mat4 = 16 floats
+		gpuData.modelMatrices = device->CreateBuffer(desc);
 	}
 
 	// Initialize CPU-side sorting system
@@ -706,6 +774,60 @@ Scene::CpuMemoryInfo Scene::GetCpuMemoryInfo() const
 	}
 
 	return info;
+}
+
+bool Scene::UpdateMeshTransform(SplatMesh::ID id, const math::mat4 &newTransform)
+{
+	std::lock_guard<std::mutex> lock(meshesMutex);
+
+	auto meshIt = std::find_if(meshes.begin(), meshes.end(),
+	                           [id](const SplatMesh &mesh) { return mesh.GetId() == id; });
+
+	if (meshIt == meshes.end())
+	{
+		LOG_WARNING("UpdateMeshTransform: Mesh {} not found", id);
+		return false;
+	}
+
+	meshIt->SetModelMatrix(newTransform);
+
+	auto rangeIt = meshGpuRanges.find(id);
+	if (rangeIt != meshGpuRanges.end())
+	{
+		rangeIt->second.transform = newTransform;
+	}
+
+	// Find the mesh index (position in meshes vector) for GPU buffer update
+	size_t meshIndex = std::distance(meshes.begin(), meshIt);
+
+	if (gpuData.modelMatrices)
+	{
+		container::vector<float> matrixData;
+		matrixData.reserve(16);
+
+		for (int col = 0; col < 4; ++col)
+		{
+			for (int row = 0; row < 4; ++row)
+			{
+				matrixData.push_back(newTransform[col][row]);
+			}
+		}
+
+		size_t offset = meshIndex * 16 * sizeof(float);
+		device->UploadBufferAsync(
+		    gpuData.modelMatrices.Get(),
+		    matrixData.data(),
+		    matrixData.size() * sizeof(float),
+		    offset);
+	}
+
+	return true;
+}
+
+size_t Scene::GetMeshCount() const
+{
+	std::lock_guard<std::mutex> lock(meshesMutex);
+	return meshes.size();
 }
 
 }        // namespace msplat::engine
