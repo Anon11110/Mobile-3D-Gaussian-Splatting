@@ -99,7 +99,7 @@ class BuildTypeRule(ValidationRule):
 
         from .types import BuildType
 
-        valid_types = [BuildType.DEBUG.value, BuildType.RELEASE.value]
+        valid_types = [BuildType.DEBUG.value, BuildType.RELEASE.value, BuildType.RELWITHDEBINFO.value]
         if context.args.build_type not in valid_types:
             return Result.fail(
                 ValidationError(

@@ -37,6 +37,7 @@ class BuildConstants:
     DEFAULT_BUILD_DIR: str = "build"
     BIN_SUBDIR_DEBUG: str = "bin/Debug"
     BIN_SUBDIR_RELEASE: str = "bin/Release"
+    BIN_SUBDIR_RELWITHDEBINFO: str = "bin/RelWithDebInfo"
 
     # Standard exit codes
     EXIT_SUCCESS: int = 0

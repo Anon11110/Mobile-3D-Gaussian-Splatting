@@ -297,7 +297,7 @@ The Android build integrates with the main CMake project:
 python3 scripts/configure.py [OPTIONS]
 ```
 
-- `--build-type {Debug,Release}` - Set build configuration (default: Release)
+- `--build-type {Debug,Release,RelWithDebInfo}` - Set build configuration (default: Release)
 - `--clean` - Clean build directory before configuring
 - `--validation` - Enable Vulkan validation layers (recommended for Debug builds)
 - `--generator GENERATOR` - Override CMake generator (e.g., "Ninja", "Unix Makefiles")
@@ -341,6 +341,10 @@ python3 scripts/configure.py build --target splat-loader --run
 
 # Debug build with validation
 python3 scripts/configure.py --clean --build-type Debug --validation
+python3 scripts/configure.py build --target triangle --run
+
+# RelWithDebInfo build (Release optimization + debug symbols)
+python3 scripts/configure.py --clean --build-type RelWithDebInfo
 python3 scripts/configure.py build --target triangle --run
 
 # Build all executable targets and RHI library

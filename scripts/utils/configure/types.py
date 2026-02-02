@@ -133,6 +133,7 @@ class BuildType(Enum):
 
     DEBUG = "Debug"
     RELEASE = "Release"
+    RELWITHDEBINFO = "RelWithDebInfo"
 
 
 @dataclass

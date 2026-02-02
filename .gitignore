@@ -87,6 +87,7 @@ AGENTS.md
 .vscode/
 .mcp.json
 .serena/
+.vs/
 
 # Ignore all compiled SPIR-V shader binaries
 shaders/compiled/*.spv

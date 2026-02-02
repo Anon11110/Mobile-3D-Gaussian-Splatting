@@ -402,7 +402,7 @@ Examples:
     # Configure command (default behavior, so these are also top-level args)
     parser.add_argument(
         "--build-type",
-        choices=[BuildType.DEBUG.value, BuildType.RELEASE.value],
+        choices=[BuildType.DEBUG.value, BuildType.RELEASE.value, BuildType.RELWITHDEBINFO.value],
         default=BuildType.RELEASE.value,
         help="CMake build type",
     )
