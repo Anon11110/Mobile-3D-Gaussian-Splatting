@@ -22,6 +22,7 @@
 #include <cstring>
 #include <fstream>
 #include <sys/stat.h>
+#include <unordered_map>
 
 #include "hybrid_splat_renderer_app.h"
 
@@ -280,6 +281,16 @@ static app::DeviceManager     *g_deviceManager   = nullptr;
 static bool                    g_initialized     = false;
 static timer::Timer            g_frameTimer;
 static std::string             g_internalDataPath;
+static AAssetManager          *g_assetManager = nullptr;
+
+// Extracted model paths, maps asset path to internal storage path
+static std::unordered_map<std::string, std::string> g_extractedModelPaths;
+
+static bool FileExists(const char *path)
+{
+	struct stat buffer;
+	return (stat(path, &buffer) == 0);
+}
 
 /**
  * @brief Extract an asset file to internal storage
@@ -326,10 +337,51 @@ static bool ExtractAssetToFile(AAssetManager *assetManager, const char *assetPat
 	return totalRead == static_cast<size_t>(assetSize);
 }
 
-static bool FileExists(const char *path)
+/**
+ * @brief Get the extracted filesystem path for an asset, extracting if needed
+ * @param assetManager Android asset manager
+ * @param assetPath Path within assets (e.g., "models/flowers_1.ply")
+ * @return Filesystem path to extracted file, or empty string on failure
+ */
+static std::string GetExtractedModelPath(AAssetManager *assetManager, const char *assetPath)
 {
-	struct stat buffer;
-	return (stat(path, &buffer) == 0);
+	auto it = g_extractedModelPaths.find(assetPath);
+	if (it != g_extractedModelPaths.end())
+	{
+		return it->second;
+	}
+
+	// Extract filename from asset path (e.g., "models/flowers_1.ply" -> "flowers_1.ply")
+	const char *filename = strrchr(assetPath, '/');
+	filename             = filename ? filename + 1 : assetPath;
+
+	std::string outputPath = g_internalDataPath + "/" + filename;
+
+	if (!FileExists(outputPath.c_str()))
+	{
+		if (!ExtractAssetToFile(assetManager, assetPath, outputPath.c_str()))
+		{
+			LOGE("Failed to extract asset: %s", assetPath);
+			return "";
+		}
+	}
+
+	g_extractedModelPaths[assetPath] = outputPath;
+	return outputPath;
+}
+
+// Public function for app to resolve asset paths to filesystem paths
+extern "C" const char *Android_ResolveAssetPath(const char *assetPath)
+{
+	static std::string lastResolvedPath;
+
+	if (!g_assetManager || !assetPath)
+	{
+		return nullptr;
+	}
+
+	lastResolvedPath = GetExtractedModelPath(g_assetManager, assetPath);
+	return lastResolvedPath.empty() ? nullptr : lastResolvedPath.c_str();
 }
 
 /**
@@ -343,8 +395,9 @@ static void HandleAppCmd(android_app *androidApp, int32_t cmd)
 			LOGI("APP_CMD_INIT_WINDOW");
 			if (androidApp->window != nullptr && !g_initialized)
 			{
-				// Store internal data path for file extraction
+				// Store internal data path and asset manager for file extraction
 				g_internalDataPath = androidApp->activity->internalDataPath;
+				g_assetManager     = androidApp->activity->assetManager;
 				LOGI("Internal data path: %s", g_internalDataPath.c_str());
 
 				g_platformAdapter = new AndroidPlatformAdapter(androidApp);
@@ -353,31 +406,13 @@ static void HandleAppCmd(android_app *androidApp, int32_t cmd)
 				g_app = new HybridSplatRendererApp();
 				g_app->SetImGuiWindow(androidApp->window);
 
-				// Extract PLY file from assets to internal storage if not already extracted
-				auto        assetManager = androidApp->activity->assetManager;
-				const char *assetPath    = HybridSplatRendererApp::GetDefaultAssetPath();
+				// Extract default PLY file from assets to internal storage
+				const char *assetPath     = HybridSplatRendererApp::GetDefaultAssetPath();
+				std::string plyOutputPath = GetExtractedModelPath(g_assetManager, assetPath);
 
-				// Extract filename from asset path (e.g., "models/flowers_1.ply" -> "flowers_1.ply")
-				const char *filename = strrchr(assetPath, '/');
-				filename             = filename ? filename + 1 : assetPath;
-
-				std::string plyOutputPath = g_internalDataPath + "/" + filename;
-
-				if (!FileExists(plyOutputPath.c_str()))
+				if (plyOutputPath.empty())
 				{
-					if (ExtractAssetToFile(assetManager, assetPath, plyOutputPath.c_str()))
-					{
-						LOGI("PLY file extracted successfully");
-					}
-					else
-					{
-						LOGW("Failed to extract PLY file, will use test data");
-						plyOutputPath.clear();
-					}
-				}
-				else
-				{
-					LOGI("PLY file already exists at %s", plyOutputPath.c_str());
+					LOGW("Failed to extract PLY file, will use test data");
 				}
 
 				if (!plyOutputPath.empty())
@@ -388,7 +423,7 @@ static void HandleAppCmd(android_app *androidApp, int32_t cmd)
 				g_deviceManager = new app::DeviceManager(g_app);
 
 				// Create Android asset VFS for shader loading
-				auto assetVfs = container::make_shared<vfs::AndroidAssetFileSystem>(assetManager);
+				auto assetVfs = container::make_shared<vfs::AndroidAssetFileSystem>(g_assetManager);
 				auto rootVfs  = container::make_shared<vfs::RootFileSystem>();
 				rootVfs->mount("/", assetVfs);
 				g_deviceManager->SetVFS(rootVfs);

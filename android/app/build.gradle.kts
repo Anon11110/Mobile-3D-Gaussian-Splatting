@@ -119,10 +119,25 @@ tasks.register<Copy>("copyShaders") {
 }
 
 // Task to copy PLY model files to assets directory
-tasks.register<Copy>("copyModels") {
-    from("../../assets/splats/flowers_1")
-    into("src/main/assets/models")
-    include("*.ply")
+tasks.register("copyModels") {
+    val modelsDir = file("src/main/assets/models")
+
+    doLast {
+        modelsDir.mkdirs()
+
+        // Copy flowers_1.ply
+        copy {
+            from("../../assets/splats/flowers_1/flowers_1.ply")
+            into(modelsDir)
+        }
+
+        // Copy train_30000.ply (rename from point_cloud.ply)
+        copy {
+            from("../../assets/splats/train/point_cloud/iteration_30000/point_cloud.ply")
+            into(modelsDir)
+            rename { "train_30000.ply" }
+        }
+    }
 }
 
 // Make asset copy run before asset merging

@@ -12,6 +12,10 @@
 #include <thread>
 #include <vulkan/vulkan.h>
 
+#if defined(__ANDROID__)
+extern "C" const char *Android_ResolveAssetPath(const char *assetPath);
+#endif
+
 HybridSplatRendererApp::HybridSplatRendererApp()
 {
 	m_fpsHistory.fill(0.0f);
@@ -38,6 +42,10 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	const auto &vfs = deviceManager->GetVFS();
 	m_shaderFactory = container::make_unique<engine::ShaderFactory>(device, vfs);
 	m_scene         = container::make_unique<engine::Scene>(device);
+
+	m_scene->SetBufferChangeCallback([this](const engine::Scene::GpuData &gpuData, uint32_t newSplatCount) {
+		OnSceneBuffersChanged(gpuData, newSplatCount);
+	});
 
 	m_camera.SetPosition(math::vec3(0.0f, 0.0f, 3.0f));
 	m_camera.SetTarget(math::vec3(0.0f, 0.0f, 0.0f));
@@ -171,28 +179,41 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_descriptorSet->BindBuffer(0, uboBinding);
 
 	// Binding 1: Positions
-	rhi::BufferBinding positionsBinding{};
-	positionsBinding.buffer = m_scene->GetGpuData().positions.Get();
-	positionsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(1, positionsBinding);
+	const auto &gpuData = m_scene->GetGpuData();
+	if (gpuData.positions)
+	{
+		rhi::BufferBinding positionsBinding{};
+		positionsBinding.buffer = gpuData.positions.Get();
+		positionsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(1, positionsBinding);
+	}
 
 	// Binding 2: Covariances3D
-	rhi::BufferBinding cov3DBinding{};
-	cov3DBinding.buffer = m_scene->GetGpuData().covariances3D.Get();
-	cov3DBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(2, cov3DBinding);
+	if (gpuData.covariances3D)
+	{
+		rhi::BufferBinding cov3DBinding{};
+		cov3DBinding.buffer = gpuData.covariances3D.Get();
+		cov3DBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(2, cov3DBinding);
+	}
 
 	// Binding 3: Colors
-	rhi::BufferBinding colorsBinding{};
-	colorsBinding.buffer = m_scene->GetGpuData().colors.Get();
-	colorsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(3, colorsBinding);
+	if (gpuData.colors)
+	{
+		rhi::BufferBinding colorsBinding{};
+		colorsBinding.buffer = gpuData.colors.Get();
+		colorsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(3, colorsBinding);
+	}
 
 	// Binding 4: SH Rest
-	rhi::BufferBinding shBinding{};
-	shBinding.buffer = m_scene->GetGpuData().shRest.Get();
-	shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-	m_descriptorSet->BindBuffer(4, shBinding);
+	if (gpuData.shRest)
+	{
+		rhi::BufferBinding shBinding{};
+		shBinding.buffer = gpuData.shRest.Get();
+		shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(4, shBinding);
+	}
 
 	// Binding 5: Sorted indices (app-owned buffer, written to by backend)
 	if (m_sortedIndices)
@@ -326,7 +347,7 @@ void HybridSplatRendererApp::OnUpdate(float deltaTime)
 
 void HybridSplatRendererApp::OnRender()
 {
-	if (!m_deviceManager || !m_scene || m_scene->GetTotalSplatCount() == 0)
+	if (!m_deviceManager || !m_scene)
 	{
 		return;
 	}
@@ -386,6 +407,46 @@ void HybridSplatRendererApp::OnRender()
 		}
 
 		LOG_INFO("Async compute {}", m_asyncComputeEnabled ? "enabled" : "disabled");
+	}
+
+	// Deferred model loading and mesh removal to frame boundary
+	if (m_pendingModelLoad)
+	{
+		m_pendingModelLoad = false;
+		LOG_INFO("Loading deferred model: {}", m_pendingModelPath);
+
+#if defined(__ANDROID__)
+		// Resolve APK asset path to extracted filesystem path
+		const char *resolvedPath = Android_ResolveAssetPath(m_pendingModelPath.c_str());
+		if (resolvedPath)
+		{
+			LoadSplatFile(resolvedPath);
+		}
+		else
+		{
+			LOG_ERROR("Failed to resolve Android asset path: {}", m_pendingModelPath);
+		}
+#else
+		LoadSplatFile(m_pendingModelPath.c_str());
+#endif
+	}
+
+	if (m_pendingMeshRemoval)
+	{
+		m_pendingMeshRemoval = false;
+		LOG_INFO("Removing deferred mesh: {}", m_pendingMeshRemovalId);
+		if (m_scene->RemoveMesh(m_pendingMeshRemovalId))
+		{
+			auto it = std::find(m_loadedMeshIds.begin(), m_loadedMeshIds.end(), m_pendingMeshRemovalId);
+			if (it != m_loadedMeshIds.end())
+			{
+				if (it != m_loadedMeshIds.end() - 1)
+				{
+					std::swap(*it, m_loadedMeshIds.back());
+				}
+				m_loadedMeshIds.pop_back();
+			}
+		}
 	}
 
 	// Acquire next image (skip in vsync bypass mode)
@@ -664,15 +725,18 @@ void HybridSplatRendererApp::OnRender()
 	// Begin pipeline statistics query
 	BeginPipelineStatsQuery(cmdList);
 
-	// Draw the splats using indexed procedural vertex generation
-	cmdList->SetPipeline(m_renderPipeline.Get());
-	cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
-	cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
+	// Draw the splats using indexed procedural vertex generation if scene is not empty
+	uint32_t splatCount = m_scene->GetTotalSplatCount();
+	if (splatCount > 0 && m_renderPipeline && m_descriptorSet && m_quadIndexBuffer)
+	{
+		cmdList->SetPipeline(m_renderPipeline.Get());
+		cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
+		cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
 
-	// Draw using instanced rendering: 4 indices per strip, one instance per splat
-	uint32_t indexCount    = 4;
-	uint32_t instanceCount = m_scene->GetTotalSplatCount();
-	cmdList->DrawIndexedInstanced(indexCount, instanceCount, 0, 0, 0);
+		// Draw using instanced rendering: 4 indices per strip, one instance per splat
+		uint32_t indexCount = 4;
+		cmdList->DrawIndexedInstanced(indexCount, splatCount, 0, 0, 0);
+	}
 
 	// End pipeline statistics query
 	EndPipelineStatsQuery(cmdList);
@@ -834,12 +898,14 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 					// 0 = Prescan, 1 = IntegratedScan
 					if (m_backend->GetSortMethod() == 1)
 					{
-						m_backend->SetSortMethod(0);
+						m_currentSortMethod = 0;
+						m_backend->SetSortMethod(m_currentSortMethod);
 						LOG_INFO("Switched to Prescan radix sort method");
 					}
 					else
 					{
-						m_backend->SetSortMethod(1);
+						m_currentSortMethod = 1;
+						m_backend->SetSortMethod(m_currentSortMethod);
 						LOG_INFO("Switched to Integrated Scan radix sort method");
 					}
 				}
@@ -1019,11 +1085,32 @@ void HybridSplatRendererApp::LoadSplatFile(const char *filepath)
 			splatData->rotZ[i] = -splatData->rotZ[i];
 		}
 
-		m_scene->AddMesh(splatData, math::Identity());
-		m_scene->AllocateGpuBuffers();
-		rhi::FenceHandle uploadFence = m_scene->UploadAttributeData();
-		uploadFence->Wait(UINT64_MAX);
-		LOG_INFO("Loaded {} splats from {}", splatData->numSplats, filepath);
+		engine::SplatMesh::ID meshId = m_scene->AddMesh(splatData, math::Identity());
+
+		if (meshId != engine::SplatMesh::ID(-1))
+		{
+			m_loadedMeshIds.push_back(meshId);
+			LOG_INFO("Loaded mesh {} with {} splats from {}", meshId, splatData->numSplats, filepath);
+		}
+
+		// Only do initial setup if this is the first load or loading into empty scene
+		bool wasUploaded = m_scene->IsAttributeDataUploaded();
+		if (!wasUploaded)
+		{
+			m_scene->AllocateGpuBuffers();
+			rhi::FenceHandle uploadFence = m_scene->UploadAttributeData();
+			if (uploadFence)
+			{
+				uploadFence->Wait(UINT64_MAX);
+			}
+
+			if (m_descriptorSet)
+			{
+				uint32_t newSplatCount = m_scene->GetTotalSplatCount();
+				RebindSceneDescriptors(newSplatCount);
+				ReinitializeSortBackend(newSplatCount);
+			}
+		}
 	}
 	else
 	{
@@ -1171,6 +1258,122 @@ void HybridSplatRendererApp::CreateTestSplatData()
 	uploadFence->Wait(UINT64_MAX);
 
 	LOG_INFO("Created random test scene with {} splats", testSplatCount);
+}
+
+void HybridSplatRendererApp::OnSceneBuffersChanged(const engine::Scene::GpuData &gpuData, uint32_t newSplatCount)
+{
+	LOG_INFO("Scene buffers changed: {} splats", newSplatCount);
+
+	RebindSceneDescriptors(newSplatCount);
+	ReinitializeSortBackend(newSplatCount);
+}
+
+void HybridSplatRendererApp::RebindSceneDescriptors(uint32_t newSplatCount)
+{
+	rhi::IRHIDevice *device = m_deviceManager->GetDevice();
+
+	device->WaitIdle();
+
+	// Recreate app-owned sorted indices buffer with new size
+	if (newSplatCount > 0)
+	{
+		rhi::BufferDesc indicesDesc{};
+		indicesDesc.size  = newSplatCount * sizeof(uint32_t);
+		indicesDesc.usage = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST | rhi::BufferUsage::TRANSFER_SRC;
+		m_sortedIndices   = device->CreateBuffer(indicesDesc);
+	}
+	else
+	{
+		m_sortedIndices = nullptr;
+	}
+
+	// Rebind scene buffers to descriptor set
+	const auto &gpuData = m_scene->GetGpuData();
+	if (gpuData.positions)
+	{
+		rhi::BufferBinding positionsBinding{};
+		positionsBinding.buffer = gpuData.positions.Get();
+		positionsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(1, positionsBinding);
+	}
+
+	if (gpuData.covariances3D)
+	{
+		rhi::BufferBinding cov3DBinding{};
+		cov3DBinding.buffer = gpuData.covariances3D.Get();
+		cov3DBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(2, cov3DBinding);
+	}
+
+	if (gpuData.colors)
+	{
+		rhi::BufferBinding colorsBinding{};
+		colorsBinding.buffer = gpuData.colors.Get();
+		colorsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(3, colorsBinding);
+	}
+
+	if (gpuData.shRest)
+	{
+		rhi::BufferBinding shBinding{};
+		shBinding.buffer = gpuData.shRest.Get();
+		shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(4, shBinding);
+	}
+
+	if (m_sortedIndices)
+	{
+		rhi::BufferBinding indicesBinding{};
+		indicesBinding.buffer = m_sortedIndices.Get();
+		indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+		m_descriptorSet->BindBuffer(5, indicesBinding);
+	}
+
+	LOG_INFO("Rebound scene descriptors to new buffers");
+}
+
+void HybridSplatRendererApp::ReinitializeSortBackend(uint32_t newSplatCount)
+{
+	if (newSplatCount == 0)
+	{
+		m_backend.reset();
+		LOG_INFO("Scene empty, sort backend cleared");
+		return;
+	}
+
+	rhi::IRHIDevice *device = m_deviceManager->GetDevice();
+	const auto      &vfs    = m_deviceManager->GetVFS();
+
+	// Destroy old backend
+	m_backend.reset();
+
+	// Recreate backend with new scene state
+	if (m_currentBackendType == BackendType::GPU)
+	{
+		m_backend = container::make_unique<engine::GpuSplatSortBackend>();
+		if (!m_backend->Initialize(device, m_scene.get(), m_sortedIndices, newSplatCount, vfs))
+		{
+			LOG_WARNING("GPU backend failed to reinitialize, falling back to CPU");
+			m_backend            = container::make_unique<engine::CpuSplatSortBackend>();
+			m_currentBackendType = BackendType::CPU;
+			m_backend->Initialize(device, m_scene.get(), m_sortedIndices, newSplatCount, vfs);
+		}
+		else
+		{
+			// Restore sort method and async compute settings for GPU backend
+			m_backend->SetSortMethod(m_currentSortMethod);
+			m_backend->SetAsyncCompute(m_asyncComputeEnabled);
+		}
+	}
+	else
+	{
+		m_backend = container::make_unique<engine::CpuSplatSortBackend>();
+		m_backend->Initialize(device, m_scene.get(), m_sortedIndices, newSplatCount, vfs);
+	}
+
+	LOG_INFO("Reinitialized {} sort backend for {} splats",
+	         m_currentBackendType == BackendType::GPU ? "GPU" : "CPU",
+	         newSplatCount);
 }
 
 void HybridSplatRendererApp::RecreateSwapchain()
@@ -1957,7 +2160,8 @@ void HybridSplatRendererApp::RenderImGui()
 				const char *methods[]     = {"Prescan Radix Sort", "Integrated Scan Radix Sort"};
 				if (ImGui::Combo("##SortMethod", &currentMethod, methods, 2))
 				{
-					m_backend->SetSortMethod(currentMethod);
+					m_currentSortMethod = currentMethod;
+					m_backend->SetSortMethod(m_currentSortMethod);
 					LOG_INFO("Switched to {} radix sort method", methods[currentMethod]);
 				}
 
@@ -2029,8 +2233,85 @@ void HybridSplatRendererApp::RenderImGui()
 		if (m_scene)
 		{
 			ImGui::Text("Total Splats: %u", m_scene->GetTotalSplatCount());
+			ImGui::Text("Loaded Meshes: %zu", m_loadedMeshIds.size());
 		}
 		ImGui::Text("Frame Count: %u", m_frameCount);
+
+		ImGui::Spacing();
+		ImGui::Separator();
+
+		// Model Management section
+		ImGui::Text("Model Management");
+		ImGui::Separator();
+
+		// Model selection dropdown
+		ImGui::Text("Select Model:");
+		ImGui::SetNextItemWidth(-1);
+
+		// Build combo items from predefined models
+		if (ImGui::BeginCombo("##ModelSelect", k_predefinedModels[m_selectedModelIndex].name))
+		{
+			for (int i = 0; i < k_predefinedModelCount; ++i)
+			{
+				bool isSelected = (m_selectedModelIndex == i);
+				if (ImGui::Selectable(k_predefinedModels[i].name, isSelected))
+				{
+					m_selectedModelIndex = i;
+				}
+				if (isSelected)
+				{
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+
+		// Show the path for reference
+		ImGui::TextDisabled("Path: %s", k_predefinedModels[m_selectedModelIndex].path);
+
+		// Load button, defers loading to frame boundary
+		if (ImGui::Button("Load Model"))
+		{
+			const char *modelPath = k_predefinedModels[m_selectedModelIndex].path;
+			LOG_INFO("Queuing model load: {} ({})", k_predefinedModels[m_selectedModelIndex].name, modelPath);
+			m_pendingModelLoad = true;
+			m_pendingModelPath = modelPath;
+		}
+
+		// List loaded meshes with remove buttons
+		if (!m_loadedMeshIds.empty())
+		{
+			ImGui::Spacing();
+			ImGui::Text("Loaded Meshes:");
+			for (size_t i = 0; i < m_loadedMeshIds.size(); ++i)
+			{
+				engine::SplatMesh::ID meshId = m_loadedMeshIds[i];
+				const auto           *range  = m_scene->GetMeshGpuRange(meshId);
+
+				char label[64];
+				if (range)
+				{
+					snprintf(label, sizeof(label), "Mesh %u (%u splats)", meshId, range->splatCount);
+				}
+				else
+				{
+					snprintf(label, sizeof(label), "Mesh %u", meshId);
+				}
+
+				ImGui::BulletText("%s", label);
+				ImGui::SameLine();
+
+				char buttonLabel[32];
+				snprintf(buttonLabel, sizeof(buttonLabel), "Remove##%u", meshId);
+				if (ImGui::SmallButton(buttonLabel))
+				{
+					// Defer removal to frame boundary
+					LOG_INFO("Queuing mesh {} for removal", meshId);
+					m_pendingMeshRemoval   = true;
+					m_pendingMeshRemovalId = meshId;
+				}
+			}
+		}
 
 		ImGui::Spacing();
 

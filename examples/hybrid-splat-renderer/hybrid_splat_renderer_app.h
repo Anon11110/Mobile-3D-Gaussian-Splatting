@@ -3,9 +3,11 @@
 #include "app/application.h"
 #include "app/camera.h"
 #include "core/containers/memory.h"
+#include "core/containers/string.h"
 #include "core/containers/vector.h"
 #include "core/math/math.h"
 #include "core/timer.h"
+#include "engine/splat/splat_mesh.h"
 #include "shaders/shaderio.h"
 #include <array>
 #include <cstdlib>
@@ -21,6 +23,7 @@
 #endif
 #include "buffer_memory_tracker.h"
 #include <msplat/engine/rendering/shader_factory.h>
+#include <msplat/engine/scene/scene.h>
 
 namespace rhi
 {
@@ -44,7 +47,6 @@ class DeviceManager;
 
 namespace engine
 {
-class Scene;
 class ISplatSortBackend;
 }        // namespace engine
 }        // namespace msplat
@@ -116,16 +118,19 @@ class HybridSplatRendererApp : public app::IApplication
 	{
 #if defined(__ANDROID__)
 		return "models/flowers_1.ply";        // Path inside APK assets
-		                                      // return "models/train_7000.ply";
 #else
 		return "assets/flowers_1.ply";        // Desktop path
-		                                      // return "assets/train_7000.ply";
 #endif
 	}
 
   private:
 	void LoadSplatFile(const char *filepath);
 	void CreateTestSplatData();
+
+	// Dynamic model management
+	void OnSceneBuffersChanged(const engine::Scene::GpuData &gpuData, uint32_t newSplatCount);
+	void RebindSceneDescriptors(uint32_t newSplatCount);
+	void ReinitializeSortBackend(uint32_t newSplatCount);
 
 	app::DeviceManager *m_deviceManager = nullptr;
 
@@ -134,6 +139,7 @@ class HybridSplatRendererApp : public app::IApplication
 	container::unique_ptr<engine::Scene>             m_scene;
 	container::unique_ptr<engine::ISplatSortBackend> m_backend;
 	BackendType                                      m_currentBackendType = BackendType::GPU;
+	int                                              m_currentSortMethod  = 1;        // 0=Prescan, 1=IntegratedScan
 
 	void SwitchBackend(BackendType newType);
 
@@ -177,6 +183,33 @@ class HybridSplatRendererApp : public app::IApplication
 	container::vector<math::vec3> m_testSplatPositions;
 
 	container::string m_splatPath;
+
+	// Predefined models for easy selection
+	struct PredefinedModel
+	{
+		const char *name;
+		const char *path;
+	};
+#if defined(__ANDROID__)
+	static constexpr PredefinedModel k_predefinedModels[] = {
+	    {"Flowers", "models/flowers_1.ply"},
+	    {"Train (30K)", "models/train_30000.ply"},
+	};
+#else
+	static constexpr PredefinedModel k_predefinedModels[] = {
+	    {"Flowers", "assets/flowers_1.ply"},
+	    {"Train (30K)", "assets/train_30000.ply"},
+	};
+#endif
+	static constexpr int k_predefinedModelCount = sizeof(k_predefinedModels) / sizeof(k_predefinedModels[0]);
+
+	// Dynamic model management state
+	container::vector<engine::SplatMesh::ID> m_loadedMeshIds;
+	int                                      m_selectedModelIndex = 0;
+	bool                                     m_pendingModelLoad   = false;
+	container::string                        m_pendingModelPath;
+	bool                                     m_pendingMeshRemoval   = false;
+	engine::SplatMesh::ID                    m_pendingMeshRemovalId = 0;
 
 #if defined(__ANDROID__)
 

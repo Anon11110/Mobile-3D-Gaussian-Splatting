@@ -1,9 +1,11 @@
 #pragma once
 
+#include <functional>
 #include <future>
 #include <memory>
 #include <msplat/core/containers/filesystem.h>
 #include <msplat/core/containers/memory.h>
+#include <msplat/core/containers/unordered_map.h>
 #include <msplat/core/containers/vector.h>
 #include <msplat/engine/sorting/cpu_splat_sorter.h>
 #include <msplat/engine/splat/splat_loader.h>
@@ -34,6 +36,18 @@ class Scene
 		rhi::BufferHandle sortedIndices;
 	};
 
+	// Tracks which GPU buffer range belongs to each mesh
+	struct MeshGpuRange
+	{
+		uint32_t   startIndex;        // First splat index in consolidated buffer
+		uint32_t   splatCount;        // Number of splats for this mesh
+		math::mat4 transform;         // Local transform
+	};
+
+	// Callback type for buffer change notifications
+	// Called after ReallocateAndUpload() completes, allowing apps to rebind descriptors
+	using BufferChangeCallback = std::function<void(const GpuData &, uint32_t newSplatCount)>;
+
 	explicit Scene(rhi::IRHIDevice *device);
 	~Scene() = default;
 
@@ -59,6 +73,18 @@ class Scene
 	const GpuData &GetGpuData() const;
 	uint32_t       GetTotalSplatCount() const;
 	bool           IsAttributeDataUploaded() const;
+
+	// Reallocates GPU buffers after mesh add/remove
+	rhi::FenceHandle ReallocateAndUpload();
+
+	// Set callback to be notified when GPU buffers change
+	void SetBufferChangeCallback(BufferChangeCallback callback);
+
+	// Helper to find which mesh owns a specific splat index
+	SplatMesh::ID GetMeshIDFromSplatIndex(uint32_t globalIndex) const;
+
+	// Get the GPU range for a specific mesh
+	const MeshGpuRange *GetMeshGpuRange(SplatMesh::ID id) const;
 
 	// CPU memory usage breakdown for profiling
 	struct CpuMemoryInfo
@@ -100,8 +126,16 @@ class Scene
 	// Store last sorted indices for verification
 	mutable container::vector<uint32_t> lastSortedIndices;
 
+	// Dynamic scene management
+	container::unordered_map<SplatMesh::ID, MeshGpuRange> meshGpuRanges;
+	BufferChangeCallback                                  bufferChangeCallback;
+
 	uint32_t CalculateMaxShCoeffsPerSplat() const;
 	void     UpdateSplatPositions();
+
+	// Internal versions without locking
+	void             AllocateGpuBuffersInternal();
+	rhi::FenceHandle UploadAttributeDataInternal();
 };
 
 template <typename Func>

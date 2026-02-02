@@ -23,12 +23,7 @@ SplatMesh::ID Scene::AddMesh(container::shared_ptr<SplatSoA> splatData,
 
 	std::lock_guard<std::mutex> lock(meshesMutex);
 
-	// Allow adding meshes as long as attribute data hasn't been uploaded
-	if (attributeDataUploaded)
-	{
-		LOG_ERROR("Cannot add mesh after attribute data has been uploaded");
-		return SplatMesh::ID(-1);
-	}
+	const bool needsReallocation = attributeDataUploaded;
 
 	SplatMesh::ID meshId = nextMeshId++;
 	meshes.emplace_back(meshId, std::move(splatData), initialTransform);
@@ -38,6 +33,42 @@ SplatMesh::ID Scene::AddMesh(container::shared_ptr<SplatSoA> splatData,
 	LOG_INFO("Added mesh {} with {} splats. Total: {} splats",
 	         meshId, meshes.back().GetSplatData()->numSplats, totalSplatCount);
 
+	// If GPU data was already uploaded, reallocate and re-upload everything
+	if (needsReallocation)
+	{
+		LOG_INFO("Dynamic mesh addition, triggering ReallocateAndUpload()");
+
+		gpuBuffersAllocated   = false;
+		attributeDataUploaded = false;
+
+		// Wait for GPU, release old buffers, reallocate, and re-upload
+		device->WaitIdle();
+
+		gpuData.positions     = nullptr;
+		gpuData.covariances3D = nullptr;
+		gpuData.colors        = nullptr;
+		gpuData.shRest        = nullptr;
+		gpuData.sortedIndices = nullptr;
+		meshGpuRanges.clear();
+
+		cpuSplatSorter.reset();
+		splatPositions.clear();
+		lastSortedIndices.clear();
+
+		AllocateGpuBuffersInternal();
+		rhi::FenceHandle fence = UploadAttributeDataInternal();
+		if (fence)
+		{
+			fence->Wait(UINT64_MAX);
+		}
+
+		// Invoke callback to notify app of buffer changes
+		if (bufferChangeCallback)
+		{
+			bufferChangeCallback(gpuData, totalSplatCount);
+		}
+	}
+
 	return meshId;
 }
 
@@ -45,39 +76,81 @@ bool Scene::RemoveMesh(SplatMesh::ID id)
 {
 	std::lock_guard<std::mutex> lock(meshesMutex);
 
-	if (attributeDataUploaded)
-	{
-		LOG_ERROR("Cannot remove mesh after attribute data has been uploaded");
-		return false;
-	}
-
 	auto it = std::find_if(meshes.begin(), meshes.end(),
 	                       [id](const SplatMesh &mesh) { return mesh.GetId() == id; });
 
-	if (it != meshes.end())
+	if (it == meshes.end())
 	{
-		if (it->HasCpuData())
-		{
-			totalSplatCount -= it->GetSplatData()->numSplats;
-		}
-
-		if (it != meshes.end() - 1)
-		{
-			std::swap(*it, meshes.back());
-		}
-		meshes.pop_back();
-
-		LOG_INFO("Removed mesh {}. Total: {} splats", id, totalSplatCount);
-		return true;
+		LOG_WARNING("Mesh {} not found for removal", id);
+		return false;
 	}
 
-	return false;
+	const bool needsReallocation = attributeDataUploaded;
+
+	if (it->HasCpuData())
+	{
+		totalSplatCount -= it->GetSplatData()->numSplats;
+	}
+
+	// Remove mesh using swap-and-pop
+	if (it != meshes.end() - 1)
+	{
+		std::swap(*it, meshes.back());
+	}
+	meshes.pop_back();
+
+	LOG_INFO("Removed mesh {}. Total: {} splats", id, totalSplatCount);
+
+	// If GPU data was already uploaded, reallocate and re-upload everything
+	if (needsReallocation)
+	{
+		LOG_INFO("Dynamic mesh removal - triggering ReallocateAndUpload()");
+
+		gpuBuffersAllocated   = false;
+		attributeDataUploaded = false;
+
+		// Wait for GPU, release old buffers, reallocate, and re-upload
+		device->WaitIdle();
+
+		gpuData.positions     = nullptr;
+		gpuData.covariances3D = nullptr;
+		gpuData.colors        = nullptr;
+		gpuData.shRest        = nullptr;
+		gpuData.sortedIndices = nullptr;
+		meshGpuRanges.clear();
+
+		cpuSplatSorter.reset();
+		splatPositions.clear();
+		lastSortedIndices.clear();
+
+		if (totalSplatCount > 0)
+		{
+			AllocateGpuBuffersInternal();
+			rhi::FenceHandle fence = UploadAttributeDataInternal();
+			if (fence)
+			{
+				fence->Wait(UINT64_MAX);
+			}
+		}
+
+		// Invoke callback to notify app of buffer changes
+		if (bufferChangeCallback)
+		{
+			bufferChangeCallback(gpuData, totalSplatCount);
+		}
+	}
+
+	return true;
 }
 
 rhi::FenceHandle Scene::UploadAttributeData()
 {
 	std::lock_guard<std::mutex> lock(meshesMutex);
+	return UploadAttributeDataInternal();
+}
 
+rhi::FenceHandle Scene::UploadAttributeDataInternal()
+{
 	if (attributeDataUploaded)
 	{
 		LOG_WARNING("Attribute data has already been uploaded");
@@ -118,6 +191,9 @@ rhi::FenceHandle Scene::UploadAttributeData()
 	colors.reserve(totalSplatCount * 4);
 	shRest.reserve(totalShCoeffs);
 
+	meshGpuRanges.clear();
+	uint32_t currentSplatOffset = 0;
+
 	// Consolidate all mesh data
 	for (const auto &mesh : meshes)
 	{
@@ -126,6 +202,13 @@ rhi::FenceHandle Scene::UploadAttributeData()
 			continue;
 
 		uint32_t count = splatData->numSplats;
+
+		// Record the GPU range for this mesh
+		MeshGpuRange range;
+		range.startIndex            = currentSplatOffset;
+		range.splatCount            = count;
+		range.transform             = mesh.GetModelMatrix();
+		meshGpuRanges[mesh.GetId()] = range;
 
 		// Pack attributes in SoA format
 		for (uint32_t i = 0; i < count; ++i)
@@ -162,7 +245,7 @@ rhi::FenceHandle Scene::UploadAttributeData()
 			covariances.push_back(cov[5]);        // M33
 			covariances.push_back(0.0f);          // padding
 
-			// Color - convert SH degree 0 and opacity
+			// Color: convert SH degree 0 and opacity
 			math::vec3 rgb   = ComputeSHDegree0Color(splatData->fDc0[i], splatData->fDc1[i], splatData->fDc2[i]);
 			float      alpha = TransformOpacity(splatData->opacity[i]);
 
@@ -177,6 +260,8 @@ rhi::FenceHandle Scene::UploadAttributeData()
 		{
 			shRest.push_back(coeff);
 		}
+
+		currentSplatOffset += count;
 	}
 
 	std::vector<rhi::FenceHandle> uploadFences;
@@ -224,9 +309,8 @@ rhi::FenceHandle Scene::UploadAttributeData()
 	attributeDataUploaded = true;
 	gpuBuffersAllocated   = true;
 
-	LOG_INFO("Uploaded {} splats to GPU", totalSplatCount);
+	LOG_INFO("Uploaded {} splats to GPU ({} meshes)", totalSplatCount, meshGpuRanges.size());
 
-	// Create and return a composite fence that waits for all uploads
 	if (!uploadFences.empty())
 	{
 		return device->CreateCompositeFence(uploadFences);
@@ -240,6 +324,77 @@ const Scene::GpuData &Scene::GetGpuData() const
 	return gpuData;
 }
 
+rhi::FenceHandle Scene::ReallocateAndUpload()
+{
+	std::lock_guard<std::mutex> lock(meshesMutex);
+
+	// Wait for GPU, release old buffers, reallocate, and re-upload
+	device->WaitIdle();
+
+	gpuBuffersAllocated   = false;
+	attributeDataUploaded = false;
+
+	gpuData.positions     = nullptr;
+	gpuData.covariances3D = nullptr;
+	gpuData.colors        = nullptr;
+	gpuData.shRest        = nullptr;
+	gpuData.sortedIndices = nullptr;
+
+	meshGpuRanges.clear();
+
+	cpuSplatSorter.reset();
+	splatPositions.clear();
+	lastSortedIndices.clear();
+
+	rhi::FenceHandle fence = nullptr;
+	if (totalSplatCount > 0)
+	{
+		AllocateGpuBuffersInternal();
+		fence = UploadAttributeDataInternal();
+	}
+
+	// Invoke callback to notify app of buffer changes
+	if (bufferChangeCallback)
+	{
+		bufferChangeCallback(gpuData, totalSplatCount);
+	}
+
+	LOG_INFO("ReallocateAndUpload complete: {} splats", totalSplatCount);
+	return fence;
+}
+
+void Scene::SetBufferChangeCallback(BufferChangeCallback callback)
+{
+	bufferChangeCallback = std::move(callback);
+}
+
+SplatMesh::ID Scene::GetMeshIDFromSplatIndex(uint32_t globalIndex) const
+{
+	std::lock_guard<std::mutex> lock(meshesMutex);
+
+	for (const auto &[meshId, range] : meshGpuRanges)
+	{
+		if (globalIndex >= range.startIndex && globalIndex < range.startIndex + range.splatCount)
+		{
+			return meshId;
+		}
+	}
+
+	return SplatMesh::ID(-1);        // Not found
+}
+
+const Scene::MeshGpuRange *Scene::GetMeshGpuRange(SplatMesh::ID id) const
+{
+	std::lock_guard<std::mutex> lock(meshesMutex);
+
+	auto it = meshGpuRanges.find(id);
+	if (it != meshGpuRanges.end())
+	{
+		return &it->second;
+	}
+	return nullptr;
+}
+
 uint32_t Scene::GetTotalSplatCount() const
 {
 	std::lock_guard<std::mutex> lock(meshesMutex);
@@ -249,7 +404,11 @@ uint32_t Scene::GetTotalSplatCount() const
 void Scene::AllocateGpuBuffers()
 {
 	std::lock_guard<std::mutex> lock(meshesMutex);
+	AllocateGpuBuffersInternal();
+}
 
+void Scene::AllocateGpuBuffersInternal()
+{
 	if (gpuBuffersAllocated)
 	{
 		LOG_WARNING("GPU buffers already allocated");
