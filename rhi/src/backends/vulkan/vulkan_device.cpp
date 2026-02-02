@@ -985,12 +985,44 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		std::vector<VkPhysicalDevice> devices(deviceCount);
 		vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
-		// Pick last suitable device (first is usually the integrated GPU)
-		physicalDevice = devices[devices.size() - 1];
+		// Prefer discrete GPU over integrated
+		auto scoreDevice = [](VkPhysicalDevice device) -> int {
+			VkPhysicalDeviceProperties props;
+			vkGetPhysicalDeviceProperties(device, &props);
 
-		// Query device properties for timestamp period
+			switch (props.deviceType)
+			{
+				case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+					return 1000;
+				case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+					return 100;
+				case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+					return 50;
+				case VK_PHYSICAL_DEVICE_TYPE_CPU:
+					return 10;
+				default:
+					return 0;
+			}
+		};
+
+		physicalDevice = devices[0];
+		int bestScore  = scoreDevice(devices[0]);
+
+		for (size_t i = 1; i < devices.size(); i++)
+		{
+			int score = scoreDevice(devices[i]);
+			if (score > bestScore)
+			{
+				bestScore      = score;
+				physicalDevice = devices[i];
+			}
+		}
+
 		VkPhysicalDeviceProperties deviceProperties;
 		vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+		fprintf(stdout, "Selected GPU: %s (type: %d)\n",
+		        deviceProperties.deviceName, deviceProperties.deviceType);
+
 		timestampPeriod = deviceProperties.limits.timestampPeriod;
 
 		// Find queue families
