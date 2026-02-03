@@ -360,6 +360,88 @@ void HybridSplatRendererApp::SwitchBackend(BackendType newType)
 	LOG_INFO("Switched to {} backend ({})", m_backend->GetName(), m_backend->GetMethodName());
 }
 
+void HybridSplatRendererApp::ProcessPendingOperations()
+{
+	// Backend switch
+	if (m_pendingOps.backendSwitch)
+	{
+		SwitchBackend(m_pendingOps.backendSwitch->targetBackend);
+		m_pendingOps.backendSwitch.reset();
+
+		// Reset profiling frame index to avoid reading stale timestamps from the old backend.
+		// Different backends write different timestamps, which could cause hangs with WAIT flag.
+		if (m_profilingEnabled)
+		{
+			m_profilingFrameIndex = 0;
+			m_currentGpuTiming    = {};
+		}
+	}
+
+	// Async compute toggle
+	if (m_pendingOps.asyncComputeToggle && m_backend)
+	{
+		m_asyncComputeEnabled = m_pendingOps.asyncComputeToggle->enable;
+		m_backend->SetAsyncCompute(m_asyncComputeEnabled);
+		m_pendingOps.asyncComputeToggle.reset();
+
+		// Reset profiling frame index to avoid reading stale timestamps from the old mode.
+		// When switching modes, the timestamps from N frames ago were written under a different
+		// mode, which would cause hangs with WAIT flag.
+		if (m_profilingEnabled)
+		{
+			m_profilingFrameIndex = 0;
+			m_currentGpuTiming    = {};
+		}
+
+		LOG_INFO("Async compute {}", m_asyncComputeEnabled ? "enabled" : "disabled");
+	}
+
+	// Model load
+	if (m_pendingOps.modelLoad)
+	{
+		LOG_INFO("Loading deferred model: {}", m_pendingOps.modelLoad->path);
+
+#if defined(__ANDROID__)
+		// Resolve APK asset path to extracted filesystem path
+		const char *resolvedPath = Android_ResolveAssetPath(m_pendingOps.modelLoad->path.c_str());
+		if (resolvedPath)
+		{
+			LoadSplatFile(resolvedPath);
+		}
+		else
+		{
+			LOG_ERROR("Failed to resolve Android asset path: {}", m_pendingOps.modelLoad->path);
+		}
+#else
+		LoadSplatFile(m_pendingOps.modelLoad->path.c_str());
+#endif
+		m_pendingOps.modelLoad.reset();
+	}
+
+	// Mesh removal
+	if (m_pendingOps.meshRemoval)
+	{
+		engine::SplatMesh::ID meshId = m_pendingOps.meshRemoval->meshId;
+		LOG_INFO("Removing deferred mesh: {}", meshId);
+
+		if (m_scene->RemoveMesh(meshId))
+		{
+			auto it = std::find(m_loadedMeshIds.begin(), m_loadedMeshIds.end(), meshId);
+			if (it != m_loadedMeshIds.end())
+			{
+				if (it != m_loadedMeshIds.end() - 1)
+				{
+					std::swap(*it, m_loadedMeshIds.back());
+				}
+				m_loadedMeshIds.pop_back();
+			}
+
+			m_meshTransforms.erase(meshId);
+		}
+		m_pendingOps.meshRemoval.reset();
+	}
+}
+
 void HybridSplatRendererApp::OnUpdate(float deltaTime)
 {
 	m_camera.Update(deltaTime, m_deviceManager->GetWindow());
@@ -397,79 +479,8 @@ void HybridSplatRendererApp::OnRender()
 		return;
 	}
 
-	// Backend switch and async compute toggle must happen before any rendering/sorting
-	if (m_pendingBackendSwitch)
-	{
-		m_pendingBackendSwitch = false;
-		SwitchBackend(m_pendingBackendType);
-
-		// Reset profiling frame index to avoid reading stale timestamps from the old backend.
-		// Different backends write different timestamps, which could cause hangs with WAIT flag.
-		if (m_profilingEnabled)
-		{
-			m_profilingFrameIndex = 0;
-			m_currentGpuTiming    = {};
-		}
-	}
-
-	if (m_pendingAsyncComputeToggle && m_backend)
-	{
-		m_pendingAsyncComputeToggle = false;
-		m_backend->SetAsyncCompute(m_asyncComputeEnabled);
-
-		// Reset profiling frame index to avoid reading stale timestamps from the old mode.
-		// When switching modes, the timestamps from N frames ago were written under a different
-		// mode, which would cause hangs with WAIT flag.
-		if (m_profilingEnabled)
-		{
-			m_profilingFrameIndex = 0;
-			m_currentGpuTiming    = {};
-		}
-
-		LOG_INFO("Async compute {}", m_asyncComputeEnabled ? "enabled" : "disabled");
-	}
-
-	// Deferred model loading and mesh removal to frame boundary
-	if (m_pendingModelLoad)
-	{
-		m_pendingModelLoad = false;
-		LOG_INFO("Loading deferred model: {}", m_pendingModelPath);
-
-#if defined(__ANDROID__)
-		// Resolve APK asset path to extracted filesystem path
-		const char *resolvedPath = Android_ResolveAssetPath(m_pendingModelPath.c_str());
-		if (resolvedPath)
-		{
-			LoadSplatFile(resolvedPath);
-		}
-		else
-		{
-			LOG_ERROR("Failed to resolve Android asset path: {}", m_pendingModelPath);
-		}
-#else
-		LoadSplatFile(m_pendingModelPath.c_str());
-#endif
-	}
-
-	if (m_pendingMeshRemoval)
-	{
-		m_pendingMeshRemoval = false;
-		LOG_INFO("Removing deferred mesh: {}", m_pendingMeshRemovalId);
-		if (m_scene->RemoveMesh(m_pendingMeshRemovalId))
-		{
-			auto it = std::find(m_loadedMeshIds.begin(), m_loadedMeshIds.end(), m_pendingMeshRemovalId);
-			if (it != m_loadedMeshIds.end())
-			{
-				if (it != m_loadedMeshIds.end() - 1)
-				{
-					std::swap(*it, m_loadedMeshIds.back());
-				}
-				m_loadedMeshIds.pop_back();
-			}
-
-			m_meshTransforms.erase(m_pendingMeshRemovalId);
-		}
-	}
+	// Process deferred operations at frame boundary
+	ProcessPendingOperations();
 
 	// Acquire next image (skip in vsync bypass mode)
 	uint32_t acquireSemIndex = m_frameCount % m_imageAvailableSemaphores.size();
@@ -948,11 +959,13 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 				break;
 
 			case GLFW_KEY_C:
+			{
 				// Switch between CPU and GPU backends in the next frame
-				m_pendingBackendSwitch = true;
-				m_pendingBackendType   = (m_currentBackendType == BackendType::GPU) ? BackendType::CPU : BackendType::GPU;
-				LOG_INFO("Backend switch to {} scheduled", m_pendingBackendType == BackendType::GPU ? "GPU" : "CPU");
+				BackendType targetBackend  = (m_currentBackendType == BackendType::GPU) ? BackendType::CPU : BackendType::GPU;
+				m_pendingOps.backendSwitch = PendingOperations::BackendSwitch{targetBackend};
+				LOG_INFO("Backend switch to {} scheduled", targetBackend == BackendType::GPU ? "GPU" : "CPU");
 				break;
+			}
 
 			case GLFW_KEY_H:
 				// Toggle ImGui visibility (only if ImGui is enabled)
@@ -2182,8 +2195,7 @@ void HybridSplatRendererApp::RenderImGui()
 		const char *backends[]   = {"GPU", "CPU"};
 		if (ImGui::Combo("##Backend", &backendIndex, backends, 2))
 		{
-			m_pendingBackendSwitch = true;
-			m_pendingBackendType   = static_cast<BackendType>(backendIndex);
+			m_pendingOps.backendSwitch = PendingOperations::BackendSwitch{static_cast<BackendType>(backendIndex)};
 		}
 
 		// Backend-specific info
@@ -2222,10 +2234,11 @@ void HybridSplatRendererApp::RenderImGui()
 				}
 
 				// Async compute toggle
-				if (ImGui::Checkbox("Async Compute", &m_asyncComputeEnabled))
+				bool asyncEnabled = m_asyncComputeEnabled;
+				if (ImGui::Checkbox("Async Compute", &asyncEnabled))
 				{
-					m_pendingAsyncComputeToggle = true;
-					LOG_INFO("Async compute toggle scheduled: {}", m_asyncComputeEnabled ? "enable" : "disable");
+					m_pendingOps.asyncComputeToggle = PendingOperations::AsyncComputeToggle{asyncEnabled};
+					LOG_INFO("Async compute toggle scheduled: {}", asyncEnabled ? "enable" : "disable");
 				}
 			}
 		}
@@ -2267,8 +2280,7 @@ void HybridSplatRendererApp::RenderImGui()
 		{
 			const char *modelPath = k_predefinedModels[m_selectedModelIndex].path;
 			LOG_INFO("Queuing model load: {} ({})", k_predefinedModels[m_selectedModelIndex].name, modelPath);
-			m_pendingModelLoad = true;
-			m_pendingModelPath = modelPath;
+			m_pendingOps.modelLoad = PendingOperations::ModelLoad{modelPath};
 		}
 
 		// List loaded meshes with remove buttons and transform controls
@@ -2308,8 +2320,7 @@ void HybridSplatRendererApp::RenderImGui()
 					{
 						// Defer removal to frame boundary
 						LOG_INFO("Queuing mesh {} for removal", meshId);
-						m_pendingMeshRemoval   = true;
-						m_pendingMeshRemovalId = meshId;
+						m_pendingOps.meshRemoval = PendingOperations::MeshRemoval{meshId};
 					}
 
 					// Transform controls

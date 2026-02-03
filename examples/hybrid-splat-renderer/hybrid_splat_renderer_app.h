@@ -15,6 +15,7 @@
 #include <deque>
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
+#include <optional>
 #if defined(__ANDROID__)
 #	include <android/input.h>
 #	include <android/native_window.h>
@@ -54,15 +55,56 @@ class ISplatSortBackend;
 
 using namespace msplat;
 
-/// Backend type for runtime switching
+// Backend type for runtime switching
 enum class BackendType
 {
 	GPU = 0,
 	CPU = 1
 };
 
-/// Hybrid Splat Renderer Application
-/// Supports runtime switching between CPU and GPU sorting backends
+// Pending frame-boundary operations
+// These operations are deferred to the start of OnRender() to ensure they execute
+// at a safe point in the frame lifecycle (after fence wait, before rendering).
+struct PendingOperations
+{
+	struct BackendSwitch
+	{
+		BackendType targetBackend;
+	};
+	struct AsyncComputeToggle
+	{
+		bool enable;
+	};
+	struct ModelLoad
+	{
+		container::string path;
+	};
+	struct MeshRemoval
+	{
+		engine::SplatMesh::ID meshId;
+	};
+
+	std::optional<BackendSwitch>      backendSwitch;
+	std::optional<AsyncComputeToggle> asyncComputeToggle;
+	std::optional<ModelLoad>          modelLoad;
+	std::optional<MeshRemoval>        meshRemoval;
+
+	bool HasPending() const
+	{
+		return backendSwitch || asyncComputeToggle || modelLoad || meshRemoval;
+	}
+
+	void Clear()
+	{
+		backendSwitch.reset();
+		asyncComputeToggle.reset();
+		modelLoad.reset();
+		meshRemoval.reset();
+	}
+};
+
+// Hybrid Splat Renderer Application
+// Supports runtime switching between CPU and GPU sorting backends
 class HybridSplatRendererApp : public app::IApplication
 {
   public:
@@ -143,6 +185,7 @@ class HybridSplatRendererApp : public app::IApplication
 	int                                              m_currentSortMethod  = 1;        // 0=Prescan, 1=IntegratedScan
 
 	void SwitchBackend(BackendType newType);
+	void ProcessPendingOperations();
 
 	container::unique_ptr<engine::ShaderFactory> m_shaderFactory;
 
@@ -176,10 +219,8 @@ class HybridSplatRendererApp : public app::IApplication
 	bool              m_crossBackendVerifyEnabled   = false;        // Cross-backend verification mode
 	bool              m_crossBackendVerifyRequested = false;        // Run verification on next frame
 	container::string m_crossBackendVerifyResult;                   // Last verification result
-	bool              m_pendingBackendSwitch      = false;          // Defer backend switch to next frame
-	BackendType       m_pendingBackendType        = BackendType::GPU;
-	bool              m_pendingAsyncComputeToggle = false;        // Defer async compute toggle to next frame
-	uint32_t          m_frameCount                = 0;
+	PendingOperations m_pendingOps;                                 // Deferred frame-boundary operations
+	uint32_t          m_frameCount = 0;
 
 	container::vector<math::vec3> m_testSplatPositions;
 
@@ -207,10 +248,6 @@ class HybridSplatRendererApp : public app::IApplication
 	// Dynamic model management state
 	container::vector<engine::SplatMesh::ID> m_loadedMeshIds;
 	int                                      m_selectedModelIndex = 0;
-	bool                                     m_pendingModelLoad   = false;
-	container::string                        m_pendingModelPath;
-	bool                                     m_pendingMeshRemoval   = false;
-	engine::SplatMesh::ID                    m_pendingMeshRemovalId = 0;
 
 	// Per-mesh transform state for ImGui controls
 	struct MeshTransformState
