@@ -24,6 +24,7 @@
 #	include <imgui_impl_glfw.h>
 #endif
 #include "buffer_memory_tracker.h"
+#include <msplat/engine/rendering/compute_splat_rasterizer.h>
 #include <msplat/engine/rendering/shader_factory.h>
 #include <msplat/engine/scene/scene.h>
 
@@ -182,7 +183,11 @@ class HybridSplatRendererApp : public app::IApplication
 	container::unique_ptr<engine::Scene>             m_scene;
 	container::unique_ptr<engine::ISplatSortBackend> m_backend;
 	BackendType                                      m_currentBackendType = BackendType::GPU;
-	int                                              m_currentSortMethod  = 1;        // 0=Prescan, 1=IntegratedScan
+
+	// Compute rasterizer
+	container::unique_ptr<engine::ComputeSplatRasterizer> m_computeRasterizer;
+	bool                                                  m_computeRasterizerEnabled = false;
+	int                                                   m_currentSortMethod        = 1;        // 0=Prescan, 1=IntegratedScan
 
 	void SwitchBackend(BackendType newType);
 	void ProcessPendingOperations();

@@ -285,6 +285,17 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	// Initialize GPU profiling
 	InitGpuProfiling();
 
+	// Initialize compute rasterizer
+	if (m_scene->GetTotalSplatCount() > 0)
+	{
+		int fbWidth, fbHeight;
+		deviceManager->GetPlatformAdapter()->GetFramebufferSize(&fbWidth, &fbHeight);
+
+		m_computeRasterizer = container::make_unique<engine::ComputeSplatRasterizer>(device, vfs);
+		m_computeRasterizer->Initialize(static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight), m_scene->GetTotalSplatCount());
+		LOG_INFO("Compute rasterizer initialized for {} splats ({}x{})", m_scene->GetTotalSplatCount(), fbWidth, fbHeight);
+	}
+
 	if (m_imguiEnabled)
 	{
 		InitImGui();
@@ -670,6 +681,12 @@ void HybridSplatRendererApp::OnRender()
 		}
 	}
 
+	// Test compute rasterizer preprocess pass if enabled
+	if (m_computeRasterizer && m_computeRasterizerEnabled)
+	{
+		m_computeRasterizer->RecordPreprocess(cmdList, *m_scene, ubo);
+	}
+
 	// Log FPS periodically
 	if (m_frameCount % 60 == 0 && m_fpsCounter.shouldUpdate())
 	{
@@ -890,6 +907,7 @@ void HybridSplatRendererApp::OnShutdown()
 	m_quadIndexBuffer = nullptr;
 	m_sortedIndices   = nullptr;
 
+	m_computeRasterizer.reset();
 	m_backend.reset();
 	m_scene.reset();
 	m_shaderFactory.reset();
@@ -1425,6 +1443,18 @@ void HybridSplatRendererApp::ReinitializeSortBackend(uint32_t newSplatCount)
 	LOG_INFO("Reinitialized {} sort backend for {} splats",
 	         m_currentBackendType == BackendType::GPU ? "GPU" : "CPU",
 	         newSplatCount);
+
+	// Reinitialize compute rasterizer with new splat count
+	if (m_computeRasterizer)
+	{
+		int fbWidth, fbHeight;
+		m_deviceManager->GetPlatformAdapter()->GetFramebufferSize(&fbWidth, &fbHeight);
+
+		// Recreate with new max splat count
+		m_computeRasterizer = container::make_unique<engine::ComputeSplatRasterizer>(device, vfs);
+		m_computeRasterizer->Initialize(static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight), newSplatCount);
+		LOG_INFO("Compute rasterizer reinitialized for {} splats", newSplatCount);
+	}
 }
 
 void HybridSplatRendererApp::RecreateSwapchain()
@@ -1459,6 +1489,12 @@ void HybridSplatRendererApp::RecreateSwapchain()
 	// Update camera aspect ratio
 	float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 	m_camera.SetPerspectiveProjection(45.0f, aspectRatio, 0.1f, 1000.0f);
+
+	// Resize compute rasterizer if initialized
+	if (m_computeRasterizer && m_computeRasterizer->IsInitialized())
+	{
+		m_computeRasterizer->Resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+	}
 
 	LOG_INFO("Swapchain resized: {}x{}", width, height);
 }
@@ -2239,6 +2275,45 @@ void HybridSplatRendererApp::RenderImGui()
 				{
 					m_pendingOps.asyncComputeToggle = PendingOperations::AsyncComputeToggle{asyncEnabled};
 					LOG_INFO("Async compute toggle scheduled: {}", asyncEnabled ? "enable" : "disable");
+				}
+			}
+		}
+
+		// Compute Rasterizer section
+		if (m_computeRasterizer && m_computeRasterizer->IsInitialized())
+		{
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Text("Compute Rasterizer (Experimental)");
+			ImGui::Separator();
+
+			if (ImGui::Checkbox("Enable Tile-Based Preprocess", &m_computeRasterizerEnabled))
+			{
+				LOG_INFO("Compute rasterizer preprocess {}", m_computeRasterizerEnabled ? "enabled" : "disabled");
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("(?)");
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::BeginTooltip();
+				ImGui::Text("Experimental tile-based compute pipeline");
+				ImGui::Text("Currently only runs preprocess pass for verification");
+				ImGui::EndTooltip();
+			}
+
+			if (m_computeRasterizerEnabled)
+			{
+				uint32_t tileInstanceCount = m_computeRasterizer->ReadTileInstanceCount();
+				auto     stats             = m_computeRasterizer->GetStatistics();
+				auto     tileConfig        = m_computeRasterizer->GetTileConfig();
+
+				ImGui::Text("Tile Instances: %u", tileInstanceCount);
+				ImGui::Text("Tiles: %u x %u = %u", tileConfig.tilesX, tileConfig.tilesY, tileConfig.totalTiles);
+
+				if (stats.activeSplats > 0)
+				{
+					float avgTiles = static_cast<float>(tileInstanceCount) / static_cast<float>(stats.activeSplats);
+					ImGui::Text("Avg Tiles/Splat: %.2f", avgTiles);
 				}
 			}
 		}

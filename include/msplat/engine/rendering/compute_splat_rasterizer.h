@@ -1,0 +1,156 @@
+#pragma once
+
+#include <msplat/app/camera.h>
+#include <msplat/core/containers/memory.h>
+#include <msplat/core/containers/vector.h>
+#include <msplat/core/vfs.h>
+#include <msplat/engine/scene/scene.h>
+#include <msplat/engine/sorting/gpu_splat_sorter.h>
+#include <rhi/rhi.h>
+
+struct FrameUBO;
+
+namespace msplat::engine
+{
+
+// Configuration for tile-based rendering
+struct TileConfig
+{
+	uint32_t tileSize     = 16;        // Tile size in pixels (typically 16)
+	uint32_t screenWidth  = 0;         // Screen width in pixels
+	uint32_t screenHeight = 0;         // Screen height in pixels
+	uint32_t tilesX       = 0;         // Number of tiles in X dimension
+	uint32_t tilesY       = 0;         // Number of tiles in Y dimension
+	uint32_t totalTiles   = 0;         // Total number of tiles
+
+	void Update(uint32_t width, uint32_t height)
+	{
+		screenWidth  = width;
+		screenHeight = height;
+		tilesX       = (width + tileSize - 1) / tileSize;
+		tilesY       = (height + tileSize - 1) / tileSize;
+		totalTiles   = tilesX * tilesY;
+	}
+};
+
+// Tile-based compute rasterization pipeline for 3D Gaussian Splatting:
+//
+// 1. Preprocess: Project 3D Gaussians to 2D, evaluate SH, compute tile coverage
+// 2. Sort: Sort by (TileID << 16 | Depth16) using existing radix sort
+// 3. Identify Ranges: Find start/end indices for each tile
+// 4. Rasterize: Per-tile workgroups blend splats and write to storage image
+class ComputeSplatRasterizer
+{
+  public:
+	ComputeSplatRasterizer(rhi::IRHIDevice *device, container::shared_ptr<vfs::IFileSystem> vfs = nullptr);
+	~ComputeSplatRasterizer() = default;
+
+	ComputeSplatRasterizer(const ComputeSplatRasterizer &)                = delete;
+	ComputeSplatRasterizer &operator=(const ComputeSplatRasterizer &)     = delete;
+	ComputeSplatRasterizer(ComputeSplatRasterizer &&) noexcept            = default;
+	ComputeSplatRasterizer &operator=(ComputeSplatRasterizer &&) noexcept = default;
+
+	void Initialize(uint32_t screenWidth, uint32_t screenHeight, uint32_t maxSplatCount);
+	void Resize(uint32_t screenWidth, uint32_t screenHeight);
+	void RecordPreprocess(rhi::IRHICommandList *cmdList, const Scene &scene, const FrameUBO &frameUBO);
+
+	/// Get the global counter value (number of tile instances emitted)
+	uint32_t ReadTileInstanceCount();
+
+	const TileConfig &GetTileConfig() const
+	{
+		return m_tileConfig;
+	}
+
+	struct Statistics
+	{
+		uint32_t activeSplats;              // Number of splats after culling
+		uint32_t totalTileInstances;        // Total tile-splat pairs emitted
+		float    avgTilesPerSplat;          // Average tiles touched per visible splat
+		double   preprocessMs;              // Preprocess pass duration
+		double   sortMs;                    // Sort pass duration
+		double   rangesMs;                  // Identify ranges pass duration
+		double   rasterMs;                  // Rasterization pass duration
+	};
+
+	Statistics GetStatistics() const
+	{
+		return m_stats;
+	}
+
+	struct BufferInfo
+	{
+		rhi::BufferHandle geometryBuffer;         // Gaussian2D per splat
+		rhi::BufferHandle tileKeys;               // Packed tile keys
+		rhi::BufferHandle tileValues;             // Splat indices
+		rhi::BufferHandle tileRanges;             // Per-tile start/end
+		rhi::BufferHandle globalCounter;          // Atomic counter
+		rhi::BufferHandle counterReadback;        // CPU-readable counter copy
+	};
+
+	BufferInfo GetBufferInfo() const;
+
+	bool IsInitialized() const
+	{
+		return m_isInitialized;
+	}
+
+  private:
+	void CreateBuffers(uint32_t maxSplatCount);
+	void CreateComputePipelines();
+	void CreateDescriptorSets();
+	void RebindSceneDescriptors(const Scene &scene);
+
+	struct PreprocessPC
+	{
+		uint32_t numSplats;
+		uint32_t tilesX;
+		uint32_t tilesY;
+		uint32_t tileSize;
+		float    nearPlane;
+		float    farPlane;
+		uint32_t maxTileInstances;
+		uint32_t _pad0;
+	};
+
+	static constexpr uint32_t WorkgroupSize    = 256;
+	static constexpr uint32_t MaxTilesPerSplat = 9;        // 3x3 tile coverage max
+	static constexpr float    DefaultNearPlane = 0.1f;
+	static constexpr float    DefaultFarPlane  = 100.0f;
+
+	rhi::IRHIDevice                        *m_device;
+	container::shared_ptr<vfs::IFileSystem> m_vfs;
+	TileConfig                              m_tileConfig;
+	bool                                    m_isInitialized = false;
+
+	uint32_t m_maxSplatCount    = 0;
+	uint32_t m_maxTileInstances = 0;
+
+	// Buffers
+	rhi::BufferHandle m_geometryBuffer;         // Gaussian2D[] - preprocessed 2D data
+	rhi::BufferHandle m_tileKeys;               // uint32_t[] - packed tile keys
+	rhi::BufferHandle m_tileValues;             // uint32_t[] - splat indices
+	rhi::BufferHandle m_tileRanges;             // int2[] - per-tile start/end
+	rhi::BufferHandle m_globalCounter;          // uint32_t - atomic counter
+	rhi::BufferHandle m_counterReadback;        // CPU-readable copy of counter
+	rhi::BufferHandle m_frameUBO;               // FrameUBO for preprocess shader
+
+	// Pipelines
+	rhi::PipelineHandle m_preprocessPipeline;
+
+	// Descriptor set layouts
+	rhi::DescriptorSetLayoutHandle m_preprocessLayout;
+
+	rhi::DescriptorSetHandle m_preprocessDescriptorSet;
+
+	// Track bound scene for descriptor rebinding
+	const Scene *m_lastBoundScene = nullptr;
+
+	Statistics m_stats = {};
+
+	// Near/far planes for depth encoding (can be configured)
+	float m_nearPlane = DefaultNearPlane;
+	float m_farPlane  = DefaultFarPlane;
+};
+
+}        // namespace msplat::engine

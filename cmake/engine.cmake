@@ -15,8 +15,11 @@ set(ENGINE_HEADERS
     # Rendering
     ${MSPLAT_ROOT}/include/msplat/engine/rendering/shader_factory.h
     ${MSPLAT_ROOT}/include/msplat/engine/rendering/mesh_generator.h
+    ${MSPLAT_ROOT}/include/msplat/engine/rendering/compute_splat_rasterizer.h
     # Shader IO (shared between C++ and HLSL)
     ${MSPLAT_ROOT}/shaders/shaderio.h
+    # Compute rasterizer shader types
+    ${MSPLAT_ROOT}/shaders/compute_raster_types.h
 )
 
 set(ENGINE_SOURCES
@@ -33,6 +36,7 @@ set(ENGINE_SOURCES
     # Rendering
     ${MSPLAT_ROOT}/src/engine/rendering/shader_factory.cpp
     ${MSPLAT_ROOT}/src/engine/rendering/mesh_generator.cpp
+    ${MSPLAT_ROOT}/src/engine/rendering/compute_splat_rasterizer.cpp
     # Third-party
     ${MSPLAT_ROOT}/third-party/miniply/miniply.cpp
 )

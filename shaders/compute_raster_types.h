@@ -1,0 +1,100 @@
+// Shared data structures for tile-based compute rasterization pipeline
+
+#ifndef COMPUTE_RASTER_TYPES_H
+#define COMPUTE_RASTER_TYPES_H
+
+// Gaussian2D: Pre-computed 2D projection data for rasterization
+struct Gaussian2D
+{
+    float2 screenPos;   // Screen-space center position (pixels)
+    float3 conic;       // Inverse 2D covariance matrix (a, b, c)
+                        // where the quadratic form is: a*x^2 + 2*b*x*y + c*y^2
+    float  opacity;     // Pre-multiplied opacity (after EWA alpha compensation)
+    float4 color;       // Final RGB color (after SH evaluation) + alpha
+    float  radius;      // Maximum bounding radius for tile coverage (pixels)
+    float  depth;       // Linear view-space depth (for debugging/verification)
+};
+// Size: 48 bytes (12 floats), naturally aligned
+
+// Preprocess push constants
+struct PreprocessPC
+{
+    uint  numSplats;    // Total number of splats to process
+    uint  tilesX;       // Number of tiles in X dimension
+    uint  tilesY;       // Number of tiles in Y dimension
+    uint  tileSize;     // Tile size in pixels (typically 16)
+    float nearPlane;    // Near plane distance for depth normalization
+    float farPlane;     // Far plane distance for depth normalization
+    uint  maxTileInstances; // Maximum tile instances buffer capacity
+    uint  _pad0;        // Padding to align to 16 bytes
+};
+
+// IdentifyRanges push constants
+struct RangesPC
+{
+    uint numTileInstances;  // Total number of tile instances after preprocess
+    uint numTiles;          // Total number of tiles (tilesX * tilesY)
+};
+
+// Rasterize push constants
+struct RasterPC
+{
+    uint tilesX;        // Number of tiles in X dimension
+    uint tilesY;        // Number of tiles in Y dimension
+    uint screenWidth;   // Screen width in pixels
+    uint screenHeight;  // Screen height in pixels
+};
+
+// Tile range structure: stores start and end indices for each tile
+// in the sorted tile instance array
+struct TileRange
+{
+    int start;  // First index (inclusive) in tileValues for this tile
+    int end;    // Last index (exclusive) in tileValues for this tile
+};
+
+// Helper functions for 32-bit packed tile key format:
+// Key = (TileID << 16) | Depth16
+//
+// TileID (upper 16 bits): 0-65,535 tiles
+// Depth16 (lower 16 bits): Logarithmic depth encoded to 16 bits
+uint PackTileKey(uint tileID, uint depth16)
+{
+    return (tileID << 16) | (depth16 & 0xFFFF);
+}
+
+uint UnpackTileID(uint key)
+{
+    return key >> 16;
+}
+
+uint UnpackDepth16(uint key)
+{
+    return key & 0xFFFF;
+}
+
+// Logarithmic depth encoding for better precision distribution
+// More precision near the camera, less far away
+uint EncodeDepth16(float linearDepth, float nearPlane, float farPlane)
+{
+    // Handle edge cases
+    if (linearDepth <= nearPlane) return 0;
+    if (linearDepth >= farPlane) return 65535;
+
+    // Logarithmic encoding: log2(depth - near + 1) / log2(far - near + 1)
+    float logDepth = log2(linearDepth - nearPlane + 1.0) / log2(farPlane - nearPlane + 1.0);
+    return uint(saturate(logDepth) * 65535.0);
+}
+
+// Float16 packing helpers for shared memory optimization in rasterizer
+uint PackFloat16x2(float2 v)
+{
+    return f32tof16(v.x) | (f32tof16(v.y) << 16);
+}
+
+float2 UnpackFloat16x2(uint packed)
+{
+    return float2(f16tof32(packed & 0xFFFF), f16tof32(packed >> 16));
+}
+
+#endif // COMPUTE_RASTER_TYPES_H
