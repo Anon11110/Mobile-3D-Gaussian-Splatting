@@ -52,6 +52,7 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 
 	// Device feature flags
 	bool hasDynamicRendering;
+	bool hasPipelineStatisticsQuery = false;
 
 	// Timestamp period for GPU profiling (nanoseconds)
 	float timestampPeriod;
@@ -352,8 +353,32 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 
 	QueryPoolHandle CreateQueryPool(const QueryPoolDesc &desc) override
 	{
-		VulkanQueryPool *queryPool = new VulkanQueryPool(device, desc);
-		return RefCntPtr<IRHIQueryPool>::Create(queryPool);
+		if (desc.queryType == QueryType::PIPELINE_STATISTICS && !hasPipelineStatisticsQuery)
+		{
+			fprintf(stderr,
+			        "Warning: Pipeline statistics queries are not supported on this device. "
+			        "Fragment invocation profiling is disabled.\n");
+			return {};
+		}
+
+		try
+		{
+			VulkanQueryPool *queryPool = new VulkanQueryPool(device, desc);
+			return RefCntPtr<IRHIQueryPool>::Create(queryPool);
+		}
+		catch (const std::runtime_error &e)
+		{
+			// Treat pipeline statistics as optional profiling. Other query types remain fatal.
+			if (desc.queryType == QueryType::PIPELINE_STATISTICS)
+			{
+				fprintf(stderr,
+				        "Warning: Failed to create pipeline statistics query pool (%s). "
+				        "Fragment invocation profiling is disabled.\n",
+				        e.what());
+				return {};
+			}
+			throw;
+		}
 	}
 
 	double GetTimestampPeriod() const override
@@ -1098,7 +1123,20 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		}
 
 		VkPhysicalDeviceFeatures deviceFeatures{};
-		deviceFeatures.pipelineStatisticsQuery = VK_TRUE;
+		VkPhysicalDeviceFeatures supportedFeatures{};
+		vkGetPhysicalDeviceFeatures(physicalDevice, &supportedFeatures);
+		hasPipelineStatisticsQuery                = supportedFeatures.pipelineStatisticsQuery == VK_TRUE;
+
+#if defined(__APPLE__)
+		// MoltenVK does not support VK_QUERY_TYPE_PIPELINE_STATISTICS.
+		hasPipelineStatisticsQuery = false;
+#endif
+
+		deviceFeatures.pipelineStatisticsQuery = hasPipelineStatisticsQuery ? VK_TRUE : VK_FALSE;
+		if (!hasPipelineStatisticsQuery)
+		{
+			fprintf(stdout, "Pipeline statistics queries unavailable; fragment invocation profiling disabled\n");
+		}
 
 		// Check if Vulkan 1.3 is supported (dynamic rendering is core in 1.3)
 		VkPhysicalDeviceProperties deviceProperties;

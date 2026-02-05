@@ -274,7 +274,8 @@ class BuildCommand(Command):
             # Run executable if requested
             if self.args.run:
                 target = targets[0]
-                if not run_executable(self.build_dir, target):
+                run_build_type = getattr(self.args, "build_type", None)
+                if not run_executable(self.build_dir, target, run_build_type):
                     return Result.fail(BuildError(f"Failed to run {target}"))
 
             return Result.ok(0)

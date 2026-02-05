@@ -67,6 +67,8 @@ class BuildConfiguration:
 
         # For multi-config generators, check directory existence
         if generator_info.is_multi_config and build_type == "Release":
+            if (build_dir / BuildConstants.BIN_SUBDIR_RELWITHDEBINFO).exists():
+                build_type = "RelWithDebInfo"
             if (build_dir / BuildConstants.BIN_SUBDIR_DEBUG).exists():
                 build_type = "Debug"
 

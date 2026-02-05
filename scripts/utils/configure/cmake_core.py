@@ -470,12 +470,16 @@ def run_executable(
         # For multi-config generators, if we couldn't get it from cache or it's empty,
         # fall back to directory existence check
         if generator_info.is_multi_config and build_type == "Release":
+            if (build_dir / BuildConstants.BIN_SUBDIR_RELWITHDEBINFO).exists():
+                build_type = "RelWithDebInfo"
             if (build_dir / BuildConstants.BIN_SUBDIR_DEBUG).exists():
                 build_type = "Debug"
 
     # Determine executable path
     if build_type == "Debug":
         exe_dir = build_dir / BuildConstants.BIN_SUBDIR_DEBUG
+    elif build_type == "RelWithDebInfo":
+        exe_dir = build_dir / BuildConstants.BIN_SUBDIR_RELWITHDEBINFO
     else:
         exe_dir = build_dir / BuildConstants.BIN_SUBDIR_RELEASE
 
