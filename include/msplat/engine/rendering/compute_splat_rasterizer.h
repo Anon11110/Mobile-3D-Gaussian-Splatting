@@ -52,9 +52,14 @@ class ComputeSplatRasterizer
 
 	void Initialize(uint32_t screenWidth, uint32_t screenHeight, uint32_t maxSplatCount);
 	void Resize(uint32_t screenWidth, uint32_t screenHeight);
+
+	// Record preprocess only
 	void RecordPreprocess(rhi::IRHICommandList *cmdList, const Scene &scene, const FrameUBO &frameUBO);
 
-	/// Get the global counter value (number of tile instances emitted)
+	// Record the full preprocess → sort → identify ranges pipeline
+	void RecordPreprocessSortAndRanges(rhi::IRHICommandList *cmdList, const Scene &scene, const FrameUBO &frameUBO);
+
+	// Get the global counter value (number of tile instances emitted)
 	uint32_t ReadTileInstanceCount();
 
 	const TileConfig &GetTileConfig() const
@@ -80,12 +85,14 @@ class ComputeSplatRasterizer
 
 	struct BufferInfo
 	{
-		rhi::BufferHandle geometryBuffer;         // Gaussian2D per splat
-		rhi::BufferHandle tileKeys;               // Packed tile keys
-		rhi::BufferHandle tileValues;             // Splat indices
-		rhi::BufferHandle tileRanges;             // Per-tile start/end
-		rhi::BufferHandle globalCounter;          // Atomic counter
-		rhi::BufferHandle counterReadback;        // CPU-readable counter copy
+		rhi::BufferHandle geometryBuffer;          // Gaussian2D per splat
+		rhi::BufferHandle tileKeys;                // Packed tile keys (unsorted, sorter's input)
+		rhi::BufferHandle tileValues;              // Splat indices (unsorted, sorter's input)
+		rhi::BufferHandle sortedTileKeys;          // Sorted tile keys (sorter's output)
+		rhi::BufferHandle sortedTileValues;        // Sorted splat indices (sorter's output)
+		rhi::BufferHandle tileRanges;              // Per-tile start/end
+		rhi::BufferHandle globalCounter;           // Atomic counter
+		rhi::BufferHandle counterReadback;         // CPU-readable counter copy
 	};
 
 	BufferInfo GetBufferInfo() const;
@@ -95,11 +102,15 @@ class ComputeSplatRasterizer
 		return m_isInitialized;
 	}
 
+	bool VerifySortOrder();
+
   private:
 	void CreateBuffers(uint32_t maxSplatCount);
 	void CreateComputePipelines();
 	void CreateDescriptorSets();
 	void RebindSceneDescriptors(const Scene &scene);
+	void RecordSort(rhi::IRHICommandList *cmdList);
+	void RecordIdentifyRanges(rhi::IRHICommandList *cmdList);
 
 	struct PreprocessPC
 	{
@@ -111,6 +122,12 @@ class ComputeSplatRasterizer
 		float    farPlane;
 		uint32_t maxTileInstances;
 		uint32_t _pad0;
+	};
+
+	struct RangesPC
+	{
+		uint32_t numTileInstances;
+		uint32_t numTiles;
 	};
 
 	static constexpr uint32_t WorkgroupSize    = 256;
@@ -127,21 +144,31 @@ class ComputeSplatRasterizer
 	uint32_t m_maxTileInstances = 0;
 
 	// Buffers
-	rhi::BufferHandle m_geometryBuffer;         // Gaussian2D[] - preprocessed 2D data
-	rhi::BufferHandle m_tileKeys;               // uint32_t[] - packed tile keys
-	rhi::BufferHandle m_tileValues;             // uint32_t[] - splat indices
-	rhi::BufferHandle m_tileRanges;             // int2[] - per-tile start/end
-	rhi::BufferHandle m_globalCounter;          // uint32_t - atomic counter
-	rhi::BufferHandle m_counterReadback;        // CPU-readable copy of counter
-	rhi::BufferHandle m_frameUBO;               // FrameUBO for preprocess shader
+	rhi::BufferHandle m_geometryBuffer;          // Gaussian2D[] - preprocessed 2D data
+	rhi::BufferHandle m_tileRanges;              // int2[] - per-tile start/end
+	rhi::BufferHandle m_globalCounter;           // uint32_t - atomic counter
+	rhi::BufferHandle m_counterReadback;         // CPU-readable copy of counter
+	rhi::BufferHandle m_frameUBO;                // FrameUBO for preprocess shader
+	rhi::BufferHandle m_sortedTileValues;        // Output buffer for sorted tile values
+
+	// Tile key sorter
+	// Preprocess writes directly to sorter's splatDepths (keys) and splatIndicesOriginal (values)
+	container::unique_ptr<GpuSplatSorter> m_tileSorter;
+
+	// Verification readback buffer
+	rhi::BufferHandle m_sortVerifyReadback;
 
 	// Pipelines
 	rhi::PipelineHandle m_preprocessPipeline;
+	rhi::PipelineHandle m_rangesPipeline;
 
 	// Descriptor set layouts
 	rhi::DescriptorSetLayoutHandle m_preprocessLayout;
+	rhi::DescriptorSetLayoutHandle m_rangesLayout;
 
+	// Descriptor sets
 	rhi::DescriptorSetHandle m_preprocessDescriptorSet;
+	rhi::DescriptorSetHandle m_rangesDescriptorSet;
 
 	// Track bound scene for descriptor rebinding
 	const Scene *m_lastBoundScene = nullptr;

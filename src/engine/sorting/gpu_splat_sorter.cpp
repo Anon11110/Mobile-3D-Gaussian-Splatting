@@ -779,6 +779,34 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 	timingFrameIndex++;
 }
 
+void GpuSplatSorter::SortOnly(rhi::IRHICommandList *cmdList)
+{
+	if (!isInitialized)
+	{
+		return;
+	}
+
+	// Barrier: ensure external writes to splatDepths/splatIndicesOriginal are visible
+	rhi::BufferTransition preBarriers[2] = {};
+	preBarriers[0].buffer                = splatDepths.Get();
+	preBarriers[0].before                = rhi::ResourceState::ShaderReadWrite;
+	preBarriers[0].after                 = rhi::ResourceState::GeneralRead;
+	preBarriers[1].buffer                = splatIndicesOriginal.Get();
+	preBarriers[1].before                = rhi::ResourceState::ShaderReadWrite;
+	preBarriers[1].after                 = rhi::ResourceState::GeneralRead;
+
+	cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {preBarriers, 2}, {}, {});
+
+	if (sortMethod == SortMethod::IntegratedScan)
+	{
+		RecordRadixSortIntegrated(cmdList);
+	}
+	else
+	{
+		RecordRadixSortPrescan(cmdList);
+	}
+}
+
 void GpuSplatSorter::RecordDepthCalculation(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera)
 {
 	if (!depthCalcPipeline)

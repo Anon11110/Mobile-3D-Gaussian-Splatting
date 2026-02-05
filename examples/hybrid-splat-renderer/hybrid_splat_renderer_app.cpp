@@ -681,10 +681,10 @@ void HybridSplatRendererApp::OnRender()
 		}
 	}
 
-	// Test compute rasterizer preprocess pass if enabled
+	// Run compute rasterizer pipeline if enabled
 	if (m_computeRasterizer && m_computeRasterizerEnabled)
 	{
-		m_computeRasterizer->RecordPreprocess(cmdList, *m_scene, ubo);
+		m_computeRasterizer->RecordPreprocessSortAndRanges(cmdList, *m_scene, ubo);
 	}
 
 	// Log FPS periodically
@@ -2287,9 +2287,9 @@ void HybridSplatRendererApp::RenderImGui()
 			ImGui::Text("Compute Rasterizer (Experimental)");
 			ImGui::Separator();
 
-			if (ImGui::Checkbox("Enable Tile-Based Preprocess", &m_computeRasterizerEnabled))
+			if (ImGui::Checkbox("Enable Tile-Based Pipeline", &m_computeRasterizerEnabled))
 			{
-				LOG_INFO("Compute rasterizer preprocess {}", m_computeRasterizerEnabled ? "enabled" : "disabled");
+				LOG_INFO("Compute rasterizer {}", m_computeRasterizerEnabled ? "enabled" : "disabled");
 			}
 			ImGui::SameLine();
 			ImGui::TextDisabled("(?)");
@@ -2297,7 +2297,7 @@ void HybridSplatRendererApp::RenderImGui()
 			{
 				ImGui::BeginTooltip();
 				ImGui::Text("Experimental tile-based compute pipeline");
-				ImGui::Text("Currently only runs preprocess pass for verification");
+				ImGui::Text("Runs: Preprocess -> Sort -> Identify Ranges");
 				ImGui::EndTooltip();
 			}
 
@@ -2314,6 +2314,22 @@ void HybridSplatRendererApp::RenderImGui()
 				{
 					float avgTiles = static_cast<float>(tileInstanceCount) / static_cast<float>(stats.activeSplats);
 					ImGui::Text("Avg Tiles/Splat: %.2f", avgTiles);
+				}
+
+				// Verify sort order button
+				if (ImGui::Button("Verify Sort Order"))
+				{
+					bool sortOk = m_computeRasterizer->VerifySortOrder();
+					LOG_INFO("Tile sort verification: {}", sortOk ? "PASSED" : "FAILED");
+				}
+				ImGui::SameLine();
+				ImGui::TextDisabled("(?)");
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::BeginTooltip();
+					ImGui::Text("Reads back sorted tile keys from GPU");
+					ImGui::Text("and verifies ascending order (blocks GPU)");
+					ImGui::EndTooltip();
 				}
 			}
 		}

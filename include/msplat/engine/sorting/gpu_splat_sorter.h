@@ -33,22 +33,21 @@ class GpuSplatSorter
 	GpuSplatSorter(GpuSplatSorter &&) noexcept            = default;
 	GpuSplatSorter &operator=(GpuSplatSorter &&) noexcept = default;
 
-	/// Initialize the sorter
-	/// @param totalSplatCount Number of splats to sort
-	/// @param outputBuffer Buffer where final sorted indices are written.
-	///        Must be large enough for totalSplatCount * sizeof(uint32_t).
 	void Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer);
 	void Sort(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera);
 
+	// Sort pre-written keys without depth calculation.
+	void SortOnly(rhi::IRHICommandList *cmdList);
+
 	rhi::BufferHandle GetSortedIndices() const;
 
-	/// Get the primary output buffer (sortIndicesB)
+	// Get the primary output buffer (sortIndicesB)
 	rhi::BufferHandle GetPrimaryOutputBuffer() const;
 
-	/// Get the alternate output buffer for pipelined rendering (sortIndicesB_Alt)
+	// Get the alternate output buffer for pipelined rendering (sortIndicesB_Alt)
 	rhi::BufferHandle GetAlternateOutputBuffer() const;
 
-	/// Change the output buffer for pipelined rendering
+	// Change the output buffer for pipelined rendering
 	/// @param outputBuffer New buffer to write sorted indices to (must be primary or alternate buffer)
 	void SetOutputBuffer(rhi::BufferHandle outputBuffer);
 
