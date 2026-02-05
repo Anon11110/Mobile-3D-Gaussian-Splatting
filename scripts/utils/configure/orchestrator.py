@@ -326,12 +326,11 @@ class BuildOrchestrator:
 
     def _display_build_info(self, targets: List[str]) -> None:
         """Display build information."""
+        term.section("Build Configuration")
+        term.kv("Build directory", str(self.config.build_dir))
+        term.kv("Build type", self.config.build_type)
+        term.kv("Generator", self.config.generator_info.name or "Unknown")
         term.section(f"Building targets: {', '.join(targets)}")
-
-        if self.config.verbose:
-            term.kv("Build directory", str(self.config.build_dir))
-            term.kv("Build type", self.config.build_type)
-            term.kv("Generator", self.config.generator_info.name or "Unknown")
 
     def _display_target_start(self, target: str) -> None:
         """Display target build start message."""

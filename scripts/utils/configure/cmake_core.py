@@ -158,7 +158,7 @@ def clean_build_dir(build_dir: Path) -> None:
     if build_dir.exists():
         print(Messages.CLEANING_BUILD_DIR.format(path=build_dir))
         shutil.rmtree(build_dir)
-    build_dir.mkdir(exist_ok=True)
+    build_dir.mkdir(parents=True, exist_ok=True)
 
 
 def run_cmake(config, source_dir: Path, build_dir: Path, verbose: bool = True) -> bool:
@@ -269,7 +269,7 @@ def auto_configure(
         return False
 
     # Create build directory
-    build_dir.mkdir(exist_ok=True)
+    build_dir.mkdir(parents=True, exist_ok=True)
 
     # Run CMake configuration
     if not run_cmake(config, source_dir, build_dir, verbose):
@@ -386,12 +386,15 @@ def discover_cmake_targets(source_dir: Path, build_dir: Path) -> List[str]:
 
 def discover_build_targets(build_dir: Path) -> List[str]:
     """Legacy function for backward compatibility. Use discover_cmake_targets() instead."""
-    # Try to infer source directory from build directory
-    source_dir = (
-        build_dir.parent
-        if build_dir.name == BuildConstants.DEFAULT_BUILD_DIR
-        else build_dir
-    )
+    # Try to infer source directory from build directory.
+    # Build dir may be nested: build/<os-arch-gen-type>/ (parent.name == "build")
+    # or flat: build/ (build_dir.name == "build")
+    if build_dir.parent.name == BuildConstants.BUILD_DIR_BASE:
+        source_dir = build_dir.parent.parent
+    elif build_dir.name == BuildConstants.DEFAULT_BUILD_DIR:
+        source_dir = build_dir.parent
+    else:
+        source_dir = build_dir
     return discover_cmake_targets(source_dir, build_dir)
 
 

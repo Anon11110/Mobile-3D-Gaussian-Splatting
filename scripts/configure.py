@@ -27,6 +27,7 @@ from utils.configure.cmake_core import (
     run_cmake,
     is_project_configured,
     auto_configure,
+    get_build_type_from_cache,
     discover_cmake_targets,
     build_targets,
     run_executable,
@@ -35,6 +36,7 @@ from utils.configure.cmake_core import (
 )
 from utils.configure.constants import BuildConstants
 from platforms import get_platform_config
+from platforms.platformBase import compute_build_dir_name, find_existing_build_dirs
 
 # Type aliases for better readability (defined after imports)
 CommandArgs = Namespace
@@ -136,7 +138,7 @@ class ConfigureCommand(Command):
             if self.args.clean:
                 clean_build_dir(self.build_dir)
             else:
-                self.build_dir.mkdir(exist_ok=True)
+                self.build_dir.mkdir(parents=True, exist_ok=True)
 
             return Result.ok(0)
         except Exception as e:
@@ -424,8 +426,8 @@ Examples:
     parser.add_argument("--generator", help="Override CMake generator")
     parser.add_argument(
         "--build-dir",
-        default=BuildConstants.DEFAULT_BUILD_DIR,
-        help="Build directory path",
+        default=None,
+        help="Build directory path (default: auto-computed from platform/generator/build-type)",
     )
     parser.add_argument(
         "--debug-mode",
@@ -467,8 +469,14 @@ Examples:
     )
     build_parser.add_argument(
         "--build-dir",
-        default=BuildConstants.DEFAULT_BUILD_DIR,
-        help="Build directory path",
+        default=None,
+        help="Build directory path (default: auto-detected from existing build dirs)",
+    )
+    build_parser.add_argument(
+        "--build-type",
+        choices=[BuildType.DEBUG.value, BuildType.RELEASE.value, BuildType.RELWITHDEBINFO.value],
+        default=None,
+        help="Build type to select when multiple build dirs exist",
     )
     build_parser.add_argument(
         "--verbose",
@@ -508,6 +516,74 @@ Examples:
     return parser
 
 
+def _resolve_build_dir_for_build(root_dir: Path, args: CommandArgs) -> Path:
+    """Resolve the build directory for the build subcommand.
+
+    When --build-dir is not given:
+      - If --build-type is specified, compute the exact dir name
+      - If exactly one matching subdir exists, use it
+      - If multiple exist, error with a list
+      - If none exist, compute a default dir (auto-configure will create it)
+    """
+    config = get_platform_config()
+    generator = config.get_default_generator()
+
+    def describe_build_dir(path: Path) -> str:
+        try:
+            rel = path.relative_to(root_dir)
+        except ValueError:
+            rel = path
+        suffix = " (legacy)" if path.name == BuildConstants.DEFAULT_BUILD_DIR else ""
+        return f"{rel}{suffix}"
+
+    def collect_existing_build_dirs() -> List[Path]:
+        existing = list(find_existing_build_dirs(root_dir))
+        legacy = root_dir / BuildConstants.DEFAULT_BUILD_DIR
+        if legacy.is_dir() and is_project_configured(legacy):
+            existing.append(legacy)
+        return sorted(existing)
+
+    def matches_build_type(path: Path, build_type: str) -> bool:
+        if path.name == BuildConstants.DEFAULT_BUILD_DIR:
+            return get_build_type_from_cache(path) == build_type
+        return path.name.split("-")[-1] == build_type
+
+    build_type = getattr(args, "build_type", None)
+    if build_type is not None:
+        existing = collect_existing_build_dirs()
+        if existing:
+            matching = [d for d in existing if matches_build_type(d, build_type)]
+            if len(matching) == 1:
+                return matching[0].resolve()
+            elif len(matching) > 1:
+                names = "\n  ".join(describe_build_dir(d) for d in matching)
+                term.error(
+                    f"Multiple build directories match build type '{build_type}':\n  {names}\n"
+                    "Specify one explicitly with --build-dir to select a generator."
+                )
+                sys.exit(1)
+        # No matching existing build dirs — compute default path
+        subdir = compute_build_dir_name(generator, build_type)
+        return (root_dir / BuildConstants.BUILD_DIR_BASE / subdir).resolve()
+
+    # Scan for existing build dirs matching this platform
+    existing = collect_existing_build_dirs()
+
+    if len(existing) == 1:
+        return existing[0].resolve()
+    elif len(existing) > 1:
+        names = "\n  ".join(describe_build_dir(d) for d in existing)
+        term.error(
+            f"Multiple build directories found:\n  {names}\n"
+            "Specify one with --build-type or --build-dir."
+        )
+        sys.exit(1)
+    else:
+        # None exist — compute default (auto-configure will create it)
+        subdir = compute_build_dir_name(generator, BuildType.DEBUG.value)
+        return (root_dir / BuildConstants.BUILD_DIR_BASE / subdir).resolve()
+
+
 def main() -> int:
     """Main entry point using command pattern with comprehensive error handling."""
     try:
@@ -529,7 +605,21 @@ def main() -> int:
         script_dir = Path(__file__).resolve().parent
         root_dir = script_dir.parent.resolve()
         source_dir = root_dir
-        build_dir = (root_dir / args.build_dir).resolve()
+
+        # Resolve build directory
+        if args.build_dir is not None:
+            # Explicit override — use as-is
+            build_dir = (root_dir / args.build_dir).resolve()
+        elif args.command == "build":
+            # Build subcommand: resolve from existing build dirs
+            build_dir = _resolve_build_dir_for_build(root_dir, args)
+        else:
+            # Configure command: compute from platform/generator/build-type
+            config = get_platform_config()
+            generator = args.generator or config.get_default_generator()
+            build_type = getattr(args, "build_type", BuildType.RELEASE.value)
+            subdir = compute_build_dir_name(generator, build_type)
+            build_dir = (root_dir / BuildConstants.BUILD_DIR_BASE / subdir).resolve()
 
         # Create and execute command
         command_result = CommandFactory.create_command(args, source_dir, build_dir)

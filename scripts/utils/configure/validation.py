@@ -163,12 +163,24 @@ class BuildDirectoryRule(ValidationRule):
         if not context.build_dir:
             return Result.ok(None)  # No build directory to validate
 
-        # Check if parent directory exists for build directory creation
-        parent_dir = context.build_dir.parent
-        if not parent_dir.exists():
+        # Check that some ancestor directory exists (build dir may be nested
+        # e.g. build/macos-arm64-xcode-Debug/ where build/ doesn't exist yet).
+        # mkdir(parents=True) will create intermediates, so we only need to
+        # verify the path is rooted under a real directory.
+        check = context.build_dir
+        while not check.exists():
+            parent = check.parent
+            if parent == check:
+                return Result.fail(
+                    ValidationError(
+                        f"No existing ancestor directory for build path: {context.build_dir}"
+                    )
+                )
+            check = parent
+        if not check.is_dir():
             return Result.fail(
                 ValidationError(
-                    f"Parent directory for build directory does not exist: {parent_dir}"
+                    f"Ancestor path is not a directory: {check}"
                 )
             )
 

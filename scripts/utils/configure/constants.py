@@ -34,6 +34,7 @@ class BuildConstants:
     CMAKE_EXECUTABLE: str = "cmake"
 
     # Build directories
+    BUILD_DIR_BASE: str = "build"
     DEFAULT_BUILD_DIR: str = "build"
     BIN_SUBDIR_DEBUG: str = "bin/Debug"
     BIN_SUBDIR_RELEASE: str = "bin/Release"

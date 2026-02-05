@@ -15,6 +15,11 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
+# Enable compile_commands.json for IDE integration (Debug and RelWithDebInfo)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+endif()
+
 # Core library options
 option(MSPLAT_USE_STD_CONTAINERS "Use system STL containers instead of custom implementations" OFF)
 
