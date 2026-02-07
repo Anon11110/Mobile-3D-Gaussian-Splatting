@@ -1,7 +1,9 @@
 #include "shaders/shaderio.h"
+#include <algorithm>
 #include <msplat/core/log.h>
 #include <msplat/engine/rendering/compute_splat_rasterizer.h>
 #include <msplat/engine/rendering/shader_factory.h>
+#include <numeric>
 
 namespace msplat::engine
 {
@@ -19,7 +21,7 @@ void ComputeSplatRasterizer::Initialize(uint32_t screenWidth, uint32_t screenHei
 	}
 
 	m_maxSplatCount    = maxSplatCount;
-	m_maxTileInstances = maxSplatCount * MaxTilesPerSplat;
+	m_maxTileInstances = maxSplatCount * InitialTilesPerSplat;
 
 	m_tileConfig.Update(screenWidth, screenHeight);
 
@@ -28,6 +30,7 @@ void ComputeSplatRasterizer::Initialize(uint32_t screenWidth, uint32_t screenHei
 	         m_tileConfig.tilesX, m_tileConfig.tilesY, maxSplatCount, m_maxTileInstances);
 
 	CreateBuffers(maxSplatCount);
+	CreateOutputImage();
 	CreateComputePipelines();
 	CreateDescriptorSets();
 
@@ -69,6 +72,9 @@ void ComputeSplatRasterizer::Resize(uint32_t screenWidth, uint32_t screenHeight)
 	}
 
 	m_tileConfig.Update(screenWidth, screenHeight);
+
+	CreateOutputImage();
+	RebindRasterDescriptors();
 }
 
 void ComputeSplatRasterizer::CreateBuffers(uint32_t maxSplatCount)
@@ -131,6 +137,21 @@ void ComputeSplatRasterizer::CreateBuffers(uint32_t maxSplatCount)
 	         (maxSplatCount * 48) / (1024.0 * 1024.0),
 	         (m_maxTileInstances * 4) / (1024.0 * 1024.0),
 	         (m_maxTileInstances * 4) / (1024.0 * 1024.0));
+}
+
+void ComputeSplatRasterizer::CreateOutputImage()
+{
+	rhi::TextureDesc texDesc = {};
+	texDesc.width            = m_tileConfig.screenWidth;
+	texDesc.height           = m_tileConfig.screenHeight;
+	texDesc.format           = rhi::TextureFormat::RGBA32_FLOAT;
+	texDesc.isStorageImage   = true;
+	texDesc.resourceUsage    = rhi::ResourceUsage::Static;
+
+	m_outputImage = m_device->CreateTexture(texDesc);
+
+	LOG_INFO("ComputeSplatRasterizer: Output image created ({}x{}, RGBA32F)",
+	         texDesc.width, texDesc.height);
 }
 
 void ComputeSplatRasterizer::CreateComputePipelines()
@@ -231,7 +252,49 @@ void ComputeSplatRasterizer::CreateComputePipelines()
 		m_rangesPipeline = m_device->CreateComputePipeline(pipelineDesc);
 	}
 
-	LOG_INFO("ComputeSplatRasterizer: Compute pipelines created (preprocess + identify_ranges)");
+	// --- Rasterize pipeline ---
+	rhi::ShaderHandle rasterShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/splat_raster_compute.comp.spv",
+	    rhi::ShaderStage::COMPUTE);
+
+	if (!rasterShader)
+	{
+		LOG_ERROR("ComputeSplatRasterizer: Failed to load splat_raster_compute.comp.spv");
+		return;
+	}
+
+	// Create rasterize descriptor set layout
+	{
+		rhi::DescriptorSetLayoutDesc layoutDesc = {};
+
+		// Binding 0: geometryBuffer
+		layoutDesc.bindings.push_back({0, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 1: sortedTileValues
+		layoutDesc.bindings.push_back({1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 2: tileRanges
+		layoutDesc.bindings.push_back({2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 3: outputImage
+		layoutDesc.bindings.push_back({3, rhi::DescriptorType::STORAGE_TEXTURE, 1, rhi::ShaderStageFlags::COMPUTE});
+
+		m_rasterLayout = m_device->CreateDescriptorSetLayout(layoutDesc);
+	}
+
+	// Create rasterize pipeline
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = rasterShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {m_rasterLayout.Get()};
+
+		rhi::PushConstantRange pushConstantRange = {};
+		pushConstantRange.stageFlags             = rhi::ShaderStageFlags::COMPUTE;
+		pushConstantRange.offset                 = 0;
+		pushConstantRange.size                   = sizeof(RasterPC);
+		pipelineDesc.pushConstantRanges          = {pushConstantRange};
+
+		m_rasterPipeline = m_device->CreateComputePipeline(pipelineDesc);
+	}
+
+	LOG_INFO("ComputeSplatRasterizer: Compute pipelines created (preprocess + identify_ranges + rasterize)");
 }
 
 void ComputeSplatRasterizer::CreateDescriptorSets()
@@ -257,7 +320,7 @@ void ComputeSplatRasterizer::CreateDescriptorSets()
 		m_preprocessDescriptorSet->BindBuffer(7, binding);
 	}
 
-	// Binding 8: tileKeys -> sorter's splatDepths (preprocess writes keys directly here)
+	// Binding 8: tileKeys -> sorter's splatDepths
 	{
 		rhi::BufferBinding binding = {};
 		binding.buffer             = sorterBuffers.splatDepths.Get();
@@ -265,7 +328,7 @@ void ComputeSplatRasterizer::CreateDescriptorSets()
 		m_preprocessDescriptorSet->BindBuffer(8, binding);
 	}
 
-	// Binding 9: tileValues -> sorter's splatIndicesOriginal (preprocess writes values directly here)
+	// Binding 9: tileValues -> sorter's splatIndicesOriginal
 	{
 		rhi::BufferBinding binding = {};
 		binding.buffer             = sorterBuffers.splatIndicesOriginal.Get();
@@ -300,7 +363,51 @@ void ComputeSplatRasterizer::CreateDescriptorSets()
 		m_rangesDescriptorSet->BindBuffer(1, binding);
 	}
 
-	LOG_INFO("ComputeSplatRasterizer: Descriptor sets created (preprocess aliased to sorter buffers)");
+	// --- Rasterize descriptor set ---
+	m_rasterDescriptorSet = m_device->CreateDescriptorSet(m_rasterLayout.Get());
+
+	// Binding 0: geometryBuffer
+	{
+		rhi::BufferBinding binding = {};
+		binding.buffer             = m_geometryBuffer.Get();
+		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		m_rasterDescriptorSet->BindBuffer(0, binding);
+	}
+
+	// Binding 1: sortedTileValues
+	{
+		rhi::BufferBinding binding = {};
+		binding.buffer             = m_sortedTileValues.Get();
+		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		m_rasterDescriptorSet->BindBuffer(1, binding);
+	}
+
+	// Binding 2: tileRanges
+	{
+		rhi::BufferBinding binding = {};
+		binding.buffer             = m_tileRanges.Get();
+		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		m_rasterDescriptorSet->BindBuffer(2, binding);
+	}
+
+	// Binding 3: outputImage
+	RebindRasterDescriptors();
+
+	LOG_INFO("ComputeSplatRasterizer: Descriptor sets created (preprocess + ranges + rasterize)");
+}
+
+void ComputeSplatRasterizer::RebindRasterDescriptors()
+{
+	if (!m_rasterDescriptorSet || !m_outputImage)
+	{
+		return;
+	}
+
+	rhi::TextureBinding texBinding = {};
+	texBinding.texture             = m_outputImage.Get();
+	texBinding.type                = rhi::DescriptorType::STORAGE_TEXTURE;
+	texBinding.layout              = rhi::ImageLayout::GENERAL;
+	m_rasterDescriptorSet->BindTexture(3, texBinding);
 }
 
 void ComputeSplatRasterizer::RebindSceneDescriptors(const Scene &scene)
@@ -489,17 +596,24 @@ void ComputeSplatRasterizer::RecordIdentifyRanges(rhi::IRHICommandList *cmdList)
 	cmdList->FillBuffer(m_tileRanges.Get(), 0,
 	                    m_tileConfig.totalTiles * sizeof(int32_t) * 2, 0xFFFFFFFF);
 
-	// Barriers: sort output -> ranges read, fill -> compute
+	// Wait for tileRanges fill
 	{
-		rhi::BufferTransition transitions[2] = {};
-		transitions[0].buffer                = sorterBuffers.sortKeysB.Get();
-		transitions[0].before                = rhi::ResourceState::ShaderReadWrite;
-		transitions[0].after                 = rhi::ResourceState::GeneralRead;
-		transitions[1].buffer                = m_tileRanges.Get();
-		transitions[1].before                = rhi::ResourceState::CopyDestination;
-		transitions[1].after                 = rhi::ResourceState::ShaderReadWrite;
+		rhi::BufferTransition transition = {};
+		transition.buffer                = m_tileRanges.Get();
+		transition.before                = rhi::ResourceState::CopyDestination;
+		transition.after                 = rhi::ResourceState::ShaderReadWrite;
 
-		cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {transitions, 2}, {}, {});
+		cmdList->Barrier(rhi::PipelineScope::Copy, rhi::PipelineScope::Compute, {&transition, 1}, {}, {});
+	}
+
+	// Wait for sort output to be readable
+	{
+		rhi::BufferTransition transition = {};
+		transition.buffer                = sorterBuffers.sortKeysB.Get();
+		transition.before                = rhi::ResourceState::ShaderReadWrite;
+		transition.after                 = rhi::ResourceState::GeneralRead;
+
+		cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {&transition, 1}, {}, {});
 	}
 
 	// Bind pipeline and descriptor set
@@ -530,12 +644,308 @@ void ComputeSplatRasterizer::RecordIdentifyRanges(rhi::IRHICommandList *cmdList)
 	}
 }
 
-void ComputeSplatRasterizer::RecordPreprocessSortAndRanges(
+void ComputeSplatRasterizer::RecordRasterize(rhi::IRHICommandList *cmdList)
+{
+	if (!m_rasterPipeline || !m_outputImage)
+	{
+		return;
+	}
+
+	// Pre-rasterize barriers: ensure geometry + sorted values are visible, transition output image
+	{
+		rhi::BufferTransition bufTransitions[2] = {};
+		bufTransitions[0].buffer                = m_geometryBuffer.Get();
+		bufTransitions[0].before                = rhi::ResourceState::ShaderReadWrite;
+		bufTransitions[0].after                 = rhi::ResourceState::GeneralRead;
+		bufTransitions[1].buffer                = m_sortedTileValues.Get();
+		bufTransitions[1].before                = rhi::ResourceState::ShaderReadWrite;
+		bufTransitions[1].after                 = rhi::ResourceState::GeneralRead;
+
+		rhi::TextureTransition texTransition = {};
+		texTransition.texture                = m_outputImage.Get();
+		texTransition.before                 = rhi::ResourceState::Undefined;
+		texTransition.after                  = rhi::ResourceState::ShaderReadWrite;
+
+		cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute,
+		                 {bufTransitions, 2}, {&texTransition, 1}, {});
+	}
+
+	cmdList->SetPipeline(m_rasterPipeline.Get());
+	cmdList->BindDescriptorSet(0, m_rasterDescriptorSet.Get());
+
+	RasterPC pc     = {};
+	pc.tilesX       = m_tileConfig.tilesX;
+	pc.tilesY       = m_tileConfig.tilesY;
+	pc.screenWidth  = m_tileConfig.screenWidth;
+	pc.screenHeight = m_tileConfig.screenHeight;
+
+	cmdList->PushConstants(rhi::ShaderStageFlags::COMPUTE, 0,
+	                       {reinterpret_cast<const std::byte *>(&pc), sizeof(pc)});
+
+	cmdList->Dispatch(m_tileConfig.tilesX, m_tileConfig.tilesY, 1);
+
+	// Transition output image for transfer/read
+	{
+		rhi::TextureTransition transition = {};
+		transition.texture                = m_outputImage.Get();
+		transition.before                 = rhi::ResourceState::ShaderReadWrite;
+		transition.after                  = rhi::ResourceState::CopySource;
+
+		cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Copy, {}, {&transition, 1}, {});
+	}
+}
+
+void ComputeSplatRasterizer::ResizeTileBuffers(uint32_t newMaxTileInstances)
+{
+	LOG_INFO("ComputeSplatRasterizer: Resizing tile buffers from {} to {} instances ({:.1f} MB -> {:.1f} MB sort memory)",
+	         m_maxTileInstances, newMaxTileInstances,
+	         (m_maxTileInstances * 24.0) / (1024.0 * 1024.0),
+	         (newMaxTileInstances * 24.0) / (1024.0 * 1024.0));
+
+	m_maxTileInstances = newMaxTileInstances;
+
+	// Recreate sorted tile values buffer
+	rhi::BufferDesc sortedValuesDesc = {};
+	sortedValuesDesc.size            = m_maxTileInstances * sizeof(uint32_t);
+	sortedValuesDesc.usage           = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST | rhi::BufferUsage::TRANSFER_SRC;
+	sortedValuesDesc.resourceUsage   = rhi::ResourceUsage::Static;
+	m_sortedTileValues               = m_device->CreateBuffer(sortedValuesDesc);
+
+	// Recreate tile key sorter with new capacity
+	m_tileSorter = container::make_unique<GpuSplatSorter>(m_device, m_vfs);
+	m_tileSorter->Initialize(m_maxTileInstances, m_sortedTileValues);
+
+	// Recreate verification readback buffer
+	rhi::BufferDesc verifyDesc           = {};
+	verifyDesc.size                      = m_maxTileInstances * sizeof(uint32_t);
+	verifyDesc.usage                     = rhi::BufferUsage::TRANSFER_DST;
+	verifyDesc.resourceUsage             = rhi::ResourceUsage::Readback;
+	verifyDesc.hints.persistently_mapped = true;
+	m_sortVerifyReadback                 = m_device->CreateBuffer(verifyDesc);
+
+	// Invalidate debug buffers
+	m_dbgKeysReadback = nullptr;
+	m_dbgValsReadback = nullptr;
+	m_dbgKeysStaging  = nullptr;
+	m_dbgValsStaging  = nullptr;
+
+	// Rebind descriptor sets with new sorter buffers
+	auto sorterBuffers = m_tileSorter->GetBufferInfo();
+
+	// Preprocess: binding 8 (tileKeys → sorter's splatDepths)
+	{
+		rhi::BufferBinding binding = {};
+		binding.buffer             = sorterBuffers.splatDepths.Get();
+		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		m_preprocessDescriptorSet->BindBuffer(8, binding);
+	}
+
+	// Preprocess: binding 9 (tileValues → sorter's splatIndicesOriginal)
+	{
+		rhi::BufferBinding binding = {};
+		binding.buffer             = sorterBuffers.splatIndicesOriginal.Get();
+		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		m_preprocessDescriptorSet->BindBuffer(9, binding);
+	}
+
+	// Ranges: binding 0 (sortedTileKeys → sorter's sortKeysB)
+	{
+		rhi::BufferBinding binding = {};
+		binding.buffer             = sorterBuffers.sortKeysB.Get();
+		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		m_rangesDescriptorSet->BindBuffer(0, binding);
+	}
+
+	// Rasterize: binding 1 (sortedTileValues)
+	{
+		rhi::BufferBinding binding = {};
+		binding.buffer             = m_sortedTileValues.Get();
+		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		m_rasterDescriptorSet->BindBuffer(1, binding);
+	}
+
+	LOG_INFO("ComputeSplatRasterizer: Tile buffers resized successfully (new max: {} instances)", m_maxTileInstances);
+}
+
+void ComputeSplatRasterizer::Render(
     rhi::IRHICommandList *cmdList, const Scene &scene, const FrameUBO &frameUBO)
 {
+	// Check previous frame's tile count and resize buffers if overflow occurred
+	if (m_hasRenderedOneFrame)
+	{
+		uint32_t prevCount = ReadTileInstanceCount();
+		if (prevCount > m_maxTileInstances)
+		{
+			uint32_t newMax = prevCount * 2;        // 2x headroom to avoid frequent resizes
+			LOG_WARNING("ComputeSplatRasterizer: Tile buffer overflow detected ({} > {}), resizing to {}",
+			            prevCount, m_maxTileInstances, newMax);
+
+			cmdList->End();
+			rhi::IRHICommandList *ptr = cmdList;
+			m_device->SubmitCommandLists({&ptr, 1});
+			m_device->WaitIdle();
+
+			ResizeTileBuffers(newMax);
+
+			cmdList->Begin();
+		}
+	}
+
+	// Preprocess stage
+	if (m_onPreprocessTimestamp)
+		m_onPreprocessTimestamp(cmdList, true);
 	RecordPreprocess(cmdList, scene, frameUBO);
-	RecordSort(cmdList);
+	if (m_onPreprocessTimestamp)
+		m_onPreprocessTimestamp(cmdList, false);
+
+	// Sort stage
+	if (m_cpuSortDebugEnabled)
+	{
+		// Submit preprocess commands, wait for completion, CPU sort, restart
+		cmdList->End();
+		rhi::IRHICommandList *ptr = cmdList;
+		m_device->SubmitCommandLists({&ptr, 1});
+		m_device->WaitIdle();
+
+		PerformCPUSort();
+
+		cmdList->Begin();
+	}
+	else
+	{
+		if (m_onSortTimestamp)
+			m_onSortTimestamp(cmdList, true);
+		RecordSort(cmdList);
+		if (m_onSortTimestamp)
+			m_onSortTimestamp(cmdList, false);
+	}
+
+	// Identify ranges stage
+	if (m_onRangesTimestamp)
+		m_onRangesTimestamp(cmdList, true);
 	RecordIdentifyRanges(cmdList);
+	if (m_onRangesTimestamp)
+		m_onRangesTimestamp(cmdList, false);
+
+	// Rasterize stage
+	if (m_onRasterTimestamp)
+		m_onRasterTimestamp(cmdList, true);
+	RecordRasterize(cmdList);
+	if (m_onRasterTimestamp)
+		m_onRasterTimestamp(cmdList, false);
+
+	m_hasRenderedOneFrame = true;
+}
+
+void ComputeSplatRasterizer::PerformCPUSort()
+{
+	auto     sorterBuffers = m_tileSorter->GetBufferInfo();
+	uint32_t bufSize       = m_maxTileInstances * sizeof(uint32_t);
+
+	if (!m_dbgKeysReadback)
+	{
+		rhi::BufferDesc rbDesc           = {};
+		rbDesc.size                      = bufSize;
+		rbDesc.usage                     = rhi::BufferUsage::TRANSFER_DST;
+		rbDesc.resourceUsage             = rhi::ResourceUsage::Readback;
+		rbDesc.hints.persistently_mapped = true;
+		m_dbgKeysReadback                = m_device->CreateBuffer(rbDesc);
+		m_dbgValsReadback                = m_device->CreateBuffer(rbDesc);
+
+		rhi::BufferDesc stageDesc           = {};
+		stageDesc.size                      = bufSize;
+		stageDesc.usage                     = rhi::BufferUsage::TRANSFER_SRC;
+		stageDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
+		stageDesc.hints.persistently_mapped = true;
+		m_dbgKeysStaging                    = m_device->CreateBuffer(stageDesc);
+		m_dbgValsStaging                    = m_device->CreateBuffer(stageDesc);
+
+		LOG_INFO("ComputeSplatRasterizer: CPU sort debug buffers allocated ({:.1f} MB)",
+		         (bufSize * 4) / (1024.0 * 1024.0));
+	}
+
+	m_stats.totalTileInstances = ReadTileInstanceCount();
+	uint32_t count             = std::min(m_stats.totalTileInstances, m_maxTileInstances);
+
+	LOG_INFO("ComputeSplatRasterizer: CPU sort - {} tile instances", count);
+
+	// Copy keys (splatDepths) and values (splatIndicesOriginal) from GPU to readback buffers
+	{
+		auto  cmdHandle = m_device->CreateCommandList();
+		auto *cmd       = cmdHandle.Get();
+		cmd->Begin();
+
+		rhi::BufferCopy copy = {};
+		copy.size            = bufSize;
+		cmd->CopyBuffer(sorterBuffers.splatDepths.Get(), m_dbgKeysReadback.Get(), {&copy, 1});
+		cmd->CopyBuffer(sorterBuffers.splatIndicesOriginal.Get(), m_dbgValsReadback.Get(), {&copy, 1});
+
+		cmd->End();
+		rhi::IRHICommandList *ptr = cmd;
+		m_device->SubmitCommandLists({&ptr, 1});
+		m_device->WaitIdle();
+	}
+
+	// Map readback buffers
+	auto *keys = static_cast<uint32_t *>(m_dbgKeysReadback->Map());
+	auto *vals = static_cast<uint32_t *>(m_dbgValsReadback->Map());
+
+	if (!keys || !vals)
+	{
+		LOG_ERROR("ComputeSplatRasterizer: Failed to map debug readback buffers");
+		if (keys)
+			m_dbgKeysReadback->Unmap();
+		if (vals)
+			m_dbgValsReadback->Unmap();
+		return;
+	}
+
+	// Build sort indices and sort by key
+	std::vector<uint32_t> indices(m_maxTileInstances);
+	std::iota(indices.begin(), indices.end(), 0u);
+	std::sort(indices.begin(), indices.end(), [keys](uint32_t a, uint32_t b) { return keys[a] < keys[b]; });
+
+	// Write sorted results to staging buffers
+	auto *sortedKeys = static_cast<uint32_t *>(m_dbgKeysStaging->Map());
+	auto *sortedVals = static_cast<uint32_t *>(m_dbgValsStaging->Map());
+
+	if (!sortedKeys || !sortedVals)
+	{
+		LOG_ERROR("ComputeSplatRasterizer: Failed to map debug staging buffers");
+		m_dbgKeysReadback->Unmap();
+		m_dbgValsReadback->Unmap();
+		if (sortedKeys)
+			m_dbgKeysStaging->Unmap();
+		if (sortedVals)
+			m_dbgValsStaging->Unmap();
+		return;
+	}
+
+	for (uint32_t i = 0; i < m_maxTileInstances; i++)
+	{
+		sortedKeys[i] = keys[indices[i]];
+		sortedVals[i] = vals[indices[i]];
+	}
+
+	m_dbgKeysReadback->Unmap();
+	m_dbgValsReadback->Unmap();
+
+	// Upload sorted results to GPU: sortKeysB (for identify_ranges) and m_sortedTileValues (for rasterize)
+	{
+		auto  cmdHandle = m_device->CreateCommandList();
+		auto *cmd       = cmdHandle.Get();
+		cmd->Begin();
+
+		rhi::BufferCopy copy = {};
+		copy.size            = bufSize;
+		cmd->CopyBuffer(m_dbgKeysStaging.Get(), sorterBuffers.sortKeysB.Get(), {&copy, 1});
+		cmd->CopyBuffer(m_dbgValsStaging.Get(), m_sortedTileValues.Get(), {&copy, 1});
+
+		cmd->End();
+		rhi::IRHICommandList *ptr = cmd;
+		m_device->SubmitCommandLists({&ptr, 1});
+		m_device->WaitIdle();
+	}
 }
 
 uint32_t ComputeSplatRasterizer::ReadTileInstanceCount()
@@ -672,6 +1082,40 @@ ComputeSplatRasterizer::BufferInfo ComputeSplatRasterizer::GetBufferInfo() const
 	}
 
 	return info;
+}
+
+void ComputeSplatRasterizer::SetSortMethod(int method)
+{
+	if (m_tileSorter)
+	{
+		m_tileSorter->SetSortMethod(static_cast<GpuSplatSorter::SortMethod>(method));
+	}
+}
+
+int ComputeSplatRasterizer::GetSortMethod() const
+{
+	if (m_tileSorter)
+	{
+		return static_cast<int>(m_tileSorter->GetSortMethod());
+	}
+	return 0;
+}
+
+void ComputeSplatRasterizer::SetShaderVariant(int variant)
+{
+	if (m_tileSorter)
+	{
+		m_tileSorter->SetShaderVariant(static_cast<GpuSplatSorter::ShaderVariant>(variant));
+	}
+}
+
+int ComputeSplatRasterizer::GetShaderVariant() const
+{
+	if (m_tileSorter)
+	{
+		return static_cast<int>(m_tileSorter->GetShaderVariant());
+	}
+	return 0;
 }
 
 }        // namespace msplat::engine

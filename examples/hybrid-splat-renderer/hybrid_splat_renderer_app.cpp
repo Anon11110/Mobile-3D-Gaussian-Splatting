@@ -293,6 +293,13 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 
 		m_computeRasterizer = container::make_unique<engine::ComputeSplatRasterizer>(device, vfs);
 		m_computeRasterizer->Initialize(static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight), m_scene->GetTotalSplatCount());
+
+		m_computeRasterizer->SetProfilingCallbacks(
+		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputePreprocessTimestamp(cmd, begin); },
+		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeSortTimestamp(cmd, begin); },
+		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeRangesTimestamp(cmd, begin); },
+		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeRasterTimestamp(cmd, begin); });
+
 		LOG_INFO("Compute rasterizer initialized for {} splats ({}x{})", m_scene->GetTotalSplatCount(), fbWidth, fbHeight);
 	}
 
@@ -681,124 +688,184 @@ void HybridSplatRendererApp::OnRender()
 		}
 	}
 
-	// Run compute rasterizer pipeline if enabled
-	if (m_computeRasterizer && m_computeRasterizerEnabled)
-	{
-		m_computeRasterizer->RecordPreprocessSortAndRanges(cmdList, *m_scene, ubo);
-	}
+	bool useComputeRasterization = m_computeRasterizer && m_rasterizationPipelineType == RasterizationPipelineType::ComputeRaster && m_computeRasterizer->IsInitialized();
 
 	// Log FPS periodically
 	if (m_frameCount % 60 == 0 && m_fpsCounter.shouldUpdate())
 	{
-		LOG_INFO("Frame FPS: {:.2f} | Sort: {} | Splats: {}",
+		LOG_INFO("Frame FPS: {:.2f} | {} | Splats: {}",
 		         m_fpsCounter.getFPS(),
-		         m_sortingEnabled ? (m_backend ? m_backend->GetMethodName() : "N/A") : "Disabled",
+		         useComputeRasterization ? "Compute Raster" :
+		                                   (m_sortingEnabled ? (m_backend ? m_backend->GetMethodName() : "N/A") : "Disabled"),
 		         m_scene->GetTotalSplatCount());
 		m_fpsCounter.reset();
 	}
 
-	// Acquire sorted indices buffer from compute queue (GPU backend async compute only)
-	// During warmup: use the buffer directly (WaitIdle already synced)
-	// During pipelined: use previous frame's buffer with semaphore sync
-	rhi::IRHIBuffer    *sortedIndicesForRendering = m_sortedIndices.Get();
-	rhi::IRHISemaphore *computeSemaphore          = m_backend ? m_backend->GetComputeSemaphore() : nullptr;
-
-	if (m_backend && m_sortingEnabled && m_backend->IsAsyncComputeEnabled())
-	{
-		sortedIndicesForRendering = m_backend->GetSortedIndicesBuffer();
-
-		// Only do QFOT acquire if pipeline is warmed up and using semaphore sync
-		// During warmup: buffer sync is via WaitIdle, no QFOT needed
-		// During pipelined: semaphore wait + QFOT acquire
-		// And rebind descriptor set with the correct buffer for current frame
-		if (computeSemaphore)
-		{
-			if (auto *gpuBackend = dynamic_cast<engine::GpuSplatSortBackend *>(m_backend.get());
-			    gpuBackend && gpuBackend->IsPipelineWarmedUp())
-			{
-				rhi::BufferTransition acquireTransition{};
-				acquireTransition.buffer = sortedIndicesForRendering;
-				acquireTransition.before = rhi::ResourceState::ShaderReadWrite;
-				acquireTransition.after  = rhi::ResourceState::GeneralRead;
-				cmdList->AcquireFromQueue(rhi::QueueType::COMPUTE, {&acquireTransition, 1}, {});
-			}
-		}
-
-		rhi::BufferBinding indicesBinding{};
-		indicesBinding.buffer = sortedIndicesForRendering;
-		indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(5, indicesBinding);
-	}
-	else if (m_backend && m_sortingEnabled)
-	{
-		rhi::BufferBinding indicesBinding{};
-		indicesBinding.buffer = m_sortedIndices.Get();
-		indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(5, indicesBinding);
-	}
-
 	rhi::IRHITexture *backBuffer = swapchain->GetBackBuffer(imageIndex);
 
-	// Transition to render target
-	rhi::TextureTransition renderTransition = {};
-	renderTransition.texture                = backBuffer;
-	renderTransition.before                 = rhi::ResourceState::Undefined;
-	renderTransition.after                  = rhi::ResourceState::RenderTarget;
+	// Compute semaphore for async compute sort (only used in hardware path)
+	rhi::IRHISemaphore *computeSemaphore = nullptr;
 
-	cmdList->Barrier(
-	    rhi::PipelineScope::Graphics,
-	    rhi::PipelineScope::Graphics,
-	    {},
-	    {&renderTransition, 1},
-	    {});
-
-	// Begin rendering
-	rhi::RenderingInfo renderingInfo{};
-	renderingInfo.colorAttachments.resize(1);
-	renderingInfo.colorAttachments[0].view                = swapchain->GetBackBufferView(imageIndex);
-	renderingInfo.colorAttachments[0].loadOp              = rhi::LoadOp::CLEAR;
-	renderingInfo.colorAttachments[0].storeOp             = rhi::StoreOp::STORE;
-	renderingInfo.colorAttachments[0].clearValue.color[0] = 0.0f;
-	renderingInfo.colorAttachments[0].clearValue.color[1] = 0.0f;
-	renderingInfo.colorAttachments[0].clearValue.color[2] = 0.0f;
-	renderingInfo.colorAttachments[0].clearValue.color[3] = 1.0f;
-	renderingInfo.renderAreaWidth                         = width;
-	renderingInfo.renderAreaHeight                        = height;
-
-	// Record render pass begin timestamp
-	RecordRenderTimestamp(cmdList, true);
-
-	cmdList->BeginRendering(renderingInfo);
-	cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
-	cmdList->SetScissor(0, 0, width, height);
-
-	// Begin pipeline statistics query
-	BeginPipelineStatsQuery(cmdList);
-
-	// Draw the splats using indexed procedural vertex generation if scene is not empty
-	uint32_t splatCount = m_scene->GetTotalSplatCount();
-	if (splatCount > 0 && m_renderPipeline && m_descriptorSet && m_quadIndexBuffer)
+	if (useComputeRasterization)
 	{
-		cmdList->SetPipeline(m_renderPipeline.Get());
-		cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
-		cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
+		// === Compute rasterization path ===
+		m_computeRasterizer->Render(cmdList, *m_scene, ubo);
 
-		// Draw using instanced rendering: 4 indices per strip, one instance per splat
-		uint32_t indexCount = 4;
-		cmdList->DrawIndexedInstanced(indexCount, splatCount, 0, 0, 0);
+		// Blit compute output to backbuffer
+		{
+			rhi::TextureTransition transition = {};
+			transition.texture                = backBuffer;
+			transition.before                 = rhi::ResourceState::Undefined;
+			transition.after                  = rhi::ResourceState::CopyDestination;
+
+			cmdList->Barrier(rhi::PipelineScope::Copy, rhi::PipelineScope::Copy,
+			                 {}, {&transition, 1}, {});
+		}
+
+		rhi::TextureBlit blitRegion = {};
+		blitRegion.srcX1            = m_computeRasterizer->GetTileConfig().screenWidth;
+		blitRegion.srcY1            = m_computeRasterizer->GetTileConfig().screenHeight;
+		blitRegion.srcZ1            = 1;
+		blitRegion.dstX1            = width;
+		blitRegion.dstY1            = height;
+		blitRegion.dstZ1            = 1;
+
+		cmdList->BlitTexture(m_computeRasterizer->GetOutputImage(), backBuffer,
+		                     {&blitRegion, 1}, rhi::FilterMode::LINEAR);
+
+		// Transition backbuffer for ImGui render pass
+		{
+			rhi::TextureTransition transition = {};
+			transition.texture                = backBuffer;
+			transition.before                 = rhi::ResourceState::CopyDestination;
+			transition.after                  = rhi::ResourceState::RenderTarget;
+
+			cmdList->Barrier(rhi::PipelineScope::Copy, rhi::PipelineScope::Graphics,
+			                 {}, {&transition, 1}, {});
+		}
+
+		// Render ImGui overlay
+		rhi::RenderingInfo renderingInfo{};
+		renderingInfo.colorAttachments.resize(1);
+		renderingInfo.colorAttachments[0].view    = swapchain->GetBackBufferView(imageIndex);
+		renderingInfo.colorAttachments[0].loadOp  = rhi::LoadOp::LOAD;
+		renderingInfo.colorAttachments[0].storeOp = rhi::StoreOp::STORE;
+		renderingInfo.renderAreaWidth             = width;
+		renderingInfo.renderAreaHeight            = height;
+
+		RecordRenderTimestamp(cmdList, true);
+
+		cmdList->BeginRendering(renderingInfo);
+		cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
+		cmdList->SetScissor(0, 0, width, height);
+
+		if (m_imguiEnabled && m_showImGui)
+		{
+			UpdateFpsHistory();
+			RenderImGui();
+			RenderImGuiToCommandBuffer(cmdList);
+		}
+
+		cmdList->EndRendering();
 	}
-
-	// End pipeline statistics query
-	EndPipelineStatsQuery(cmdList);
-
-	if (m_imguiEnabled && m_showImGui)
+	else
 	{
-		UpdateFpsHistory();
-		RenderImGui();
-		RenderImGuiToCommandBuffer(cmdList);
-	}
+		// === Hardware rasterization path ===
+		// Acquire sorted indices buffer from compute queue (GPU backend async compute only)
+		rhi::IRHIBuffer *sortedIndicesForRendering = m_sortedIndices.Get();
+		computeSemaphore                           = m_backend ? m_backend->GetComputeSemaphore() : nullptr;
 
-	cmdList->EndRendering();
+		if (m_backend && m_sortingEnabled && m_backend->IsAsyncComputeEnabled())
+		{
+			sortedIndicesForRendering = m_backend->GetSortedIndicesBuffer();
+
+			if (computeSemaphore)
+			{
+				if (auto *gpuBackend = dynamic_cast<engine::GpuSplatSortBackend *>(m_backend.get());
+				    gpuBackend && gpuBackend->IsPipelineWarmedUp())
+				{
+					rhi::BufferTransition acquireTransition{};
+					acquireTransition.buffer = sortedIndicesForRendering;
+					acquireTransition.before = rhi::ResourceState::ShaderReadWrite;
+					acquireTransition.after  = rhi::ResourceState::GeneralRead;
+					cmdList->AcquireFromQueue(rhi::QueueType::COMPUTE, {&acquireTransition, 1}, {});
+				}
+			}
+
+			rhi::BufferBinding indicesBinding{};
+			indicesBinding.buffer = sortedIndicesForRendering;
+			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSet->BindBuffer(5, indicesBinding);
+		}
+		else if (m_backend && m_sortingEnabled)
+		{
+			rhi::BufferBinding indicesBinding{};
+			indicesBinding.buffer = m_sortedIndices.Get();
+			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSet->BindBuffer(5, indicesBinding);
+		}
+
+		// Transition to render target
+		rhi::TextureTransition renderTransition = {};
+		renderTransition.texture                = backBuffer;
+		renderTransition.before                 = rhi::ResourceState::Undefined;
+		renderTransition.after                  = rhi::ResourceState::RenderTarget;
+
+		cmdList->Barrier(
+		    rhi::PipelineScope::Graphics,
+		    rhi::PipelineScope::Graphics,
+		    {},
+		    {&renderTransition, 1},
+		    {});
+
+		// Begin rendering
+		rhi::RenderingInfo renderingInfo{};
+		renderingInfo.colorAttachments.resize(1);
+		renderingInfo.colorAttachments[0].view                = swapchain->GetBackBufferView(imageIndex);
+		renderingInfo.colorAttachments[0].loadOp              = rhi::LoadOp::CLEAR;
+		renderingInfo.colorAttachments[0].storeOp             = rhi::StoreOp::STORE;
+		renderingInfo.colorAttachments[0].clearValue.color[0] = 0.0f;
+		renderingInfo.colorAttachments[0].clearValue.color[1] = 0.0f;
+		renderingInfo.colorAttachments[0].clearValue.color[2] = 0.0f;
+		renderingInfo.colorAttachments[0].clearValue.color[3] = 1.0f;
+		renderingInfo.renderAreaWidth                         = width;
+		renderingInfo.renderAreaHeight                        = height;
+
+		// Record render pass begin timestamp
+		RecordRenderTimestamp(cmdList, true);
+
+		cmdList->BeginRendering(renderingInfo);
+		cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
+		cmdList->SetScissor(0, 0, width, height);
+
+		// Begin pipeline statistics query
+		BeginPipelineStatsQuery(cmdList);
+
+		// Draw the splats using indexed procedural vertex generation if scene is not empty
+		uint32_t splatCount = m_scene->GetTotalSplatCount();
+		if (splatCount > 0 && m_renderPipeline && m_descriptorSet && m_quadIndexBuffer)
+		{
+			cmdList->SetPipeline(m_renderPipeline.Get());
+			cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
+			cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
+
+			// Draw using instanced rendering: 4 indices per strip, one instance per splat
+			uint32_t indexCount = 4;
+			cmdList->DrawIndexedInstanced(indexCount, splatCount, 0, 0, 0);
+		}
+
+		// End pipeline statistics query
+		EndPipelineStatsQuery(cmdList);
+
+		if (m_imguiEnabled && m_showImGui)
+		{
+			UpdateFpsHistory();
+			RenderImGui();
+			RenderImGuiToCommandBuffer(cmdList);
+		}
+
+		cmdList->EndRendering();
+	}
 
 	// Record render pass end timestamp
 	RecordRenderTimestamp(cmdList, false);
@@ -1453,6 +1520,13 @@ void HybridSplatRendererApp::ReinitializeSortBackend(uint32_t newSplatCount)
 		// Recreate with new max splat count
 		m_computeRasterizer = container::make_unique<engine::ComputeSplatRasterizer>(device, vfs);
 		m_computeRasterizer->Initialize(static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight), newSplatCount);
+
+		m_computeRasterizer->SetProfilingCallbacks(
+		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputePreprocessTimestamp(cmd, begin); },
+		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeSortTimestamp(cmd, begin); },
+		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeRangesTimestamp(cmd, begin); },
+		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeRasterTimestamp(cmd, begin); });
+
 		LOG_INFO("Compute rasterizer reinitialized for {} splats", newSplatCount);
 	}
 }
@@ -1512,6 +1586,10 @@ void HybridSplatRendererApp::InitGpuProfiling()
 	m_gpuProfilingFrameLatency = swapchain->GetImageCount();
 	m_timestampPeriod          = device->GetTimestampPeriod();        // nanoseconds
 
+	// Initialize pipeline tracking for each frame slot
+	m_frameRasterizationPipelines.resize(m_gpuProfilingFrameLatency, RasterizationPipelineType::HardwareRaster);
+	m_frameSortAsyncEnabled.resize(m_gpuProfilingFrameLatency, false);
+
 	rhi::QueryPoolDesc timestampDesc{};
 	timestampDesc.queryType  = rhi::QueryType::TIMESTAMP;
 	timestampDesc.queryCount = TIMESTAMPS_PER_FRAME * m_gpuProfilingFrameLatency;
@@ -1558,6 +1636,12 @@ void HybridSplatRendererApp::BeginGpuFrame(rhi::IRHICommandList *cmdList)
 	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
 	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
 
+	// Record which rendering pipeline is active for this frame
+	m_frameRasterizationPipelines[frameSlot] = m_rasterizationPipelineType;
+
+	// Record whether async compute is enabled because it affects which timestamps are written
+	m_frameSortAsyncEnabled[frameSlot] = m_backend && m_backend->IsAsyncComputeEnabled();
+
 	// Reset timestamp and pipeline stats queries for this frame
 	cmdList->ResetQueryPool(m_timestampQueryPool.Get(), timestampOffset, TIMESTAMPS_PER_FRAME);
 	if (m_pipelineStatsQueryPool)
@@ -1575,7 +1659,7 @@ void HybridSplatRendererApp::RecordSortTimestamp(rhi::IRHICommandList *cmdList, 
 
 	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
 	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
-	uint32_t queryIndex      = timestampOffset + (begin ? TIMESTAMP_SORT_BEGIN : TIMESTAMP_SORT_END);
+	uint32_t queryIndex      = timestampOffset + (begin ? TIMESTAMP_HW_SORT_BEGIN : TIMESTAMP_HW_SORT_END);
 
 	cmdList->WriteTimestamp(m_timestampQueryPool.Get(), queryIndex, rhi::StageMask::ComputeShader);
 }
@@ -1589,9 +1673,75 @@ void HybridSplatRendererApp::RecordRenderTimestamp(rhi::IRHICommandList *cmdList
 
 	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
 	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
-	uint32_t queryIndex      = timestampOffset + (begin ? TIMESTAMP_RENDER_BEGIN : TIMESTAMP_RENDER_END);
+
+	// Use different timestamp indices based on active rendering pipeline
+	uint32_t queryIndex;
+	if (m_rasterizationPipelineType == RasterizationPipelineType::ComputeRaster)
+	{
+		queryIndex = timestampOffset + (begin ? TIMESTAMP_COMPUTE_RENDER_BEGIN : TIMESTAMP_COMPUTE_RENDER_END);
+	}
+	else
+	{
+		queryIndex = timestampOffset + (begin ? TIMESTAMP_HW_RENDER_BEGIN : TIMESTAMP_HW_RENDER_END);
+	}
 
 	cmdList->WriteTimestamp(m_timestampQueryPool.Get(), queryIndex, rhi::StageMask::RenderTarget);
+}
+
+void HybridSplatRendererApp::RecordComputePreprocessTimestamp(rhi::IRHICommandList *cmdList, bool begin)
+{
+	if (!m_profilingEnabled || !m_timestampQueryPool || m_profilingJustEnabled)
+	{
+		return;
+	}
+
+	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
+	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
+	uint32_t queryIndex      = timestampOffset + (begin ? TIMESTAMP_COMPUTE_PREPROCESS_BEGIN : TIMESTAMP_COMPUTE_PREPROCESS_END);
+
+	cmdList->WriteTimestamp(m_timestampQueryPool.Get(), queryIndex, rhi::StageMask::ComputeShader);
+}
+
+void HybridSplatRendererApp::RecordComputeSortTimestamp(rhi::IRHICommandList *cmdList, bool begin)
+{
+	if (!m_profilingEnabled || !m_timestampQueryPool || m_profilingJustEnabled)
+	{
+		return;
+	}
+
+	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
+	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
+	uint32_t queryIndex      = timestampOffset + (begin ? TIMESTAMP_COMPUTE_SORT_BEGIN : TIMESTAMP_COMPUTE_SORT_END);
+
+	cmdList->WriteTimestamp(m_timestampQueryPool.Get(), queryIndex, rhi::StageMask::ComputeShader);
+}
+
+void HybridSplatRendererApp::RecordComputeRangesTimestamp(rhi::IRHICommandList *cmdList, bool begin)
+{
+	if (!m_profilingEnabled || !m_timestampQueryPool || m_profilingJustEnabled)
+	{
+		return;
+	}
+
+	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
+	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
+	uint32_t queryIndex      = timestampOffset + (begin ? TIMESTAMP_COMPUTE_RANGES_BEGIN : TIMESTAMP_COMPUTE_RANGES_END);
+
+	cmdList->WriteTimestamp(m_timestampQueryPool.Get(), queryIndex, rhi::StageMask::ComputeShader);
+}
+
+void HybridSplatRendererApp::RecordComputeRasterTimestamp(rhi::IRHICommandList *cmdList, bool begin)
+{
+	if (!m_profilingEnabled || !m_timestampQueryPool || m_profilingJustEnabled)
+	{
+		return;
+	}
+
+	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
+	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
+	uint32_t queryIndex      = timestampOffset + (begin ? TIMESTAMP_COMPUTE_RASTER_BEGIN : TIMESTAMP_COMPUTE_RASTER_END);
+
+	cmdList->WriteTimestamp(m_timestampQueryPool.Get(), queryIndex, rhi::StageMask::ComputeShader);
 }
 
 void HybridSplatRendererApp::BeginPipelineStatsQuery(rhi::IRHICommandList *cmdList)
@@ -1635,70 +1785,101 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 	uint32_t readFrameIndex  = (m_profilingFrameIndex - m_gpuProfilingFrameLatency) % m_gpuProfilingFrameLatency;
 	uint32_t timestampOffset = readFrameIndex * TIMESTAMPS_PER_FRAME;
 
-	GpuTimingResults results{};
+	GpuTimingResults          results{};
+	RasterizationPipelineType pipelineType   = m_frameRasterizationPipelines[readFrameIndex];
+	bool                      sortAsyncWasOn = m_frameSortAsyncEnabled[readFrameIndex];
 
-	// Determine if sort timestamps were written to the graphics queue.
-	// Sort timestamps are NOT written when: Sorting is disabled and GPU backend in async compute mode
-	bool backendInAsyncMode    = m_backend && m_backend->IsAsyncComputeEnabled();
-	bool sortTimestampsWritten = m_sortingEnabled && m_currentBackendType == BackendType::GPU && !backendInAsyncMode;
+	// Read only the timestamps that were written for the active pipeline
+	uint64_t timestamps[TIMESTAMPS_PER_FRAME] = {};
+	bool     timestampsValid                  = false;
 
-	if (!sortTimestampsWritten)
+	if (pipelineType == RasterizationPipelineType::HardwareRaster)
 	{
-		// Sorting disabled, async compute mode, or CPU backend only read render timestamps
-		uint64_t renderTimestamps[2];
-		bool     renderTimestampsValid = device->GetQueryPoolResults(
-            m_timestampQueryPool.Get(),
-            timestampOffset + TIMESTAMP_RENDER_BEGIN,
-            2,        // Only render_begin and render_end
-            renderTimestamps,
-            sizeof(renderTimestamps),
-            sizeof(uint64_t),
-            rhi::QueryResultFlags::NONE);
-
-		results.valid = renderTimestampsValid;
-
-		if (renderTimestampsValid)
+		// Hardware rasterization pipeline: read only the timestamps that were written
+		if (sortAsyncWasOn)
 		{
-			double renderTicks   = static_cast<double>(renderTimestamps[1] - renderTimestamps[0]);
-			results.renderTimeMs = (renderTicks * m_timestampPeriod) / 1000000.0;
-
-			if (m_backend && m_sortingEnabled)
-			{
-				auto metrics       = m_backend->GetMetrics();
-				results.sortTimeMs = metrics.sortDurationMs;
-			}
-		}
-	}
-	else
-	{
-		// GPU backend, single queue mode with sorting enabled: read all 4 timestamps
-		// Use non-blocking instead of WAIT to avoid hanging on queries that were never written.
-		// This can occur when switching modes/backends while frames are still in flight, because older
-		// frames may have recorded a different query layout
-		uint64_t timestamps[TIMESTAMPS_PER_FRAME];
-		bool     timestampsValid = device->GetQueryPoolResults(
-            m_timestampQueryPool.Get(),
-            timestampOffset,
-            TIMESTAMPS_PER_FRAME,
-            timestamps,
-            sizeof(timestamps),
-            sizeof(uint64_t),
-            rhi::QueryResultFlags::NONE);
-
-		results.valid = timestampsValid;
-
-		if (timestampsValid)
-		{
-			// timestamps: [0]=sort_begin, [1]=sort_end, [2]=render_begin, [3]=render_end
-			double renderTicks   = static_cast<double>(timestamps[TIMESTAMP_RENDER_END] - timestamps[TIMESTAMP_RENDER_BEGIN]);
-			results.renderTimeMs = (renderTicks * m_timestampPeriod) / 1000000.0;
-
-			double sortTicks   = static_cast<double>(timestamps[TIMESTAMP_SORT_END] - timestamps[TIMESTAMP_SORT_BEGIN]);
-			results.sortTimeMs = (sortTicks * m_timestampPeriod) / 1000000.0;
+			// Async compute enabled: only render timestamps (2-3) were written
+			timestampsValid = device->GetQueryPoolResults(
+			    m_timestampQueryPool.Get(),
+			    timestampOffset + TIMESTAMP_HW_RENDER_BEGIN,
+			    2,        // Read 2 timestamps (TIMESTAMP_HW_RENDER_BEGIN through TIMESTAMP_HW_RENDER_END)
+			    &timestamps[TIMESTAMP_HW_RENDER_BEGIN],
+			    2 * sizeof(uint64_t),
+			    sizeof(uint64_t),
+			    rhi::QueryResultFlags::NONE);
 		}
 		else
 		{
-			results.sortTimeMs = 0.0;
+			// Normal mode: all 4 hardware timestamps (0-3) were written
+			timestampsValid = device->GetQueryPoolResults(
+			    m_timestampQueryPool.Get(),
+			    timestampOffset + TIMESTAMP_HW_SORT_BEGIN,
+			    4,        // Read 4 timestamps (TIMESTAMP_HW_SORT_BEGIN through TIMESTAMP_HW_RENDER_END)
+			    &timestamps[TIMESTAMP_HW_SORT_BEGIN],
+			    4 * sizeof(uint64_t),
+			    sizeof(uint64_t),
+			    rhi::QueryResultFlags::NONE);
+		}
+	}
+	else        // RasterizationPipelineType::ComputeRaster
+	{
+		// Compute rasterization pipeline: read only timestamps 4-13
+		timestampsValid = device->GetQueryPoolResults(
+		    m_timestampQueryPool.Get(),
+		    timestampOffset + TIMESTAMP_COMPUTE_PREPROCESS_BEGIN,
+		    10,        // Read 10 timestamps (TIMESTAMP_COMPUTE_PREPROCESS_BEGIN through TIMESTAMP_COMPUTE_RENDER_END)
+		    &timestamps[TIMESTAMP_COMPUTE_PREPROCESS_BEGIN],
+		    10 * sizeof(uint64_t),
+		    sizeof(uint64_t),
+		    rhi::QueryResultFlags::NONE);
+	}
+
+	results.valid = timestampsValid;
+
+	if (timestampsValid)
+	{
+		if (pipelineType == RasterizationPipelineType::ComputeRaster)
+		{
+			// Compute rasterization pipeline: preprocess, sort, identify ranges, rasterize
+			double preprocessTicks   = static_cast<double>(timestamps[TIMESTAMP_COMPUTE_PREPROCESS_END] - timestamps[TIMESTAMP_COMPUTE_PREPROCESS_BEGIN]);
+			results.preprocessTimeMs = (preprocessTicks * m_timestampPeriod) / 1000000.0;
+
+			double sortTicks          = static_cast<double>(timestamps[TIMESTAMP_COMPUTE_SORT_END] - timestamps[TIMESTAMP_COMPUTE_SORT_BEGIN]);
+			results.computeSortTimeMs = (sortTicks * m_timestampPeriod) / 1000000.0;
+
+			double rangesTicks   = static_cast<double>(timestamps[TIMESTAMP_COMPUTE_RANGES_END] - timestamps[TIMESTAMP_COMPUTE_RANGES_BEGIN]);
+			results.rangesTimeMs = (rangesTicks * m_timestampPeriod) / 1000000.0;
+
+			double rasterTicks   = static_cast<double>(timestamps[TIMESTAMP_COMPUTE_RASTER_END] - timestamps[TIMESTAMP_COMPUTE_RASTER_BEGIN]);
+			results.rasterTimeMs = (rasterTicks * m_timestampPeriod) / 1000000.0;
+
+			// Total render time
+			double renderTicks   = static_cast<double>(timestamps[TIMESTAMP_COMPUTE_RENDER_END] - timestamps[TIMESTAMP_COMPUTE_RENDER_BEGIN]);
+			results.renderTimeMs = (renderTicks * m_timestampPeriod) / 1000000.0;
+		}
+		else
+		{
+			// Hardware rasterization pipeline: sort + render
+			bool sortTimestampsWritten = m_sortingEnabled && m_currentBackendType == BackendType::GPU && !sortAsyncWasOn;
+
+			if (sortTimestampsWritten && timestamps[TIMESTAMP_HW_SORT_BEGIN] != 0)
+			{
+				// Sort happened on graphics queue
+				double sortTicks   = static_cast<double>(timestamps[TIMESTAMP_HW_SORT_END] - timestamps[TIMESTAMP_HW_SORT_BEGIN]);
+				results.sortTimeMs = (sortTicks * m_timestampPeriod) / 1000000.0;
+			}
+			else if (m_backend && m_sortingEnabled)
+			{
+				// Sort happened on CPU or async compute queue: get timing from backend metrics
+				auto metrics       = m_backend->GetMetrics();
+				results.sortTimeMs = metrics.sortDurationMs;
+			}
+
+			if (timestamps[TIMESTAMP_HW_RENDER_BEGIN] != 0)
+			{
+				double renderTicks   = static_cast<double>(timestamps[TIMESTAMP_HW_RENDER_END] - timestamps[TIMESTAMP_HW_RENDER_BEGIN]);
+				results.renderTimeMs = (renderTicks * m_timestampPeriod) / 1000000.0;
+			}
 		}
 	}
 
@@ -2131,44 +2312,55 @@ void HybridSplatRendererApp::RenderImGui()
 
 			if (m_profilingEnabled)
 			{
-				if (m_currentBackendType == BackendType::GPU && m_currentGpuTiming.valid)
+				if (m_rasterizationPipelineType == RasterizationPipelineType::ComputeRaster && m_currentGpuTiming.valid)
 				{
-					// GPU Timing
+					// Compute rasterization pipeline: detailed per-stage breakdown
+					ImGui::Text("Preprocess:   %.3f ms", m_currentGpuTiming.preprocessTimeMs);
+					ImGui::Text("Sort:         %.3f ms", m_currentGpuTiming.computeSortTimeMs);
+					ImGui::Text("Ranges:       %.3f ms", m_currentGpuTiming.rangesTimeMs);
+					ImGui::Text("Rasterize:    %.3f ms", m_currentGpuTiming.rasterTimeMs);
+					ImGui::Text("Render Pass:  %.3f ms", m_currentGpuTiming.renderTimeMs);
+				}
+				else if (m_rasterizationPipelineType == RasterizationPipelineType::HardwareRaster)
+				{
+					// Hardware rasterization pipeline timings
+					if (m_currentBackendType == BackendType::GPU && m_currentGpuTiming.valid)
+					{
+						// GPU backend
+						double sortTime = m_sortingEnabled ? m_currentGpuTiming.sortTimeMs : 0.0;
+						ImGui::Text("Sort Pass:    %.3f ms", sortTime);
+						ImGui::Text("Render Pass:  %.3f ms", m_currentGpuTiming.renderTimeMs);
+						ImGui::Text("Total:        %.3f ms", sortTime + m_currentGpuTiming.renderTimeMs);
+					}
+					else if (m_currentBackendType == BackendType::CPU && m_currentGpuTiming.valid)
+					{
+						// CPU backend
+						float totalTime  = 0.0f;
+						float sortTime   = 0.0f;
+						float uploadTime = 0.0f;
 
-					double sortTime = m_sortingEnabled ? m_currentGpuTiming.sortTimeMs : 0.0;
-					ImGui::Text("Sort Pass:   %.3f ms", sortTime);
-					ImGui::Text("Render Pass: %.3f ms", m_currentGpuTiming.renderTimeMs);
-					ImGui::Text("Total:       %.3f ms", sortTime + m_currentGpuTiming.renderTimeMs);
+						if (m_sortingEnabled && m_backend)
+						{
+							auto metrics = m_backend->GetMetrics();
+							sortTime     = metrics.sortDurationMs;
+							uploadTime   = metrics.uploadDurationMs;
+							totalTime += sortTime + uploadTime;
+						}
+
+						ImGui::Text("Sort Time:    %.2f ms", sortTime);
+						if (uploadTime > 0.0f)
+						{
+							ImGui::Text("Upload Time:  %.2f ms", uploadTime);
+						}
+
+						totalTime += static_cast<float>(m_currentGpuTiming.renderTimeMs);
+						ImGui::Text("Render Pass:  %.3f ms", m_currentGpuTiming.renderTimeMs);
+						ImGui::Text("Total:        %.3f ms", totalTime);
+					}
 				}
 
-				// CPU sorter backend timing
-				if (m_currentBackendType == BackendType::CPU && m_currentGpuTiming.valid)
-				{
-					float totalTime  = 0.0f;
-					float sortTime   = 0.0f;
-					float uploadTime = 0.0f;
-
-					if (m_sortingEnabled && m_backend)
-					{
-						auto metrics = m_backend->GetMetrics();
-						sortTime     = metrics.sortDurationMs;
-						uploadTime   = metrics.uploadDurationMs;
-						totalTime += sortTime + uploadTime;
-					}
-
-					ImGui::Text("Sort Time:   %.2f ms", sortTime);
-					if (uploadTime > 0.0f)
-					{
-						ImGui::Text("Upload Time: %.2f ms", uploadTime);
-					}
-
-					totalTime += static_cast<float>(m_currentGpuTiming.renderTimeMs);
-					ImGui::Text("Render Pass: %.3f ms", m_currentGpuTiming.renderTimeMs);
-					ImGui::Text("Total:       %.3f ms", totalTime);
-				}
-
-				// Fragment shader invocations
-				if (m_pipelineStatsQueryPool && m_scene)
+				// Fragment shader invocations (hardware rasterization pipeline only)
+				if (m_rasterizationPipelineType == RasterizationPipelineType::HardwareRaster && m_pipelineStatsQueryPool && m_scene)
 				{
 					uint64_t fragmentInvocations = m_currentGpuTiming.fragmentInvocations;
 					uint32_t splatCount          = m_scene->GetTotalSplatCount();
@@ -2219,118 +2411,170 @@ void HybridSplatRendererApp::RenderImGui()
 		ImGui::Text("Rendering Controls");
 		ImGui::Separator();
 
-		// Sorting enabled toggle
-		if (ImGui::Checkbox("Enable Sorting", &m_sortingEnabled))
+		// Rasterization Pipeline Selection
+		ImGui::Text("Rasterization Pipeline:");
+		int         pipelineIndex = static_cast<int>(m_rasterizationPipelineType);
+		const char *pipelines[]   = {"Hardware Rasterization", "Compute Rasterization"};
+
+		// Disable compute option if rasterizer is not initialized
+		bool canUseCompute = m_computeRasterizer && m_computeRasterizer->IsInitialized();
+		if (!canUseCompute && pipelineIndex == 1)
 		{
-			LOG_INFO("Sorting {}", m_sortingEnabled ? "enabled" : "disabled");
+			pipelineIndex               = 0;
+			m_rasterizationPipelineType = RasterizationPipelineType::HardwareRaster;
 		}
 
-		// Backend selection
-		ImGui::Text("Sort Backend:");
-		int         backendIndex = static_cast<int>(m_currentBackendType);
-		const char *backends[]   = {"GPU", "CPU"};
-		if (ImGui::Combo("##Backend", &backendIndex, backends, 2))
+		if (ImGui::Combo("##RasterizationPipeline", &pipelineIndex, pipelines, 2))
 		{
-			m_pendingOps.backendSwitch = PendingOperations::BackendSwitch{static_cast<BackendType>(backendIndex)};
+			m_rasterizationPipelineType = static_cast<RasterizationPipelineType>(pipelineIndex);
+			LOG_INFO("Rasterization pipeline: {}", pipelines[pipelineIndex]);
 		}
 
-		// Backend-specific info
-		if (m_backend)
-		{
-			ImGui::Text("Method: %s", m_backend->GetMethodName());
+		ImGui::Spacing();
 
-			// Sort method and shader variant switching only for GPU backend
-			if (m_currentBackendType == BackendType::GPU)
+		// Hardware rasterization pipeline controls
+		if (m_rasterizationPipelineType == RasterizationPipelineType::HardwareRaster)
+		{
+			// Sorting enabled toggle
+			if (ImGui::Checkbox("Enable Sorting", &m_sortingEnabled))
 			{
-				int         currentMethod = m_backend->GetSortMethod();
-				const char *methods[]     = {"Prescan Radix Sort", "Integrated Scan Radix Sort"};
-				if (ImGui::Combo("##SortMethod", &currentMethod, methods, 2))
-				{
-					m_currentSortMethod = currentMethod;
-					m_backend->SetSortMethod(m_currentSortMethod);
-					LOG_INFO("Switched to {} radix sort method", methods[currentMethod]);
-				}
+				LOG_INFO("Sorting {}", m_sortingEnabled ? "enabled" : "disabled");
+			}
 
-				// Shader variant combo
-				int         currentVariant = m_backend->GetShaderVariant();
-				const char *variants[]     = {"Portable", "SubgroupOptimized"};
-				if (ImGui::Combo("##ShaderVariant", &currentVariant, variants, 2))
-				{
-					m_backend->SetShaderVariant(currentVariant);
-					LOG_INFO("Switched to {} shader variant", variants[currentVariant]);
-				}
-				ImGui::SameLine();
-				ImGui::TextDisabled("(?)");
-				if (ImGui::IsItemHovered())
-				{
-					ImGui::BeginTooltip();
-					ImGui::Text("Portable: Works on all GPUs");
-					ImGui::Text("SubgroupOptimized: Requires reliable subgroup ops (Fail on Qualcomm Adreno)");
-					ImGui::EndTooltip();
-				}
+			ImGui::Spacing();
 
-				// Async compute toggle
-				bool asyncEnabled = m_asyncComputeEnabled;
-				if (ImGui::Checkbox("Async Compute", &asyncEnabled))
+			// Backend selection
+			ImGui::Text("Sort Backend:");
+			int         backendIndex = static_cast<int>(m_currentBackendType);
+			const char *backends[]   = {"GPU", "CPU"};
+			if (ImGui::Combo("##Backend", &backendIndex, backends, 2))
+			{
+				m_pendingOps.backendSwitch = PendingOperations::BackendSwitch{static_cast<BackendType>(backendIndex)};
+			}
+
+			// Backend-specific info
+			if (m_backend)
+			{
+				ImGui::Text("Method: %s", m_backend->GetMethodName());
+
+				// Sort method and shader variant switching only for GPU backend
+				if (m_currentBackendType == BackendType::GPU)
 				{
-					m_pendingOps.asyncComputeToggle = PendingOperations::AsyncComputeToggle{asyncEnabled};
-					LOG_INFO("Async compute toggle scheduled: {}", asyncEnabled ? "enable" : "disable");
+					int         currentMethod = m_backend->GetSortMethod();
+					const char *methods[]     = {"Prescan Radix Sort", "Integrated Scan Radix Sort"};
+					if (ImGui::Combo("##SortMethod", &currentMethod, methods, 2))
+					{
+						m_currentSortMethod = currentMethod;
+						m_backend->SetSortMethod(m_currentSortMethod);
+						LOG_INFO("Switched to {} radix sort method", methods[currentMethod]);
+					}
+
+					// Shader variant combo
+					int         currentVariant = m_backend->GetShaderVariant();
+					const char *variants[]     = {"Portable", "SubgroupOptimized"};
+					if (ImGui::Combo("##ShaderVariant", &currentVariant, variants, 2))
+					{
+						m_backend->SetShaderVariant(currentVariant);
+						LOG_INFO("Switched to {} shader variant", variants[currentVariant]);
+					}
+					ImGui::SameLine();
+					ImGui::TextDisabled("(?)");
+					if (ImGui::IsItemHovered())
+					{
+						ImGui::BeginTooltip();
+						ImGui::Text("Portable: Works on all GPUs");
+						ImGui::Text("SubgroupOptimized: Requires reliable subgroup ops (Fail on Qualcomm Adreno)");
+						ImGui::EndTooltip();
+					}
+
+					// Async compute toggle
+					bool asyncEnabled = m_asyncComputeEnabled;
+					if (ImGui::Checkbox("Async Compute", &asyncEnabled))
+					{
+						m_pendingOps.asyncComputeToggle = PendingOperations::AsyncComputeToggle{asyncEnabled};
+						LOG_INFO("Async compute toggle scheduled: {}", asyncEnabled ? "enable" : "disable");
+					}
 				}
 			}
 		}
-
-		// Compute Rasterizer section
-		if (m_computeRasterizer && m_computeRasterizer->IsInitialized())
+		// Compute rasterization pipeline controls
+		else if (m_rasterizationPipelineType == RasterizationPipelineType::ComputeRaster && canUseCompute)
 		{
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Text("Compute Rasterizer (Experimental)");
-			ImGui::Separator();
+			uint32_t tileInstanceCount = m_computeRasterizer->ReadTileInstanceCount();
+			auto     stats             = m_computeRasterizer->GetStatistics();
+			auto     tileConfig        = m_computeRasterizer->GetTileConfig();
 
-			if (ImGui::Checkbox("Enable Tile-Based Pipeline", &m_computeRasterizerEnabled))
+			ImGui::Text("Tile Instances: %u", tileInstanceCount);
+			ImGui::Text("Tiles: %u x %u = %u", tileConfig.tilesX, tileConfig.tilesY, tileConfig.totalTiles);
+
+			if (stats.activeSplats > 0)
 			{
-				LOG_INFO("Compute rasterizer {}", m_computeRasterizerEnabled ? "enabled" : "disabled");
+				float avgTiles = static_cast<float>(tileInstanceCount) / static_cast<float>(stats.activeSplats);
+				ImGui::Text("Avg Tiles/Splat: %.2f", avgTiles);
+			}
+
+			ImGui::Spacing();
+
+			// Sort method selection
+			int         currentMethod = m_computeRasterizer->GetSortMethod();
+			const char *methods[]     = {"Prescan Radix Sort", "Integrated Scan Radix Sort"};
+			if (ImGui::Combo("Sort Method", &currentMethod, methods, 2))
+			{
+				m_computeRasterizer->SetSortMethod(currentMethod);
+				LOG_INFO("Compute rasterization pipeline: Switched to {} radix sort method", methods[currentMethod]);
+			}
+
+			// Shader variant selection
+			int         currentVariant = m_computeRasterizer->GetShaderVariant();
+			const char *variants[]     = {"Portable", "SubgroupOptimized"};
+			if (ImGui::Combo("Shader Variant", &currentVariant, variants, 2))
+			{
+				m_computeRasterizer->SetShaderVariant(currentVariant);
+				LOG_INFO("Compute rasterization pipeline: Switched to {} shader variant", variants[currentVariant]);
 			}
 			ImGui::SameLine();
 			ImGui::TextDisabled("(?)");
 			if (ImGui::IsItemHovered())
 			{
 				ImGui::BeginTooltip();
-				ImGui::Text("Experimental tile-based compute pipeline");
-				ImGui::Text("Runs: Preprocess -> Sort -> Identify Ranges");
+				ImGui::Text("Portable: Works on all GPUs");
+				ImGui::Text("SubgroupOptimized: Requires reliable subgroup ops (Fail on Qualcomm Adreno)");
 				ImGui::EndTooltip();
 			}
 
-			if (m_computeRasterizerEnabled)
+			ImGui::Spacing();
+
+			// CPU sort debug toggle
+			bool cpuSort = m_computeRasterizer->IsCPUSortDebugEnabled();
+			if (ImGui::Checkbox("CPU Sort (Debug)", &cpuSort))
 			{
-				uint32_t tileInstanceCount = m_computeRasterizer->ReadTileInstanceCount();
-				auto     stats             = m_computeRasterizer->GetStatistics();
-				auto     tileConfig        = m_computeRasterizer->GetTileConfig();
+				m_computeRasterizer->SetCPUSortDebug(cpuSort);
+				LOG_INFO("CPU sort debug {}", cpuSort ? "enabled" : "disabled");
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("(?)");
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::BeginTooltip();
+				ImGui::Text("Bypass GPU radix sort and use CPU std::sort.");
+				ImGui::Text("Very slow but helps isolate sort issues.");
+				ImGui::EndTooltip();
+			}
 
-				ImGui::Text("Tile Instances: %u", tileInstanceCount);
-				ImGui::Text("Tiles: %u x %u = %u", tileConfig.tilesX, tileConfig.tilesY, tileConfig.totalTiles);
-
-				if (stats.activeSplats > 0)
-				{
-					float avgTiles = static_cast<float>(tileInstanceCount) / static_cast<float>(stats.activeSplats);
-					ImGui::Text("Avg Tiles/Splat: %.2f", avgTiles);
-				}
-
-				// Verify sort order button
-				if (ImGui::Button("Verify Sort Order"))
-				{
-					bool sortOk = m_computeRasterizer->VerifySortOrder();
-					LOG_INFO("Tile sort verification: {}", sortOk ? "PASSED" : "FAILED");
-				}
-				ImGui::SameLine();
-				ImGui::TextDisabled("(?)");
-				if (ImGui::IsItemHovered())
-				{
-					ImGui::BeginTooltip();
-					ImGui::Text("Reads back sorted tile keys from GPU");
-					ImGui::Text("and verifies ascending order (blocks GPU)");
-					ImGui::EndTooltip();
-				}
+			// Verify sort order button
+			if (ImGui::Button("Verify Sort Order"))
+			{
+				bool sortOk = m_computeRasterizer->VerifySortOrder();
+				LOG_INFO("Tile sort verification: {}", sortOk ? "PASSED" : "FAILED");
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("(?)");
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::BeginTooltip();
+				ImGui::Text("Reads back sorted tile keys from GPU");
+				ImGui::Text("and verifies ascending order (blocks GPU)");
+				ImGui::EndTooltip();
 			}
 		}
 

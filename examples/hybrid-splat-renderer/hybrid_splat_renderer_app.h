@@ -63,6 +63,13 @@ enum class BackendType
 	CPU = 1
 };
 
+// Rendering pipeline type
+enum class RasterizationPipelineType
+{
+	HardwareRaster = 0,        // Traditional vertex+fragment pipeline
+	ComputeRaster  = 1         // Tile-based compute rasterization
+};
+
 // Pending frame-boundary operations
 // These operations are deferred to the start of OnRender() to ensure they execute
 // at a safe point in the frame lifecycle (after fence wait, before rendering).
@@ -182,12 +189,12 @@ class HybridSplatRendererApp : public app::IApplication
 
 	container::unique_ptr<engine::Scene>             m_scene;
 	container::unique_ptr<engine::ISplatSortBackend> m_backend;
-	BackendType                                      m_currentBackendType = BackendType::GPU;
+	BackendType                                      m_currentBackendType        = BackendType::GPU;
+	RasterizationPipelineType                        m_rasterizationPipelineType = RasterizationPipelineType::HardwareRaster;
 
 	// Compute rasterizer
 	container::unique_ptr<engine::ComputeSplatRasterizer> m_computeRasterizer;
-	bool                                                  m_computeRasterizerEnabled = false;
-	int                                                   m_currentSortMethod        = 1;        // 0=Prescan, 1=IntegratedScan
+	int                                                   m_currentSortMethod = 1;        // 0=Prescan, 1=IntegratedScan
 
 	void SwitchBackend(BackendType newType);
 	void ProcessPendingOperations();
@@ -296,27 +303,47 @@ class HybridSplatRendererApp : public app::IApplication
 	bool m_profilingJustEnabled = false;        // Skip queries for rest of frame when enabled mid-frame
 
 	// Timestamp indices within a frame
-	// Single queue mode: sort_begin, sort_end, render_begin, render_end
-	// Async compute mode: render_begin, render_end only (sort timing from backend's compute queue)
-	static constexpr uint32_t TIMESTAMP_SORT_BEGIN   = 0;
-	static constexpr uint32_t TIMESTAMP_SORT_END     = 1;
-	static constexpr uint32_t TIMESTAMP_RENDER_BEGIN = 2;
-	static constexpr uint32_t TIMESTAMP_RENDER_END   = 3;
-	static constexpr uint32_t TIMESTAMPS_PER_FRAME   = 4;        // sort_begin, sort_end, render_begin, render_end
+	// Hardware rasterization pipeline: indices 0-3
+	// Compute rasterization pipeline: indices 4-13
+	static constexpr uint32_t TIMESTAMP_HW_SORT_BEGIN            = 0;
+	static constexpr uint32_t TIMESTAMP_HW_SORT_END              = 1;
+	static constexpr uint32_t TIMESTAMP_HW_RENDER_BEGIN          = 2;
+	static constexpr uint32_t TIMESTAMP_HW_RENDER_END            = 3;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_PREPROCESS_BEGIN = 4;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_PREPROCESS_END   = 5;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_SORT_BEGIN       = 6;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_SORT_END         = 7;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RANGES_BEGIN     = 8;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RANGES_END       = 9;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RASTER_BEGIN     = 10;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RASTER_END       = 11;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RENDER_BEGIN     = 12;        // Total compute rendering time
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RENDER_END       = 13;        // Total compute rendering time
+	static constexpr uint32_t TIMESTAMPS_PER_FRAME               = 14;
 
-	uint32_t             m_gpuProfilingFrameLatency = 0;        // Set from swapchain image count
-	rhi::QueryPoolHandle m_timestampQueryPool;
-	rhi::QueryPoolHandle m_pipelineStatsQueryPool;
-	double               m_timestampPeriod     = 1.0;        // nanoseconds per tick
-	uint32_t             m_profilingFrameIndex = 0;          // Rolling frame index for query slots
+	uint32_t                               m_gpuProfilingFrameLatency = 0;        // Set from swapchain image count
+	rhi::QueryPoolHandle                   m_timestampQueryPool;
+	rhi::QueryPoolHandle                   m_pipelineStatsQueryPool;
+	double                                 m_timestampPeriod     = 1.0;          // nanoseconds per tick
+	uint32_t                               m_profilingFrameIndex = 0;            // Rolling frame index for query slots
+	std::vector<RasterizationPipelineType> m_frameRasterizationPipelines;        // Track which pipeline was used per frame slot
+	std::vector<bool>                      m_frameSortAsyncEnabled;              // Track if async compute was enabled per frame slot
 
 	// Buffered GPU timing results
 	struct GpuTimingResults
 	{
+		// Hardware rasterization pipeline timings
 		double   sortTimeMs          = 0.0;
 		double   renderTimeMs        = 0.0;
 		uint64_t fragmentInvocations = 0;
-		bool     valid               = false;
+
+		// Compute rasterization pipeline timings
+		double preprocessTimeMs  = 0.0;
+		double computeSortTimeMs = 0.0;
+		double rangesTimeMs      = 0.0;
+		double rasterTimeMs      = 0.0;
+
+		bool valid = false;
 	};
 	std::deque<GpuTimingResults> m_gpuTimingHistory;
 	GpuTimingResults             m_currentGpuTiming;
@@ -326,6 +353,10 @@ class HybridSplatRendererApp : public app::IApplication
 	void BeginGpuFrame(rhi::IRHICommandList *cmdList);
 	void RecordSortTimestamp(rhi::IRHICommandList *cmdList, bool begin);
 	void RecordRenderTimestamp(rhi::IRHICommandList *cmdList, bool begin);
+	void RecordComputePreprocessTimestamp(rhi::IRHICommandList *cmdList, bool begin);
+	void RecordComputeSortTimestamp(rhi::IRHICommandList *cmdList, bool begin);
+	void RecordComputeRangesTimestamp(rhi::IRHICommandList *cmdList, bool begin);
+	void RecordComputeRasterTimestamp(rhi::IRHICommandList *cmdList, bool begin);
 	void BeginPipelineStatsQuery(rhi::IRHICommandList *cmdList);
 	void EndPipelineStatsQuery(rhi::IRHICommandList *cmdList);
 	void ReadGpuTimingResults();

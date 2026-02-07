@@ -106,6 +106,10 @@ VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, const Text
 	{
 		imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 	}
+	if (desc.isStorageImage)
+	{
+		imageInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	}
 
 	VmaAllocationCreateInfo allocInfo{};
 	switch (desc.resourceUsage)

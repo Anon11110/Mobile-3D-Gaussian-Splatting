@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <msplat/app/camera.h>
 #include <msplat/core/containers/memory.h>
 #include <msplat/core/containers/vector.h>
@@ -53,11 +54,12 @@ class ComputeSplatRasterizer
 	void Initialize(uint32_t screenWidth, uint32_t screenHeight, uint32_t maxSplatCount);
 	void Resize(uint32_t screenWidth, uint32_t screenHeight);
 
-	// Record preprocess only
-	void RecordPreprocess(rhi::IRHICommandList *cmdList, const Scene &scene, const FrameUBO &frameUBO);
+	void Render(rhi::IRHICommandList *cmdList, const Scene &scene, const FrameUBO &frameUBO);
 
-	// Record the full preprocess → sort → identify ranges pipeline
-	void RecordPreprocessSortAndRanges(rhi::IRHICommandList *cmdList, const Scene &scene, const FrameUBO &frameUBO);
+	rhi::IRHITexture *GetOutputImage() const
+	{
+		return m_outputImage.Get();
+	}
 
 	// Get the global counter value (number of tile instances emitted)
 	uint32_t ReadTileInstanceCount();
@@ -104,13 +106,48 @@ class ComputeSplatRasterizer
 
 	bool VerifySortOrder();
 
+	void SetCPUSortDebug(bool enabled)
+	{
+		m_cpuSortDebugEnabled = enabled;
+	}
+	bool IsCPUSortDebugEnabled() const
+	{
+		return m_cpuSortDebugEnabled;
+	}
+
+	// Sort method and shader variant switching
+	void SetSortMethod(int method);
+	int  GetSortMethod() const;
+	void SetShaderVariant(int variant);
+	int  GetShaderVariant() const;
+
+	// Profiling callbacks for GPU timestamp queries
+	using TimestampCallback = std::function<void(rhi::IRHICommandList *, bool begin)>;
+	void SetProfilingCallbacks(
+	    TimestampCallback preprocessCallback,
+	    TimestampCallback sortCallback,
+	    TimestampCallback rangesCallback,
+	    TimestampCallback rasterCallback)
+	{
+		m_onPreprocessTimestamp = preprocessCallback;
+		m_onSortTimestamp       = sortCallback;
+		m_onRangesTimestamp     = rangesCallback;
+		m_onRasterTimestamp     = rasterCallback;
+	}
+
   private:
 	void CreateBuffers(uint32_t maxSplatCount);
 	void CreateComputePipelines();
 	void CreateDescriptorSets();
 	void RebindSceneDescriptors(const Scene &scene);
+	void RecordPreprocess(rhi::IRHICommandList *cmdList, const Scene &scene, const FrameUBO &frameUBO);
 	void RecordSort(rhi::IRHICommandList *cmdList);
 	void RecordIdentifyRanges(rhi::IRHICommandList *cmdList);
+	void RecordRasterize(rhi::IRHICommandList *cmdList);
+	void CreateOutputImage();
+	void RebindRasterDescriptors();
+	void PerformCPUSort();
+	void ResizeTileBuffers(uint32_t newMaxTileInstances);
 
 	struct PreprocessPC
 	{
@@ -130,10 +167,18 @@ class ComputeSplatRasterizer
 		uint32_t numTiles;
 	};
 
-	static constexpr uint32_t WorkgroupSize    = 256;
-	static constexpr uint32_t MaxTilesPerSplat = 9;        // 3x3 tile coverage max
-	static constexpr float    DefaultNearPlane = 0.1f;
-	static constexpr float    DefaultFarPlane  = 100.0f;
+	struct RasterPC
+	{
+		uint32_t tilesX;
+		uint32_t tilesY;
+		uint32_t screenWidth;
+		uint32_t screenHeight;
+	};
+
+	static constexpr uint32_t WorkgroupSize        = 256;
+	static constexpr uint32_t InitialTilesPerSplat = 16;        // 4x4 tile coverage max
+	static constexpr float    DefaultNearPlane     = 0.1f;
+	static constexpr float    DefaultFarPlane      = 100.0f;
 
 	rhi::IRHIDevice                        *m_device;
 	container::shared_ptr<vfs::IFileSystem> m_vfs;
@@ -158,17 +203,23 @@ class ComputeSplatRasterizer
 	// Verification readback buffer
 	rhi::BufferHandle m_sortVerifyReadback;
 
+	// Output storage image
+	rhi::TextureHandle m_outputImage;
+
 	// Pipelines
 	rhi::PipelineHandle m_preprocessPipeline;
 	rhi::PipelineHandle m_rangesPipeline;
+	rhi::PipelineHandle m_rasterPipeline;
 
 	// Descriptor set layouts
 	rhi::DescriptorSetLayoutHandle m_preprocessLayout;
 	rhi::DescriptorSetLayoutHandle m_rangesLayout;
+	rhi::DescriptorSetLayoutHandle m_rasterLayout;
 
 	// Descriptor sets
 	rhi::DescriptorSetHandle m_preprocessDescriptorSet;
 	rhi::DescriptorSetHandle m_rangesDescriptorSet;
+	rhi::DescriptorSetHandle m_rasterDescriptorSet;
 
 	// Track bound scene for descriptor rebinding
 	const Scene *m_lastBoundScene = nullptr;
@@ -178,6 +229,22 @@ class ComputeSplatRasterizer
 	// Near/far planes for depth encoding (can be configured)
 	float m_nearPlane = DefaultNearPlane;
 	float m_farPlane  = DefaultFarPlane;
+
+	// Dynamic tile buffer resize tracking
+	bool m_hasRenderedOneFrame = false;
+
+	// Debug CPU sort
+	bool              m_cpuSortDebugEnabled = false;
+	rhi::BufferHandle m_dbgKeysReadback;
+	rhi::BufferHandle m_dbgValsReadback;
+	rhi::BufferHandle m_dbgKeysStaging;
+	rhi::BufferHandle m_dbgValsStaging;
+
+	// Profiling callbacks
+	TimestampCallback m_onPreprocessTimestamp;
+	TimestampCallback m_onSortTimestamp;
+	TimestampCallback m_onRangesTimestamp;
+	TimestampCallback m_onRasterTimestamp;
 };
 
 }        // namespace msplat::engine

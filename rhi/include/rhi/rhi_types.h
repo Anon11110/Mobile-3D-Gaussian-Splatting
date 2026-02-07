@@ -577,6 +577,7 @@ struct TextureDesc
 	AllocationHints hints           = {};
 	bool            isRenderTarget  = false;
 	bool            isDepthStencil  = false;
+	bool            isStorageImage  = false;
 	bool            isCubeMap       = false;
 	const void     *initialData     = nullptr;
 	size_t          initialDataSize = 0;
