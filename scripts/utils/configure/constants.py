@@ -4,7 +4,44 @@ Build system constants and configuration.
 Centralized configuration for the build system.
 """
 
+import os
+import platform
+import shutil
+from pathlib import Path
 from typing import List
+
+
+def _resolve_cmake_executable() -> str:
+    """Resolve a usable CMake executable for the current platform.
+
+    On Apple Silicon, users can accidentally pick Intel Homebrew CMake
+    (`/usr/local/bin/cmake`) from a Rosetta shell. Prefer native Homebrew CMake
+    (`/opt/homebrew/bin/cmake`) when possible to avoid architecture mismatch.
+    """
+
+    # Allow explicit user override.
+    cmake_override = os.environ.get("CMAKE_EXECUTABLE")
+    if cmake_override:
+        return cmake_override
+
+    discovered = shutil.which("cmake")
+    if not discovered:
+        native_homebrew_cmake = Path("/opt/homebrew/bin/cmake")
+        if native_homebrew_cmake.exists():
+            return str(native_homebrew_cmake)
+        return "cmake"
+
+    if platform.system() != "Darwin":
+        return discovered
+
+    if platform.machine().lower() not in ("arm64", "aarch64"):
+        return discovered
+
+    native_homebrew_cmake = Path("/opt/homebrew/bin/cmake")
+    if native_homebrew_cmake.exists() and Path(discovered) == Path("/usr/local/bin/cmake"):
+        return str(native_homebrew_cmake)
+
+    return discovered
 
 
 class BuildConstants:
@@ -31,7 +68,7 @@ class BuildConstants:
     THIRD_PARTY_EXCLUDE: str = "third-party"
 
     # Executables
-    CMAKE_EXECUTABLE: str = "cmake"
+    CMAKE_EXECUTABLE: str = _resolve_cmake_executable()
 
     # Build directories
     BUILD_DIR_BASE: str = "build"

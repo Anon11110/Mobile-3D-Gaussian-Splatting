@@ -3,6 +3,7 @@
 macOS-specific platform configuration with MoltenVK support.
 """
 
+import platform
 from pathlib import Path
 from typing import List
 
@@ -82,11 +83,18 @@ class MacOSConfig(PlatformConfig):
             term.warn("MoltenVK ICD not found. Vulkan may not work properly.")
 
         # macOS-specific CMake settings
+        arch = platform.machine().lower()
+        if arch in ("arm64", "aarch64"):
+            osx_arch = "arm64"
+        else:
+            osx_arch = "x86_64"
+
         self.cmake_args.extend(
             [
                 "-G",
                 self.get_default_generator(),  # Use Xcode generator by default
                 f"-DCMAKE_OSX_DEPLOYMENT_TARGET=10.15",  # Minimum macOS version
+                f"-DCMAKE_OSX_ARCHITECTURES={osx_arch}",  # Keep architecture stable across shells
             ]
         )
 
