@@ -23,8 +23,10 @@ void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outp
 	this->totalSplatCount = totalSplatCount;
 
 	rhi::BufferDesc bufferDesc = {};
-	// TODO: If verification is not needed, remove rhi::BufferUsage::TRANSFER_SRC
-	bufferDesc.usage         = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST | rhi::BufferUsage::TRANSFER_SRC;
+	bufferDesc.usage           = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST;
+#ifdef ENABLE_SORT_VERIFICATION
+	bufferDesc.usage |= rhi::BufferUsage::TRANSFER_SRC;
+#endif
 	bufferDesc.resourceUsage = rhi::ResourceUsage::Static;
 
 	// Depth keys buffer
@@ -787,15 +789,18 @@ void GpuSplatSorter::SortOnly(rhi::IRHICommandList *cmdList)
 	}
 
 	// Barrier: ensure external writes to splatDepths/splatIndicesOriginal are visible
-	rhi::BufferTransition preBarriers[2] = {};
-	preBarriers[0].buffer                = splatDepths.Get();
-	preBarriers[0].before                = rhi::ResourceState::ShaderReadWrite;
-	preBarriers[0].after                 = rhi::ResourceState::GeneralRead;
-	preBarriers[1].buffer                = splatIndicesOriginal.Get();
-	preBarriers[1].before                = rhi::ResourceState::ShaderReadWrite;
-	preBarriers[1].after                 = rhi::ResourceState::GeneralRead;
+	{
+		rhi::BufferTransition preBarriers[2] = {};
+		preBarriers[0].buffer                = splatDepths.Get();
+		preBarriers[0].before                = rhi::ResourceState::ShaderReadWrite;
+		preBarriers[0].after                 = rhi::ResourceState::GeneralRead;
 
-	cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {preBarriers, 2}, {}, {});
+		preBarriers[1].buffer = splatIndicesOriginal.Get();
+		preBarriers[1].before = rhi::ResourceState::ShaderReadWrite;
+		preBarriers[1].after  = rhi::ResourceState::GeneralRead;
+
+		cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {preBarriers, 2}, {}, {});
+	}
 
 	if (sortMethod == SortMethod::IntegratedScan)
 	{
@@ -826,8 +831,8 @@ void GpuSplatSorter::RecordDepthCalculation(rhi::IRHICommandList *cmdList, const
 	// Barrier to ensure depth calculation completes before sorting
 	rhi::BufferTransition transition = {};
 	transition.buffer                = splatDepths.Get();
-	transition.before                = rhi::ResourceState::ShaderReadWrite;
-	transition.after                 = rhi::ResourceState::ShaderReadWrite;
+	transition.before                = rhi::ResourceState::ShaderWrite;
+	transition.after                 = rhi::ResourceState::GeneralRead;
 
 	cmdList->Barrier(
 	    rhi::PipelineScope::Compute,
@@ -900,7 +905,7 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		// Barrier: Ensure histogram writes are finished
 		rhi::BufferTransition histogramWriteTransition = {};
 		histogramWriteTransition.buffer                = histograms.Get();
-		histogramWriteTransition.before                = rhi::ResourceState::ShaderReadWrite;
+		histogramWriteTransition.before                = rhi::ResourceState::ShaderWrite;
 		histogramWriteTransition.after                 = rhi::ResourceState::ShaderReadWrite;
 
 		cmdList->Barrier(
@@ -925,21 +930,23 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		cmdList->Dispatch(numScanWorkgroups);
 
 		// Barrier: Ensure block scan and block sum writes are finished
-		rhi::BufferTransition scanBlockTransitions[2];
-		scanBlockTransitions[0].buffer = histograms.Get();
-		scanBlockTransitions[0].before = rhi::ResourceState::ShaderReadWrite;
-		scanBlockTransitions[0].after  = rhi::ResourceState::ShaderReadWrite;
+		{
+			rhi::BufferTransition scanBlockTransitions[2];
+			scanBlockTransitions[0].buffer = histograms.Get();
+			scanBlockTransitions[0].before = rhi::ResourceState::ShaderReadWrite;
+			scanBlockTransitions[0].after  = rhi::ResourceState::ShaderReadWrite;
 
-		scanBlockTransitions[1].buffer = blockSums.Get();
-		scanBlockTransitions[1].before = rhi::ResourceState::ShaderReadWrite;
-		scanBlockTransitions[1].after  = rhi::ResourceState::ShaderReadWrite;
+			scanBlockTransitions[1].buffer = blockSums.Get();
+			scanBlockTransitions[1].before = rhi::ResourceState::ShaderReadWrite;
+			scanBlockTransitions[1].after  = rhi::ResourceState::ShaderReadWrite;
 
-		cmdList->Barrier(
-		    rhi::PipelineScope::Compute,
-		    rhi::PipelineScope::Compute,
-		    {scanBlockTransitions, 2},
-		    {},
-		    {});
+			cmdList->Barrier(
+			    rhi::PipelineScope::Compute,
+			    rhi::PipelineScope::Compute,
+			    {scanBlockTransitions, 2},
+			    {},
+			    {});
+		}
 
 		// --- Pass 3: SCAN BLOCK SUMS ---
 		cmdList->SetPipeline(activeScanPipeline);
@@ -981,21 +988,23 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		cmdList->Dispatch(numScanWorkgroups);
 
 		// Barrier: Ensure final offsets are written
-		rhi::BufferTransition addOffsetTransitions[2];
-		addOffsetTransitions[0].buffer = histograms.Get();
-		addOffsetTransitions[0].before = rhi::ResourceState::ShaderReadWrite;
-		addOffsetTransitions[0].after  = rhi::ResourceState::GeneralRead;
+		{
+			rhi::BufferTransition addOffsetTransitions[2];
+			addOffsetTransitions[0].buffer = histograms.Get();
+			addOffsetTransitions[0].before = rhi::ResourceState::ShaderReadWrite;
+			addOffsetTransitions[0].after  = rhi::ResourceState::GeneralRead;
 
-		addOffsetTransitions[1].buffer = blockSums.Get();
-		addOffsetTransitions[1].before = rhi::ResourceState::GeneralRead;
-		addOffsetTransitions[1].after  = rhi::ResourceState::ShaderReadWrite;
+			addOffsetTransitions[1].buffer = blockSums.Get();
+			addOffsetTransitions[1].before = rhi::ResourceState::GeneralRead;
+			addOffsetTransitions[1].after  = rhi::ResourceState::ShaderReadWrite;
 
-		cmdList->Barrier(
-		    rhi::PipelineScope::Compute,
-		    rhi::PipelineScope::Compute,
-		    {addOffsetTransitions, 2},
-		    {},
-		    {});
+			cmdList->Barrier(
+			    rhi::PipelineScope::Compute,
+			    rhi::PipelineScope::Compute,
+			    {addOffsetTransitions, 2},
+			    {},
+			    {});
+		}
 
 		// --- Pass 5: SCATTER ---
 		cmdList->SetPipeline(scatterPairsPrescanPipeline.Get());
@@ -1008,30 +1017,32 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		cmdList->Dispatch(numWorkgroups);
 
 		// Barrier after scatter to ensure write completion
-		bool                  useA = (pass % 2 == 0);
-		rhi::BufferTransition scatterTransitions[3];
+		{
+			bool                  useA = (pass % 2 == 0);
+			rhi::BufferTransition scatterTransitions[3];
 
-		scatterTransitions[0].buffer = useA ? sortKeysA.Get() : sortKeysB.Get();
-		scatterTransitions[0].before = rhi::ResourceState::ShaderReadWrite;
-		scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
+			scatterTransitions[0].buffer = useA ? sortKeysA.Get() : sortKeysB.Get();
+			scatterTransitions[0].before = rhi::ResourceState::ShaderWrite;
+			scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
 
-		// For indices, when useA is false we use the active output buffer (sortIndicesB or sortIndicesB_Alt)
-		rhi::IRHIBuffer *activeOutputIndices = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
-		scatterTransitions[1].buffer         = useA ? sortIndicesA.Get() : activeOutputIndices;
-		scatterTransitions[1].before         = rhi::ResourceState::ShaderReadWrite;
-		scatterTransitions[1].after          = rhi::ResourceState::GeneralRead;
+			// For indices, when useA is false we use the active output buffer (sortIndicesB or sortIndicesB_Alt)
+			rhi::IRHIBuffer *activeOutputIndices = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+			scatterTransitions[1].buffer         = useA ? sortIndicesA.Get() : activeOutputIndices;
+			scatterTransitions[1].before         = rhi::ResourceState::ShaderWrite;
+			scatterTransitions[1].after          = rhi::ResourceState::GeneralRead;
 
-		// Transition histogram back to read-write for next pass
-		scatterTransitions[2].buffer = histograms.Get();
-		scatterTransitions[2].before = rhi::ResourceState::GeneralRead;
-		scatterTransitions[2].after  = rhi::ResourceState::ShaderReadWrite;
+			// Transition histogram back to write-enabled for next pass
+			scatterTransitions[2].buffer = histograms.Get();
+			scatterTransitions[2].before = rhi::ResourceState::GeneralRead;
+			scatterTransitions[2].after  = rhi::ResourceState::ShaderWrite;
 
-		cmdList->Barrier(
-		    rhi::PipelineScope::Compute,
-		    rhi::PipelineScope::Compute,
-		    {scatterTransitions, 3},
-		    {},
-		    {});
+			cmdList->Barrier(
+			    rhi::PipelineScope::Compute,
+			    rhi::PipelineScope::Compute,
+			    {scatterTransitions, 3},
+			    {},
+			    {});
+		}
 	}
 }
 
@@ -1080,7 +1091,7 @@ void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList)
 		// Barrier: Ensure histogram writes are finished
 		rhi::BufferTransition histogramWriteTransition = {};
 		histogramWriteTransition.buffer                = histograms.Get();
-		histogramWriteTransition.before                = rhi::ResourceState::ShaderReadWrite;
+		histogramWriteTransition.before                = rhi::ResourceState::ShaderWrite;
 		histogramWriteTransition.after                 = rhi::ResourceState::GeneralRead;
 
 		cmdList->Barrier(
@@ -1101,30 +1112,32 @@ void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList)
 		cmdList->Dispatch(numWorkgroups);
 
 		// Barrier after scatter to ensure write completion
-		bool                  useA = (pass % 2 == 0);
-		rhi::BufferTransition scatterTransitions[3];
+		{
+			bool                  useA = (pass % 2 == 0);
+			rhi::BufferTransition scatterTransitions[3];
 
-		scatterTransitions[0].buffer = useA ? sortKeysA.Get() : sortKeysB.Get();
-		scatterTransitions[0].before = rhi::ResourceState::ShaderReadWrite;
-		scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
+			scatterTransitions[0].buffer = useA ? sortKeysA.Get() : sortKeysB.Get();
+			scatterTransitions[0].before = rhi::ResourceState::ShaderWrite;
+			scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
 
-		// For indices, when useA is false we use the active output buffer (sortIndicesB or sortIndicesB_Alt)
-		rhi::IRHIBuffer *activeOutputIndices = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
-		scatterTransitions[1].buffer         = useA ? sortIndicesA.Get() : activeOutputIndices;
-		scatterTransitions[1].before         = rhi::ResourceState::ShaderReadWrite;
-		scatterTransitions[1].after          = rhi::ResourceState::GeneralRead;
+			// For indices, when useA is false we use the active output buffer (sortIndicesB or sortIndicesB_Alt)
+			rhi::IRHIBuffer *activeOutputIndices = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+			scatterTransitions[1].buffer         = useA ? sortIndicesA.Get() : activeOutputIndices;
+			scatterTransitions[1].before         = rhi::ResourceState::ShaderWrite;
+			scatterTransitions[1].after          = rhi::ResourceState::GeneralRead;
 
-		// Transition histogram back to read-write for next pass
-		scatterTransitions[2].buffer = histograms.Get();
-		scatterTransitions[2].before = rhi::ResourceState::GeneralRead;
-		scatterTransitions[2].after  = rhi::ResourceState::ShaderReadWrite;
+			// Transition histogram back to write-enabled for next pass
+			scatterTransitions[2].buffer = histograms.Get();
+			scatterTransitions[2].before = rhi::ResourceState::GeneralRead;
+			scatterTransitions[2].after  = rhi::ResourceState::ShaderWrite;
 
-		cmdList->Barrier(
-		    rhi::PipelineScope::Compute,
-		    rhi::PipelineScope::Compute,
-		    {scatterTransitions, 3},
-		    {},
-		    {});
+			cmdList->Barrier(
+			    rhi::PipelineScope::Compute,
+			    rhi::PipelineScope::Compute,
+			    {scatterTransitions, 3},
+			    {},
+			    {});
+		}
 	}
 }
 
@@ -1186,6 +1199,7 @@ void GpuSplatSorter::SetOutputBuffer(rhi::BufferHandle outputBuffer)
 	}
 }
 
+#ifdef ENABLE_SORT_VERIFICATION
 void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
 {
 	if (!isInitialized)
@@ -1235,29 +1249,31 @@ void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
 	cmdList->CopyBuffer(histograms.Get(), verificationHistogram.Get(), {&histogramCopy, 1});
 
 	// Transition all verification buffers
-	rhi::BufferTransition transitions[4];
-	transitions[0].buffer = verificationDepths.Get();
-	transitions[0].before = rhi::ResourceState::CopyDestination;
-	transitions[0].after  = rhi::ResourceState::GeneralRead;
+	{
+		rhi::BufferTransition transitions[4];
+		transitions[0].buffer = verificationDepths.Get();
+		transitions[0].before = rhi::ResourceState::CopyDestination;
+		transitions[0].after  = rhi::ResourceState::GeneralRead;
 
-	transitions[1].buffer = verificationSortedKeys.Get();
-	transitions[1].before = rhi::ResourceState::CopyDestination;
-	transitions[1].after  = rhi::ResourceState::GeneralRead;
+		transitions[1].buffer = verificationSortedKeys.Get();
+		transitions[1].before = rhi::ResourceState::CopyDestination;
+		transitions[1].after  = rhi::ResourceState::GeneralRead;
 
-	transitions[2].buffer = verificationSortedIndices.Get();
-	transitions[2].before = rhi::ResourceState::CopyDestination;
-	transitions[2].after  = rhi::ResourceState::GeneralRead;
+		transitions[2].buffer = verificationSortedIndices.Get();
+		transitions[2].before = rhi::ResourceState::CopyDestination;
+		transitions[2].after  = rhi::ResourceState::GeneralRead;
 
-	transitions[3].buffer = verificationHistogram.Get();
-	transitions[3].before = rhi::ResourceState::CopyDestination;
-	transitions[3].after  = rhi::ResourceState::GeneralRead;
+		transitions[3].buffer = verificationHistogram.Get();
+		transitions[3].before = rhi::ResourceState::CopyDestination;
+		transitions[3].after  = rhi::ResourceState::GeneralRead;
 
-	cmdList->Barrier(
-	    rhi::PipelineScope::Copy,
-	    rhi::PipelineScope::Copy,
-	    {transitions, 4},
-	    {},
-	    {});
+		cmdList->Barrier(
+		    rhi::PipelineScope::Copy,
+		    rhi::PipelineScope::Copy,
+		    {transitions, 4},
+		    {},
+		    {});
+	}
 
 	LOG_INFO("Verification prepared - depths, sorted results, and histogram will be checked after GPU work completes");
 }
@@ -2108,6 +2124,7 @@ bool GpuSplatSorter::VerifySortOrder()
 
 	return isOrdered;
 }
+#endif
 
 void GpuSplatSorter::ReadTimingResults()
 {

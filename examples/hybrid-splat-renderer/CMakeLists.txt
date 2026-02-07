@@ -11,6 +11,10 @@ target_link_libraries(hybrid-splat-renderer PRIVATE RHI core engine app imgui)
 # Set C++ standard
 target_compile_features(hybrid-splat-renderer PRIVATE cxx_std_20)
 
+if(ENABLE_SORT_VERIFICATION)
+    target_compile_definitions(hybrid-splat-renderer PRIVATE ENABLE_SORT_VERIFICATION)
+endif()
+
 # Apply Windows macro fix to this target
 apply_windows_macro_fix(hybrid-splat-renderer)
 

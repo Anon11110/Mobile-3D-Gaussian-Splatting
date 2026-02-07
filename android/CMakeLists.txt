@@ -19,6 +19,8 @@ message(STATUS "  NDK: ${ANDROID_NDK}")
 # Set the project root directory (used by cmake/*.cmake includes)
 set(MSPLAT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+option(ENABLE_SORT_VERIFICATION "Enable sort verification features" OFF)
+
 # Include core library configuration
 include(${MSPLAT_ROOT}/cmake/core.cmake)
 
@@ -73,6 +75,10 @@ target_link_libraries(msplat_android PRIVATE
     ${android-lib}
     ${log-lib}
 )
+
+if(ENABLE_SORT_VERIFICATION)
+    target_compile_definitions(msplat_android PRIVATE ENABLE_SORT_VERIFICATION)
+endif()
 
 # Force export of ANativeActivity_onCreate
 set_target_properties(msplat_android PROPERTIES

@@ -701,6 +701,11 @@ void GetVulkanStagesAndAccess(ResourceState state, PipelineScope scope,
 			access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 			break;
 
+		case ResourceState::ShaderWrite:
+			stages = (scope == PipelineScope::Compute) ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			access = VK_ACCESS_SHADER_WRITE_BIT;
+			break;
+
 		case ResourceState::RenderTarget:
 			stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 			access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -784,6 +789,8 @@ VkImageLayout ResourceStateToImageLayout(ResourceState state)
 		case ResourceState::CopyDestination:
 			return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 		case ResourceState::ShaderReadWrite:
+			return VK_IMAGE_LAYOUT_GENERAL;
+		case ResourceState::ShaderWrite:
 			return VK_IMAGE_LAYOUT_GENERAL;
 		case ResourceState::RenderTarget:
 			return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -945,6 +952,22 @@ void GetVulkanStagesAndAccess2(ResourceState state, PipelineScope scope,
 				stages = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 			}
 			access = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+			break;
+
+		case ResourceState::ShaderWrite:
+			if (scope == PipelineScope::Compute)
+			{
+				stages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+			}
+			else if (scope == PipelineScope::Graphics)
+			{
+				stages = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+			}
+			else
+			{
+				stages = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+			}
+			access = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
 			break;
 
 		case ResourceState::RenderTarget:

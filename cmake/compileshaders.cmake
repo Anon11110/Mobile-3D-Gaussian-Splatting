@@ -37,12 +37,11 @@ function(compile_glsl_shaders SHADER_SRC_DIR TARGET_NAME)
         set(SPIRV_FILE "${SHADER_COMPILED_DIR}/${SHADER_NAME}.spv")
 
         add_custom_command(
-            TARGET ${SHADER_TARGET_NAME}
+            TARGET ${SHADER_TARGET_NAME} POST_BUILD
             COMMAND ${GLSLC_EXECUTABLE}
                     -I${SHADER_SRC_DIR}
                     -I${CMAKE_SOURCE_DIR}/shaders
                     ${SHADER_FILE} -o ${SPIRV_FILE} --target-spv=spv1.3
-            DEPENDS ${SHADER_FILE} ${SHADER_HEADERS}
             COMMENT "Compiling GLSL shader: ${SHADER_NAME} -> ${SHADER_NAME}.spv"
             VERBATIM
         )
@@ -152,7 +151,7 @@ function(compile_hlsl_shaders SHADER_SRC_DIR TARGET_NAME)
         # -fspv-target-env=vulkan1.1: Target Vulkan 1.1
         # -I: Include directories
         add_custom_command(
-            TARGET ${SHADER_TARGET_NAME}
+            TARGET ${SHADER_TARGET_NAME} POST_BUILD
             COMMAND ${DXC_EXECUTABLE}
                     -spirv
                     -T ${SHADER_PROFILE}
@@ -162,7 +161,6 @@ function(compile_hlsl_shaders SHADER_SRC_DIR TARGET_NAME)
                     -I ${CMAKE_SOURCE_DIR}/shaders
                     -Fo ${SPIRV_FILE}
                     ${SHADER_FILE}
-            DEPENDS ${SHADER_FILE} ${SHADER_HEADERS}
             COMMENT "Compiling HLSL shader: ${SHADER_NAME} -> ${OUTPUT_NAME}"
             VERBATIM
         )

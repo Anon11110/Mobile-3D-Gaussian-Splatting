@@ -54,6 +54,10 @@ target_link_libraries(engine PUBLIC core RHI)
 
 target_compile_features(engine PUBLIC cxx_std_20)
 
+if(ENABLE_SORT_VERIFICATION)
+    target_compile_definitions(engine PUBLIC ENABLE_SORT_VERIFICATION)
+endif()
+
 if(MSVC)
     target_compile_options(engine PUBLIC /utf-8)
 endif()

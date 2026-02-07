@@ -104,7 +104,9 @@ class ComputeSplatRasterizer
 		return m_isInitialized;
 	}
 
+#ifdef ENABLE_SORT_VERIFICATION
 	bool VerifySortOrder();
+#endif
 
 	void SetCPUSortDebug(bool enabled)
 	{

@@ -184,6 +184,7 @@ const char *GpuSplatSortBackend::GetName() const
 
 bool GpuSplatSortBackend::VerifySort()
 {
+#ifdef ENABLE_SORT_VERIFICATION
 	if (!m_sorter)
 	{
 		return false;
@@ -197,20 +198,29 @@ bool GpuSplatSortBackend::VerifySort()
 
 	m_verificationPrepared = false;
 	return m_sorter->VerifySortOrder();
+#else
+	return true;
+#endif
 }
 
 void GpuSplatSortBackend::RequestVerification()
 {
+#ifdef ENABLE_SORT_VERIFICATION
 	m_prepareVerification = true;
+#endif
 }
 
 void GpuSplatSortBackend::PrepareVerification(rhi::IRHICommandList *cmdList)
 {
+#ifdef ENABLE_SORT_VERIFICATION
 	if (m_sorter)
 	{
 		m_sorter->PrepareVerification(cmdList);
 		m_verificationPrepared = true;
 	}
+#else
+	(void) cmdList;
+#endif
 }
 
 void GpuSplatSortBackend::SetSortMethod(int method)
@@ -265,17 +275,25 @@ const char *GpuSplatSortBackend::GetShaderVariantName() const
 
 bool GpuSplatSortBackend::HasComprehensiveVerification() const
 {
+#ifdef ENABLE_SORT_VERIFICATION
 	return true;
+#else
+	return false;
+#endif
 }
 
 bool GpuSplatSortBackend::RunComprehensiveVerification()
 {
+#ifdef ENABLE_SORT_VERIFICATION
 	if (!m_sorter)
 	{
 		return false;
 	}
 
 	return m_sorter->CheckVerificationResults(m_testPositions);
+#else
+	return true;
+#endif
 }
 
 void GpuSplatSortBackend::SetTestPositions(const container::vector<math::vec3> *positions)

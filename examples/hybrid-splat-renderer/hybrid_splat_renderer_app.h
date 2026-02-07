@@ -194,7 +194,8 @@ class HybridSplatRendererApp : public app::IApplication
 
 	// Compute rasterizer
 	container::unique_ptr<engine::ComputeSplatRasterizer> m_computeRasterizer;
-	int                                                   m_currentSortMethod = 1;        // 0=Prescan, 1=IntegratedScan
+	int                                                   m_currentSortMethod    = 0;        // 0=Prescan, 1=IntegratedScan
+	int                                                   m_currentShaderVariant = 0;        // 0=Portable, 1=SubgroupOptimized
 
 	void SwitchBackend(BackendType newType);
 	void ProcessPendingOperations();

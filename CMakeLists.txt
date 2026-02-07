@@ -22,6 +22,7 @@ endif()
 
 # Core library options
 option(MSPLAT_USE_STD_CONTAINERS "Use system STL containers instead of custom implementations" OFF)
+option(ENABLE_SORT_VERIFICATION "Enable sort verification features" OFF)
 
 # Windows-specific: Function to apply Windows macro fixes to a target
 function(apply_windows_macro_fix target)

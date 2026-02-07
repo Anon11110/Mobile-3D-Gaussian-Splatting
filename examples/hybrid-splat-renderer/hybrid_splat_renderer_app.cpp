@@ -92,8 +92,11 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	{
 		rhi::BufferDesc indicesDesc{};
 		indicesDesc.size  = m_scene->GetTotalSplatCount() * sizeof(uint32_t);
-		indicesDesc.usage = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST | rhi::BufferUsage::TRANSFER_SRC;
-		m_sortedIndices   = device->CreateBuffer(indicesDesc);
+		indicesDesc.usage = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST;
+#ifdef ENABLE_SORT_VERIFICATION
+		indicesDesc.usage |= rhi::BufferUsage::TRANSFER_SRC;
+#endif
+		m_sortedIndices = device->CreateBuffer(indicesDesc);
 
 		// Create and initialize GPU backend with CPU fallback
 		m_backend            = container::make_unique<engine::GpuSplatSortBackend>();
@@ -118,6 +121,8 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 		}
 		else
 		{
+			m_backend->SetSortMethod(m_currentSortMethod);
+			m_backend->SetShaderVariant(m_currentShaderVariant);
 			LOG_INFO("Initialized GPU sort backend for {} splats", m_scene->GetTotalSplatCount());
 		}
 
@@ -300,6 +305,9 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeRangesTimestamp(cmd, begin); },
 		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeRasterTimestamp(cmd, begin); });
 
+		m_computeRasterizer->SetSortMethod(m_currentSortMethod);
+		m_computeRasterizer->SetShaderVariant(m_currentShaderVariant);
+
 		LOG_INFO("Compute rasterizer initialized for {} splats ({}x{})", m_scene->GetTotalSplatCount(), fbWidth, fbHeight);
 	}
 
@@ -372,6 +380,9 @@ void HybridSplatRendererApp::SwitchBackend(BackendType newType)
 		return;
 	}
 
+	// Restore sort settings
+	m_backend->SetSortMethod(m_currentSortMethod);
+	m_backend->SetShaderVariant(m_currentShaderVariant);
 	m_backend->SetAsyncCompute(m_asyncComputeEnabled);
 
 	m_currentBackendType = newType;
@@ -596,7 +607,9 @@ void HybridSplatRendererApp::OnRender()
 	// Reset GPU profiling queries for this frame
 	BeginGpuFrame(cmdList);
 
-	if (m_backend && m_sortingEnabled)
+	// For hardware rasterization sorting only, compute rasterizer has its own tile sorting
+	bool useComputeRasterization = m_computeRasterizer && m_rasterizationPipelineType == RasterizationPipelineType::ComputeRaster && m_computeRasterizer->IsInitialized();
+	if (m_backend && m_sortingEnabled && !useComputeRasterization)
 	{
 		// Check verification results from previous frame if pending
 		if (m_checkVerificationResults)
@@ -687,8 +700,6 @@ void HybridSplatRendererApp::OnRender()
 			m_crossBackendVerifyRequested = false;
 		}
 	}
-
-	bool useComputeRasterization = m_computeRasterizer && m_rasterizationPipelineType == RasterizationPipelineType::ComputeRaster && m_computeRasterizer->IsInitialized();
 
 	// Log FPS periodically
 	if (m_frameCount % 60 == 0 && m_fpsCounter.shouldUpdate())
@@ -894,8 +905,8 @@ void HybridSplatRendererApp::OnRender()
 	rhi::IRHISemaphore    *signalSemArray[1];
 	uint32_t               numWaitSemaphores = 0;
 
-	// Wait for compute sort to complete (GPU backend only)
-	if (computeSemaphore && m_sortingEnabled)
+	// Wait for compute sort to complete (GPU sorting backend only)
+	if (computeSemaphore && m_sortingEnabled && m_backend && m_backend->IsAsyncComputeEnabled())
 	{
 		waitInfoArray[numWaitSemaphores].semaphore = computeSemaphore;
 		waitInfoArray[numWaitSemaphores].waitStage = rhi::StageMask::VertexInput;
@@ -1002,12 +1013,14 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 				LOG_INFO("Sorting {}", m_sortingEnabled ? "enabled" : "disabled");
 				break;
 
+#	ifdef ENABLE_SORT_VERIFICATION
 			case GLFW_KEY_V:
 				// Verify sorting on next frame
 				m_verifyNextSort = true;
 				LOG_INFO("Will verify sorting on next frame using {} verification",
 				         m_useSimpleVerification ? "SIMPLE" : "COMPREHENSIVE");
 				break;
+#	endif
 
 			case GLFW_KEY_M:
 				// Toggle sorting method between prescan and integrated scan
@@ -1029,12 +1042,14 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 				}
 				break;
 
+#	ifdef ENABLE_SORT_VERIFICATION
 			case GLFW_KEY_T:
 				// Toggle verification mode
 				m_useSimpleVerification = !m_useSimpleVerification;
 				LOG_INFO("Verification mode switched to: {}",
 				         m_useSimpleVerification ? "SIMPLE (sort order only)" : "COMPREHENSIVE (all steps)");
 				break;
+#	endif
 
 			case GLFW_KEY_B:
 				// Toggle vsync bypass mode (skip present to remove vsync limit)
@@ -1061,6 +1076,7 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 				}
 				break;
 
+#	ifdef ENABLE_SORT_VERIFICATION
 			case GLFW_KEY_X:
 				// Toggle cross-backend verification mode
 				if (m_currentBackendType == BackendType::GPU)
@@ -1077,6 +1093,7 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 					LOG_WARNING("Cross-backend verification only available when GPU backend is active");
 				}
 				break;
+#	endif
 
 			case GLFW_KEY_ESCAPE:
 				// Exit application
@@ -1496,8 +1513,9 @@ void HybridSplatRendererApp::ReinitializeSortBackend(uint32_t newSplatCount)
 		}
 		else
 		{
-			// Restore sort method and async compute settings for GPU backend
+			// Restore sort method, shader variant, and async compute settings for GPU backend
 			m_backend->SetSortMethod(m_currentSortMethod);
+			m_backend->SetShaderVariant(m_currentShaderVariant);
 			m_backend->SetAsyncCompute(m_asyncComputeEnabled);
 		}
 	}
@@ -1526,6 +1544,9 @@ void HybridSplatRendererApp::ReinitializeSortBackend(uint32_t newSplatCount)
 		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeSortTimestamp(cmd, begin); },
 		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeRangesTimestamp(cmd, begin); },
 		    [this](rhi::IRHICommandList *cmd, bool begin) { RecordComputeRasterTimestamp(cmd, begin); });
+
+		m_computeRasterizer->SetSortMethod(m_currentSortMethod);
+		m_computeRasterizer->SetShaderVariant(m_currentShaderVariant);
 
 		LOG_INFO("Compute rasterizer reinitialized for {} splats", newSplatCount);
 	}
@@ -2428,6 +2449,13 @@ void HybridSplatRendererApp::RenderImGui()
 		{
 			m_rasterizationPipelineType = static_cast<RasterizationPipelineType>(pipelineIndex);
 			LOG_INFO("Rasterization pipeline: {}", pipelines[pipelineIndex]);
+
+			// When switching to compute rasterization, schedule async compute disable at frame boundary
+			if (m_rasterizationPipelineType == RasterizationPipelineType::ComputeRaster && m_asyncComputeEnabled)
+			{
+				m_pendingOps.asyncComputeToggle = PendingOperations::AsyncComputeToggle{false};
+				LOG_INFO("Async compute disable scheduled (not used with compute rasterization)");
+			}
 		}
 
 		ImGui::Spacing();
@@ -2474,6 +2502,7 @@ void HybridSplatRendererApp::RenderImGui()
 					const char *variants[]     = {"Portable", "SubgroupOptimized"};
 					if (ImGui::Combo("##ShaderVariant", &currentVariant, variants, 2))
 					{
+						m_currentShaderVariant = currentVariant;
 						m_backend->SetShaderVariant(currentVariant);
 						LOG_INFO("Switched to {} shader variant", variants[currentVariant]);
 					}
@@ -2520,6 +2549,7 @@ void HybridSplatRendererApp::RenderImGui()
 			const char *methods[]     = {"Prescan Radix Sort", "Integrated Scan Radix Sort"};
 			if (ImGui::Combo("Sort Method", &currentMethod, methods, 2))
 			{
+				m_currentSortMethod = currentMethod;
 				m_computeRasterizer->SetSortMethod(currentMethod);
 				LOG_INFO("Compute rasterization pipeline: Switched to {} radix sort method", methods[currentMethod]);
 			}
@@ -2529,6 +2559,7 @@ void HybridSplatRendererApp::RenderImGui()
 			const char *variants[]     = {"Portable", "SubgroupOptimized"};
 			if (ImGui::Combo("Shader Variant", &currentVariant, variants, 2))
 			{
+				m_currentShaderVariant = currentVariant;
 				m_computeRasterizer->SetShaderVariant(currentVariant);
 				LOG_INFO("Compute rasterization pipeline: Switched to {} shader variant", variants[currentVariant]);
 			}
@@ -2556,11 +2587,11 @@ void HybridSplatRendererApp::RenderImGui()
 			if (ImGui::IsItemHovered())
 			{
 				ImGui::BeginTooltip();
-				ImGui::Text("Bypass GPU radix sort and use CPU std::sort.");
-				ImGui::Text("Very slow but helps isolate sort issues.");
+				ImGui::Text("Bypass GPU radix sort and use CPU std::sort");
 				ImGui::EndTooltip();
 			}
 
+#ifdef ENABLE_SORT_VERIFICATION
 			// Verify sort order button
 			if (ImGui::Button("Verify Sort Order"))
 			{
@@ -2576,6 +2607,7 @@ void HybridSplatRendererApp::RenderImGui()
 				ImGui::Text("and verifies ascending order (blocks GPU)");
 				ImGui::EndTooltip();
 			}
+#endif
 		}
 
 		ImGui::Spacing();
@@ -2734,6 +2766,7 @@ void HybridSplatRendererApp::RenderImGui()
 
 		ImGui::Spacing();
 
+#ifdef ENABLE_SORT_VERIFICATION
 		// Verification controls
 		ImGui::Text("Verification");
 		if (ImGui::Button("Verify Sorting Result"))
@@ -2764,6 +2797,7 @@ void HybridSplatRendererApp::RenderImGui()
 		}
 
 		ImGui::Spacing();
+#endif
 
 		// Application info
 		ImGui::Separator();
@@ -2781,8 +2815,10 @@ void HybridSplatRendererApp::RenderImGui()
 		ImGui::BulletText("SPACE: Toggle sorting");
 		ImGui::BulletText("C: Switch backend (CPU/GPU)");
 		ImGui::BulletText("M: Switch GPU sort method");
+#	ifdef ENABLE_SORT_VERIFICATION
 		ImGui::BulletText("V: Verify sorting");
 		ImGui::BulletText("X: Toggle cross-backend verify");
+#	endif
 		ImGui::BulletText("B: Toggle vsync bypass");
 #endif
 	}

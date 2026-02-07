@@ -79,6 +79,7 @@ class GpuSplatSorter
 		return shaderVariant == ShaderVariant::Portable ? "Portable" : "SubgroupOptimized";
 	}
 
+#ifdef ENABLE_SORT_VERIFICATION
 	// Verification methods
 	// Phase 1: Prepare verification (copies data to readback buffers)
 	void PrepareVerification(rhi::IRHICommandList *cmdList);
@@ -86,6 +87,7 @@ class GpuSplatSorter
 	bool CheckVerificationResults(const container::vector<math::vec3> *testPositions = nullptr);
 	// Simple verification: Only checks if final sorted keys are in ascending order
 	bool VerifySortOrder();
+#endif
 
 	// Buffer information for memory tracking
 	struct BufferInfo

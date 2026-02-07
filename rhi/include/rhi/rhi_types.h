@@ -429,6 +429,7 @@ enum class ResourceState : uint8_t
 	CopySource,
 	CopyDestination,
 	ShaderReadWrite,        // Read/write storage (UAV/SSBO)
+	ShaderWrite,            // Write-only storage (UAV/SSBO)
 	RenderTarget,
 	DepthStencilRead,
 	DepthStencilWrite,
