@@ -301,7 +301,8 @@ enum class DescriptorType
 	STORAGE_TEXTURE,        // VK: STORAGE_IMAGE
 
 	// Samplers
-	SAMPLER,        // VK: SAMPLER
+	SAMPLER,                       // VK: SAMPLER
+	COMBINED_IMAGE_SAMPLER,        // VK: COMBINED_IMAGE_SAMPLER
 };
 
 enum class ShaderStageFlags : uint32_t

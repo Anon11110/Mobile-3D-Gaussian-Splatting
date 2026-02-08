@@ -171,6 +171,18 @@ class ISplatSortBackend
 	{
 		(void) latency;
 	}
+
+	/// Set sort direction
+	/// @param ascending true for near-to-far, false for far-to-near
+	virtual void SetSortAscending(bool ascending)
+	{
+		(void) ascending;
+	}
+
+	virtual bool IsSortAscending() const
+	{
+		return false;
+	}
 };
 
 /// GPU backend implementation using GpuSplatSorter
@@ -286,6 +298,20 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	void SetTimingFrameIndex(uint32_t frameIndex) override;
 	void SetTimingLatency(uint32_t latency) override;
 
+	void SetSortAscending(bool ascending) override
+	{
+		m_sortAscending = ascending;
+		if (m_sorter)
+		{
+			m_sorter->SetSortAscending(ascending);
+		}
+	}
+
+	bool IsSortAscending() const override
+	{
+		return m_sortAscending;
+	}
+
   private:
 	rhi::IRHIDevice  *m_device = nullptr;
 	Scene            *m_scene  = nullptr;
@@ -311,6 +337,9 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	bool                                 m_prepareVerification  = false;
 	bool                                 m_verificationPrepared = false;
 	const container::vector<math::vec3> *m_testPositions        = nullptr;
+
+	// Sort direction
+	bool m_sortAscending = false;        // false = far-to-near, true = near-to-far
 };
 
 /// CPU backend implementation using Scene's CpuSplatSorter

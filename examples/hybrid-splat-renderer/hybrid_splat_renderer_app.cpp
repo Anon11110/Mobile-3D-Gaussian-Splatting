@@ -265,6 +265,9 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	pipelineDesc.descriptorSetLayouts                         = {m_descriptorSetLayout.Get()};
 	m_renderPipeline                                          = device->CreateGraphicsPipeline(pipelineDesc);
 
+	// Create transmittance culling resources
+	CreateTransmCullingResources();
+
 	uint32_t imageCount = deviceManager->GetSwapchain()->GetImageCount();
 	LOG_INFO("Swapchain image count: {}", imageCount);
 
@@ -423,6 +426,15 @@ void HybridSplatRendererApp::ProcessPendingOperations()
 		}
 
 		LOG_INFO("Async compute {}", m_asyncComputeEnabled ? "enabled" : "disabled");
+	}
+
+	// Transmittance culling toggle
+	if (m_pendingOps.transmittanceCullingToggle)
+	{
+		m_transmittanceCullingEnabled = m_pendingOps.transmittanceCullingToggle->enable;
+		m_pendingOps.transmittanceCullingToggle.reset();
+
+		LOG_INFO("Transmittance culling {}", m_transmittanceCullingEnabled ? "enabled" : "disabled");
 	}
 
 	// Model load
@@ -637,6 +649,12 @@ void HybridSplatRendererApp::OnRender()
 			m_checkVerificationResults = false;
 		}
 
+		// Set sort direction based on rendering mode
+		// Hardware rasterization transmittance culling mode needs ascending sort (near-to-far)
+		bool needAscendingSort =
+		    (m_rasterizationPipelineType == RasterizationPipelineType::HardwareRaster && m_transmittanceCullingEnabled);
+		m_backend->SetSortAscending(needAscendingSort);
+
 		const bool backendIsAsync = m_backend && m_backend->IsAsyncComputeEnabled();
 		if (m_currentBackendType == BackendType::GPU && !backendIsAsync)
 		{
@@ -816,66 +834,161 @@ void HybridSplatRendererApp::OnRender()
 			m_descriptorSet->BindBuffer(5, indicesBinding);
 		}
 
-		// Transition to render target
-		rhi::TextureTransition renderTransition = {};
-		renderTransition.texture                = backBuffer;
-		renderTransition.before                 = rhi::ResourceState::Undefined;
-		renderTransition.after                  = rhi::ResourceState::RenderTarget;
-
-		cmdList->Barrier(
-		    rhi::PipelineScope::Graphics,
-		    rhi::PipelineScope::Graphics,
-		    {},
-		    {&renderTransition, 1},
-		    {});
-
-		// Begin rendering
-		rhi::RenderingInfo renderingInfo{};
-		renderingInfo.colorAttachments.resize(1);
-		renderingInfo.colorAttachments[0].view                = swapchain->GetBackBufferView(imageIndex);
-		renderingInfo.colorAttachments[0].loadOp              = rhi::LoadOp::CLEAR;
-		renderingInfo.colorAttachments[0].storeOp             = rhi::StoreOp::STORE;
-		renderingInfo.colorAttachments[0].clearValue.color[0] = 0.0f;
-		renderingInfo.colorAttachments[0].clearValue.color[1] = 0.0f;
-		renderingInfo.colorAttachments[0].clearValue.color[2] = 0.0f;
-		renderingInfo.colorAttachments[0].clearValue.color[3] = 1.0f;
-		renderingInfo.renderAreaWidth                         = width;
-		renderingInfo.renderAreaHeight                        = height;
+		uint32_t splatCount = m_scene->GetTotalSplatCount();
 
 		// Record render pass begin timestamp
 		RecordRenderTimestamp(cmdList, true);
 
-		cmdList->BeginRendering(renderingInfo);
-		cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
-		cmdList->SetScissor(0, 0, width, height);
-
 		// Begin pipeline statistics query
 		BeginPipelineStatsQuery(cmdList);
 
-		// Draw the splats using indexed procedural vertex generation if scene is not empty
-		uint32_t splatCount = m_scene->GetTotalSplatCount();
-		if (splatCount > 0 && m_renderPipeline && m_descriptorSet && m_quadIndexBuffer)
+		if (m_transmittanceCullingEnabled && m_transmCullingPipeline && m_accumTexture)
 		{
-			cmdList->SetPipeline(m_renderPipeline.Get());
-			cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
-			cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
+			// === Transmittance culling mode ===
 
-			// Draw using instanced rendering: 4 indices per strip, one instance per splat
-			uint32_t indexCount = 4;
-			cmdList->DrawIndexedInstanced(indexCount, splatCount, 0, 0, 0);
+			// === Pass 1: Transmittance accumulation to m_accumTexture ===
+			{
+				// Transition accumulation texture to render target
+				rhi::TextureTransition accumTransition{};
+				accumTransition.texture = m_accumTexture.Get();
+				accumTransition.before  = rhi::ResourceState::Undefined;
+				accumTransition.after   = rhi::ResourceState::RenderTarget;
+				cmdList->Barrier(rhi::PipelineScope::Graphics, rhi::PipelineScope::Graphics, {}, {&accumTransition, 1}, {});
+
+				rhi::RenderingInfo accumRenderInfo{};
+				accumRenderInfo.colorAttachments.resize(1);
+				accumRenderInfo.colorAttachments[0].view                = m_accumTextureView.Get();
+				accumRenderInfo.colorAttachments[0].loadOp              = rhi::LoadOp::CLEAR;
+				accumRenderInfo.colorAttachments[0].storeOp             = rhi::StoreOp::STORE;
+				accumRenderInfo.colorAttachments[0].clearValue.color[0] = 0.0f;        // C_acc = 0
+				accumRenderInfo.colorAttachments[0].clearValue.color[1] = 0.0f;
+				accumRenderInfo.colorAttachments[0].clearValue.color[2] = 0.0f;
+				accumRenderInfo.colorAttachments[0].clearValue.color[3] = 1.0f;        // T = 1
+				accumRenderInfo.renderAreaWidth                         = width;
+				accumRenderInfo.renderAreaHeight                        = height;
+
+				cmdList->BeginRendering(accumRenderInfo);
+				cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
+				cmdList->SetScissor(0, 0, width, height);
+
+				if (splatCount > 0 && m_transmCullingPipeline && m_descriptorSet && m_quadIndexBuffer)
+				{
+					cmdList->SetPipeline(m_transmCullingPipeline.Get());
+					cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
+					cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
+					cmdList->DrawIndexedInstanced(4, splatCount, 0, 0, 0);
+				}
+
+				cmdList->EndRendering();
+			}
+
+			// === Pass 2: Composite to backbuffer ===
+			{
+				// Transition accumulation texture to shader read
+				rhi::TextureTransition accumToRead{};
+				accumToRead.texture = m_accumTexture.Get();
+				accumToRead.before  = rhi::ResourceState::RenderTarget;
+				accumToRead.after   = rhi::ResourceState::GeneralRead;
+
+				// Transition backbuffer to render target
+				rhi::TextureTransition backToRender{};
+				backToRender.texture = backBuffer;
+				backToRender.before  = rhi::ResourceState::Undefined;
+				backToRender.after   = rhi::ResourceState::RenderTarget;
+
+				rhi::TextureTransition transitions[] = {accumToRead, backToRender};
+				cmdList->Barrier(rhi::PipelineScope::Graphics, rhi::PipelineScope::Graphics, {}, {transitions, 2}, {});
+
+				rhi::RenderingInfo compositeRenderInfo{};
+				compositeRenderInfo.colorAttachments.resize(1);
+				compositeRenderInfo.colorAttachments[0].view    = swapchain->GetBackBufferView(imageIndex);
+				compositeRenderInfo.colorAttachments[0].loadOp  = rhi::LoadOp::DONT_CARE;
+				compositeRenderInfo.colorAttachments[0].storeOp = rhi::StoreOp::STORE;
+				compositeRenderInfo.renderAreaWidth             = width;
+				compositeRenderInfo.renderAreaHeight            = height;
+
+				cmdList->BeginRendering(compositeRenderInfo);
+				cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
+				cmdList->SetScissor(0, 0, width, height);
+
+				cmdList->SetPipeline(m_compositePipeline.Get());
+				cmdList->BindDescriptorSet(0, m_compositeDescriptorSet.Get());
+
+				// Set background color
+				float backgroundColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+				cmdList->PushConstants(rhi::ShaderStageFlags::FRAGMENT, 0,
+				                       {reinterpret_cast<const std::byte *>(backgroundColor), sizeof(backgroundColor)});
+
+				cmdList->Draw(3);
+
+				// Draw ImGui on top
+				if (m_imguiEnabled && m_showImGui)
+				{
+					UpdateFpsHistory();
+					RenderImGui();
+					RenderImGuiToCommandBuffer(cmdList);
+				}
+
+				cmdList->EndRendering();
+			}
+		}
+		else
+		{
+			// === Back-to-front rendering mode ===
+			// Transition to render target
+			rhi::TextureTransition renderTransition = {};
+			renderTransition.texture                = backBuffer;
+			renderTransition.before                 = rhi::ResourceState::Undefined;
+			renderTransition.after                  = rhi::ResourceState::RenderTarget;
+
+			cmdList->Barrier(
+			    rhi::PipelineScope::Graphics,
+			    rhi::PipelineScope::Graphics,
+			    {},
+			    {&renderTransition, 1},
+			    {});
+
+			// Begin rendering
+			rhi::RenderingInfo renderingInfo{};
+			renderingInfo.colorAttachments.resize(1);
+			renderingInfo.colorAttachments[0].view                = swapchain->GetBackBufferView(imageIndex);
+			renderingInfo.colorAttachments[0].loadOp              = rhi::LoadOp::CLEAR;
+			renderingInfo.colorAttachments[0].storeOp             = rhi::StoreOp::STORE;
+			renderingInfo.colorAttachments[0].clearValue.color[0] = 0.0f;
+			renderingInfo.colorAttachments[0].clearValue.color[1] = 0.0f;
+			renderingInfo.colorAttachments[0].clearValue.color[2] = 0.0f;
+			renderingInfo.colorAttachments[0].clearValue.color[3] = 1.0f;
+			renderingInfo.renderAreaWidth                         = width;
+			renderingInfo.renderAreaHeight                        = height;
+
+			cmdList->BeginRendering(renderingInfo);
+			cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
+			cmdList->SetScissor(0, 0, width, height);
+
+			// Draw the splats using indexed procedural vertex generation if scene is not empty
+			if (splatCount > 0 && m_renderPipeline && m_descriptorSet && m_quadIndexBuffer)
+			{
+				cmdList->SetPipeline(m_renderPipeline.Get());
+				cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
+				cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
+
+				// Draw using instanced rendering: 4 indices per strip, one instance per splat
+				uint32_t indexCount = 4;
+				cmdList->DrawIndexedInstanced(indexCount, splatCount, 0, 0, 0);
+			}
+
+			if (m_imguiEnabled && m_showImGui)
+			{
+				UpdateFpsHistory();
+				RenderImGui();
+				RenderImGuiToCommandBuffer(cmdList);
+			}
+
+			cmdList->EndRendering();
 		}
 
 		// End pipeline statistics query
 		EndPipelineStatsQuery(cmdList);
-
-		if (m_imguiEnabled && m_showImGui)
-		{
-			UpdateFpsHistory();
-			RenderImGui();
-			RenderImGuiToCommandBuffer(cmdList);
-		}
-
-		cmdList->EndRendering();
 	}
 
 	// Record render pass end timestamp
@@ -980,6 +1093,18 @@ void HybridSplatRendererApp::OnShutdown()
 
 	m_vertexShader   = nullptr;
 	m_fragmentShader = nullptr;
+
+	m_transmCullingPipeline       = nullptr;
+	m_transmCullingFragmentShader = nullptr;
+	m_accumTextureView            = nullptr;
+	m_accumTexture                = nullptr;
+
+	m_compositePipeline            = nullptr;
+	m_compositeDescriptorSet       = nullptr;
+	m_compositeDescriptorSetLayout = nullptr;
+	m_compositeSampler             = nullptr;
+	m_compositeFragmentShader      = nullptr;
+	m_fullscreenVertexShader       = nullptr;
 
 	m_frameUboBuffer  = nullptr;
 	m_quadIndexBuffer = nullptr;
@@ -1590,6 +1715,9 @@ void HybridSplatRendererApp::RecreateSwapchain()
 	{
 		m_computeRasterizer->Resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
 	}
+
+	// Resize transmittance culling accumulation texture
+	ResizeTransmCullingResources(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
 
 	LOG_INFO("Swapchain resized: {}x{}", width, height);
 }
@@ -2469,6 +2597,22 @@ void HybridSplatRendererApp::RenderImGui()
 				LOG_INFO("Sorting {}", m_sortingEnabled ? "enabled" : "disabled");
 			}
 
+			// Transmittance culling toggle
+			bool tcEnabled = m_transmittanceCullingEnabled;
+			if (ImGui::Checkbox("Transmittance Culling", &tcEnabled))
+			{
+				m_pendingOps.transmittanceCullingToggle = PendingOperations::TransmittanceCullingToggle{tcEnabled};
+				LOG_INFO("Transmittance culling toggle scheduled: {}", tcEnabled ? "enable" : "disable");
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::BeginTooltip();
+				ImGui::TextUnformatted("Enable transmittance-based rendering.");
+				ImGui::TextUnformatted("Renders near-to-far with accumulation buffer,");
+				ImGui::TextUnformatted("then composites over background.");
+				ImGui::EndTooltip();
+			}
+
 			ImGui::Spacing();
 
 			// Backend selection
@@ -2844,3 +2988,120 @@ bool HybridSplatRendererApp::HandleImGuiInput(AInputEvent *event)
 	return ImGui::GetIO().WantCaptureMouse;
 }
 #endif
+
+void HybridSplatRendererApp::CreateTransmCullingResources()
+{
+	auto *device    = m_deviceManager->GetDevice();
+	auto *swapchain = m_deviceManager->GetSwapchain();
+
+	m_transmCullingFragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster_transm_culling.frag.spv", rhi::ShaderStage::FRAGMENT);
+	m_fullscreenVertexShader      = m_shaderFactory->getOrCreateShader("shaders/compiled/fullscreen.vert.spv", rhi::ShaderStage::VERTEX);
+	m_compositeFragmentShader     = m_shaderFactory->getOrCreateShader("shaders/compiled/composite.frag.spv", rhi::ShaderStage::FRAGMENT);
+
+	rhi::GraphicsPipelineDesc tcPipelineDesc{};
+	tcPipelineDesc.vertexShader                = m_vertexShader.Get();
+	tcPipelineDesc.fragmentShader              = m_transmCullingFragmentShader.Get();
+	tcPipelineDesc.topology                    = rhi::PrimitiveTopology::TRIANGLE_STRIP;
+	tcPipelineDesc.rasterizationState.cullMode = rhi::CullMode::NONE;
+	tcPipelineDesc.colorBlendAttachments.resize(1);
+	tcPipelineDesc.colorBlendAttachments[0].blendEnable = true;
+	// RGB: C_acc += (C*alpha) * T, where T is stored in dst.a
+	tcPipelineDesc.colorBlendAttachments[0].srcColorBlendFactor = rhi::BlendFactor::DST_ALPHA;
+	tcPipelineDesc.colorBlendAttachments[0].dstColorBlendFactor = rhi::BlendFactor::ONE;
+	tcPipelineDesc.colorBlendAttachments[0].colorBlendOp        = rhi::BlendOp::ADD;
+	// Alpha: T *= (1 - alpha)
+	tcPipelineDesc.colorBlendAttachments[0].srcAlphaBlendFactor = rhi::BlendFactor::ZERO;
+	tcPipelineDesc.colorBlendAttachments[0].dstAlphaBlendFactor = rhi::BlendFactor::ONE_MINUS_SRC_ALPHA;
+	tcPipelineDesc.colorBlendAttachments[0].alphaBlendOp        = rhi::BlendOp::ADD;
+	tcPipelineDesc.targetSignature.colorFormats                 = {swapchain->GetBackBuffer(0)->GetFormat()};
+	tcPipelineDesc.descriptorSetLayouts                         = {m_descriptorSetLayout.Get()};
+	m_transmCullingPipeline                                     = device->CreateGraphicsPipeline(tcPipelineDesc);
+
+	// Create accumulation texture
+	int fbWidth, fbHeight;
+	m_deviceManager->GetPlatformAdapter()->GetFramebufferSize(&fbWidth, &fbHeight);
+
+	rhi::TextureDesc accumDesc{};
+	accumDesc.width          = static_cast<uint32_t>(fbWidth);
+	accumDesc.height         = static_cast<uint32_t>(fbHeight);
+	accumDesc.format         = swapchain->GetBackBuffer(0)->GetFormat();
+	accumDesc.isRenderTarget = true;
+	m_accumTexture           = device->CreateTexture(accumDesc);
+
+	rhi::TextureViewDesc accumViewDesc{};
+	accumViewDesc.texture    = m_accumTexture.Get();
+	accumViewDesc.aspectMask = rhi::TextureAspect::COLOR;
+	m_accumTextureView       = device->CreateTextureView(accumViewDesc);
+
+	// Create sampler for composite pass
+	rhi::SamplerDesc samplerDesc{};
+	samplerDesc.minFilter    = rhi::FilterMode::LINEAR;
+	samplerDesc.magFilter    = rhi::FilterMode::LINEAR;
+	samplerDesc.addressModeU = rhi::SamplerAddressMode::CLAMP_TO_EDGE;
+	samplerDesc.addressModeV = rhi::SamplerAddressMode::CLAMP_TO_EDGE;
+	samplerDesc.addressModeW = rhi::SamplerAddressMode::CLAMP_TO_EDGE;
+	m_compositeSampler       = device->CreateSampler(samplerDesc);
+
+	// Create composite descriptor set layout
+	rhi::DescriptorSetLayoutDesc compositeLayoutDesc{};
+	compositeLayoutDesc.bindings = {
+	    {0, rhi::DescriptorType::COMBINED_IMAGE_SAMPLER, 1, rhi::ShaderStageFlags::FRAGMENT},
+	};
+	m_compositeDescriptorSetLayout = device->CreateDescriptorSetLayout(compositeLayoutDesc);
+	m_compositeDescriptorSet       = device->CreateDescriptorSet(m_compositeDescriptorSetLayout.Get());
+
+	// Bind accumulation texture with combined sampler
+	rhi::TextureBinding accumBinding{};
+	accumBinding.texture = m_accumTexture.Get();
+	accumBinding.sampler = m_compositeSampler.Get();
+	accumBinding.type    = rhi::DescriptorType::COMBINED_IMAGE_SAMPLER;
+	m_compositeDescriptorSet->BindTexture(0, accumBinding);
+
+	// Create composite pipeline
+	rhi::GraphicsPipelineDesc compositePipelineDesc{};
+	compositePipelineDesc.vertexShader                = m_fullscreenVertexShader.Get();
+	compositePipelineDesc.fragmentShader              = m_compositeFragmentShader.Get();
+	compositePipelineDesc.topology                    = rhi::PrimitiveTopology::TRIANGLE_LIST;
+	compositePipelineDesc.rasterizationState.cullMode = rhi::CullMode::NONE;
+	compositePipelineDesc.colorBlendAttachments.resize(1);
+	compositePipelineDesc.colorBlendAttachments[0].blendEnable = false;
+	compositePipelineDesc.targetSignature.colorFormats         = {swapchain->GetBackBuffer(0)->GetFormat()};
+	compositePipelineDesc.descriptorSetLayouts                 = {m_compositeDescriptorSetLayout.Get()};
+	compositePipelineDesc.pushConstantRanges                   = {{rhi::ShaderStageFlags::FRAGMENT, 0, sizeof(float) * 4}};
+	m_compositePipeline                                        = device->CreateGraphicsPipeline(compositePipelineDesc);
+
+	LOG_INFO("Transmittance culling resources created ({}x{})", fbWidth, fbHeight);
+}
+
+void HybridSplatRendererApp::ResizeTransmCullingResources(uint32_t width, uint32_t height)
+{
+	if (!m_accumTexture)
+	{
+		return;
+	}
+
+	auto *device    = m_deviceManager->GetDevice();
+	auto *swapchain = m_deviceManager->GetSwapchain();
+
+	// Recreate accumulation texture at new size
+	rhi::TextureDesc accumDesc{};
+	accumDesc.width          = width;
+	accumDesc.height         = height;
+	accumDesc.format         = swapchain->GetBackBuffer(0)->GetFormat();
+	accumDesc.isRenderTarget = true;
+	m_accumTexture           = device->CreateTexture(accumDesc);
+
+	rhi::TextureViewDesc accumViewDesc{};
+	accumViewDesc.texture    = m_accumTexture.Get();
+	accumViewDesc.aspectMask = rhi::TextureAspect::COLOR;
+	m_accumTextureView       = device->CreateTextureView(accumViewDesc);
+
+	// Rebind to composite descriptor set
+	rhi::TextureBinding accumBinding{};
+	accumBinding.texture = m_accumTexture.Get();
+	accumBinding.sampler = m_compositeSampler.Get();
+	accumBinding.type    = rhi::DescriptorType::COMBINED_IMAGE_SAMPLER;
+	m_compositeDescriptorSet->BindTexture(0, accumBinding);
+
+	LOG_INFO("Transmittance culling accumulation texture resized to {}x{}", width, height);
+}

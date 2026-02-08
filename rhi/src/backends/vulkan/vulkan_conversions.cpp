@@ -294,6 +294,8 @@ VkDescriptorType DescriptorTypeToVulkan(DescriptorType type)
 		// Samplers
 		case DescriptorType::SAMPLER:
 			return VK_DESCRIPTOR_TYPE_SAMPLER;
+		case DescriptorType::COMBINED_IMAGE_SAMPLER:
+			return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
 		default:
 			throw std::runtime_error("Unknown descriptor type");

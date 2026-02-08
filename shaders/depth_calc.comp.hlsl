@@ -19,17 +19,26 @@
 struct PushConstants
 {
     uint numElements;
+    uint sortAscending;  // 0 = far-to-near, 1 = near-to-far
 };
 [[vk::push_constant]] PushConstants pc;
 
-// Converts a float to a sortable uint. For standard right-handed view spaces,
-// larger Z is further away. To sort far-to-near (descending depth), we want
-// larger Z values to have smaller uint keys.
+// Converts a float to a sortable uint.
+// When sortAscending=0: larger Z → smaller uint key (far-to-near after ascending radix sort)
+// When sortAscending=1: smaller Z → smaller uint key (near-to-far after ascending radix sort)
 uint FloatToSortableUint(float val)
 {
     uint u = asuint(val);
     uint mask = (u & 0x80000000u) != 0u ? 0xFFFFFFFFu : 0x80000000u;
-    return 0xFFFFFFFFu - (u ^ mask);
+
+    if (pc.sortAscending != 0)
+    {
+        return u ^ mask;
+    }
+    else
+    {
+        return 0xFFFFFFFFu - (u ^ mask);
+    }
 }
 
 [numthreads(256, 1, 1)]

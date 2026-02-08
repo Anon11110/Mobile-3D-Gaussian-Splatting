@@ -83,6 +83,10 @@ struct PendingOperations
 	{
 		bool enable;
 	};
+	struct TransmittanceCullingToggle
+	{
+		bool enable;
+	};
 	struct ModelLoad
 	{
 		container::string path;
@@ -92,20 +96,22 @@ struct PendingOperations
 		engine::SplatMesh::ID meshId;
 	};
 
-	std::optional<BackendSwitch>      backendSwitch;
-	std::optional<AsyncComputeToggle> asyncComputeToggle;
-	std::optional<ModelLoad>          modelLoad;
-	std::optional<MeshRemoval>        meshRemoval;
+	std::optional<BackendSwitch>              backendSwitch;
+	std::optional<AsyncComputeToggle>         asyncComputeToggle;
+	std::optional<TransmittanceCullingToggle> transmittanceCullingToggle;
+	std::optional<ModelLoad>                  modelLoad;
+	std::optional<MeshRemoval>                meshRemoval;
 
 	bool HasPending() const
 	{
-		return backendSwitch || asyncComputeToggle || modelLoad || meshRemoval;
+		return backendSwitch || asyncComputeToggle || transmittanceCullingToggle || modelLoad || meshRemoval;
 	}
 
 	void Clear()
 	{
 		backendSwitch.reset();
 		asyncComputeToggle.reset();
+		transmittanceCullingToggle.reset();
 		modelLoad.reset();
 		meshRemoval.reset();
 	}
@@ -210,6 +216,23 @@ class HybridSplatRendererApp : public app::IApplication
 	rhi::ShaderHandle   m_vertexShader;
 	rhi::ShaderHandle   m_fragmentShader;
 	rhi::PipelineHandle m_renderPipeline;
+
+	// Transmittance culling resources
+	bool                m_transmittanceCullingEnabled = false;
+	rhi::ShaderHandle   m_transmCullingFragmentShader;
+	rhi::PipelineHandle m_transmCullingPipeline;
+
+	// Accumulation render target for transmittance culling
+	rhi::TextureHandle     m_accumTexture;
+	rhi::TextureViewHandle m_accumTextureView;
+
+	// Composite pass resources
+	rhi::ShaderHandle              m_fullscreenVertexShader;
+	rhi::ShaderHandle              m_compositeFragmentShader;
+	rhi::PipelineHandle            m_compositePipeline;
+	rhi::DescriptorSetLayoutHandle m_compositeDescriptorSetLayout;
+	rhi::DescriptorSetHandle       m_compositeDescriptorSet;
+	rhi::SamplerHandle             m_compositeSampler;
 
 	rhi::DescriptorSetLayoutHandle m_descriptorSetLayout;
 	rhi::DescriptorSetHandle       m_descriptorSet;
@@ -387,4 +410,8 @@ class HybridSplatRendererApp : public app::IApplication
 #endif
 	void RecreateSwapchain();
 	void PerformCrossBackendVerification();
+
+	// Transmittance culling helpers
+	void CreateTransmCullingResources();
+	void ResizeTransmCullingResources(uint32_t width, uint32_t height);
 };

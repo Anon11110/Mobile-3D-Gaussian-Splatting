@@ -327,11 +327,11 @@ void GpuSplatSorter::CreateComputePipelines()
 		pipelineDesc.computeShader            = depthCalcShader.Get();
 		pipelineDesc.descriptorSetLayouts     = {depthCalcSetLayout.Get()};
 
-		// Push constants for numElements
+		// Push constants for depth calculation
 		rhi::PushConstantRange pushConstantRange = {};
 		pushConstantRange.stageFlags             = rhi::ShaderStageFlags::COMPUTE;
 		pushConstantRange.offset                 = 0;
-		pushConstantRange.size                   = sizeof(uint32_t);
+		pushConstantRange.size                   = sizeof(DepthCalcPushConstants);
 		pipelineDesc.pushConstantRanges          = {pushConstantRange};
 
 		depthCalcPipeline = device->CreateComputePipeline(pipelineDesc);
@@ -822,8 +822,10 @@ void GpuSplatSorter::RecordDepthCalculation(rhi::IRHICommandList *cmdList, const
 	cmdList->SetPipeline(depthCalcPipeline.Get());
 	cmdList->BindDescriptorSet(0, depthCalcDescriptorSet.Get());
 
-	uint32_t numElements = totalSplatCount;
-	cmdList->PushConstants(rhi::ShaderStageFlags::COMPUTE, 0, {reinterpret_cast<const std::byte *>(&numElements), sizeof(uint32_t)});
+	DepthCalcPushConstants depthCalcPC = {};
+	depthCalcPC.numElements            = totalSplatCount;
+	depthCalcPC.sortAscending          = sortAscending ? 1 : 0;
+	cmdList->PushConstants(rhi::ShaderStageFlags::COMPUTE, 0, {reinterpret_cast<const std::byte *>(&depthCalcPC), sizeof(DepthCalcPushConstants)});
 
 	uint32_t numWorkgroups = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
 	cmdList->Dispatch(numWorkgroups);

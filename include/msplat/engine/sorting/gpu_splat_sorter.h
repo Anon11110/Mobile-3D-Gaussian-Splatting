@@ -51,6 +51,16 @@ class GpuSplatSorter
 	/// @param outputBuffer New buffer to write sorted indices to (must be primary or alternate buffer)
 	void SetOutputBuffer(rhi::BufferHandle outputBuffer);
 
+	// Sort direction
+	void SetSortAscending(bool ascending)
+	{
+		sortAscending = ascending;
+	}
+	bool IsSortAscending() const
+	{
+		return sortAscending;
+	}
+
 	// Method switching
 	void SetSortMethod(SortMethod method)
 	{
@@ -153,6 +163,12 @@ class GpuSplatSorter
 	static constexpr uint32_t RadixPasses      = 4;
 	static constexpr uint32_t SubgroupSize     = 32;
 
+	struct DepthCalcPushConstants
+	{
+		uint32_t numElements;
+		uint32_t sortAscending;        // 0 = far-to-near, 1 = near-to-far
+	};
+
 	struct PushConstants
 	{
 		uint32_t numElements;
@@ -219,6 +235,7 @@ class GpuSplatSorter
 
 	SortMethod    sortMethod    = SortMethod::IntegratedScan;
 	ShaderVariant shaderVariant = ShaderVariant::Portable;
+	bool          sortAscending = false;        // false = far-to-near, true = near-to-far
 
 	// Store last view matrix for verification
 	math::mat4 lastViewMatrix = math::mat4(1.0f);
