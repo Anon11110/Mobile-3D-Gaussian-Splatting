@@ -116,6 +116,7 @@ class PlatformConfig(ABC):
         build_type: Union[BuildType, str] = BuildType.RELEASE,
         enable_validation: bool = False,
         enable_rhi_tests: bool = False,
+        backend: str = "vulkan",
     ):
         """Setup basic CMake arguments."""
         build_type_str = (
@@ -123,6 +124,7 @@ class PlatformConfig(ABC):
         )
         self.cmake_args = [
             f"-DCMAKE_BUILD_TYPE={build_type_str}",
+            f"-DRHI_BACKEND={backend.upper()}",
         ]
 
         # Enable compile_commands.json generation for Debug/RelWithDebInfo builds (IDE integration)

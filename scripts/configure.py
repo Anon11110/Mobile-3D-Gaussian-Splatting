@@ -119,7 +119,10 @@ class ConfigureCommand(Command):
             # Enable RHI tests if --tests flag is used
             enable_rhi_tests = getattr(self.args, "tests", False)
             config.setup_cmake_args(
-                self.args.build_type, self.args.validation, enable_rhi_tests
+                self.args.build_type,
+                self.args.validation,
+                enable_rhi_tests,
+                getattr(self.args, "backend", "vulkan"),
             )
 
             if not config.configure():
@@ -169,6 +172,8 @@ class ConfigureCommand(Command):
         term.kv("Source directory", str(self.source_dir))
         term.kv("Build directory", str(self.build_dir))
         term.kv("Build type", self.args.build_type)
+        if hasattr(self.args, "backend"):
+            term.kv("RHI backend", self.args.backend)
 
     def _override_generator(self, config):
         """Override the CMake generator with validation."""
@@ -392,6 +397,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
 Examples:
   python scripts/configure.py                    # Configure with defaults
   python scripts/configure.py --clean --debug   # Clean configure for Debug
+  python scripts/configure.py --backend metal3  # Configure with Metal3 backend
   python scripts/configure.py build --target triangle  # Build triangle target
   python scripts/configure.py build --target all       # Build all targets
   python scripts/configure.py build --tests --run      # Build and run tests
@@ -403,6 +409,12 @@ Examples:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Configure command (default behavior, so these are also top-level args)
+    parser.add_argument(
+        "--backend",
+        choices=["vulkan", "metal3"],
+        default="vulkan",
+        help="RHI backend to configure (default: vulkan)",
+    )
     parser.add_argument(
         "--build-type",
         choices=[BuildType.DEBUG.value, BuildType.RELEASE.value, BuildType.RELWITHDEBINFO.value],

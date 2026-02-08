@@ -1,14 +1,14 @@
 # Rendering Hardware Interface (RHI) Design Documentation
 
 ## Overview
-The RHI is a thin, Vulkan-first abstraction used by the examples and engine code in this repository. It mirrors Vulkan concepts (command lists, explicit barriers, descriptor sets) and currently ships only with a Vulkan backend. Surfaces are created through GLFW, memory is allocated via Vulkan Memory Allocator (VMA), and rendering relies on Vulkan 1.3 dynamic rendering (or `VK_KHR_dynamic_rendering` when 1.3 is unavailable). There is no Metal backend today.
+The RHI is a thin, Vulkan-first abstraction used by the examples and engine code in this repository. It mirrors Vulkan concepts (command lists, explicit barriers, descriptor sets) and currently ships only with a Vulkan backend. Surfaces are created from platform window handles (`GLFWwindow*` on desktop, `ANativeWindow*` on Android, `CAMetalLayer*` on Apple), memory is allocated via Vulkan Memory Allocator (VMA), and rendering relies on Vulkan 1.3 dynamic rendering (or `VK_KHR_dynamic_rendering` when 1.3 is unavailable). There is no separate Metal RHI backend today.
 
 ## Architecture
 
 ### Design Principles
 - Vulkan-centric and explicit: queue selection, state transitions, descriptor bindings, and memory hints are caller driven.
 - Lean abstractions: interfaces are close to Vulkan primitives; pipelines target a `RenderTargetSignature` instead of render passes, and viewport/scissor are dynamic.
-- Intrusive handles: every interface derives from `IRefCounted` and is wrapped in `RefCntPtr`. GPU-completion tracking is not implemented yet; callers own lifetime guarantees.
+- Intrusive handles: every interface derives from `IRefCounted` and is wrapped in `RefCntPtr`. The backend only tracks internal async-upload staging cleanup (`RetireCompletedFrame`); callers still own resource lifetime guarantees for submitted GPU work.
 - Queue awareness: command lists are created for a specific queue type (graphics/compute/transfer) and expose queue ownership transfer helpers.
 - Modern feature set: dynamic rendering and descriptor set layouts/push constants are first-class; there are no legacy fixed-function paths.
 
@@ -17,17 +17,19 @@ The RHI is a thin, Vulkan-first abstraction used by the examples and engine code
 Application
   | (include/rhi/rhi.h, rhi_types.h)
 Vulkan Backend (rhi/src/backends/vulkan)
-  | Vulkan 1.3 / VK_KHR_dynamic_rendering + VMA + GLFW surface creation
+  | Vulkan 1.3 / VK_KHR_dynamic_rendering + synchronization2 + VMA + platform surface creation
 ```
 No other backend is present.
 
 ## API Surface
 
 ### Device (`IRHIDevice`)
-- Resource factories: buffers, textures, texture views, samplers, shaders, graphics/compute pipelines, descriptor set layouts, descriptor sets (per-queue pool), command lists (per-queue), swapchains, semaphores, fences, composite fences.
+- Resource factories: buffers, textures, texture views, samplers, shaders, graphics/compute pipelines, descriptor set layouts, descriptor sets (per-queue pool), command lists (per-queue), swapchains, semaphores, fences, composite fences, and query pools.
 - Buffer data helpers: `UpdateBuffer` maps host-visible buffers; device-local buffers must use `UploadBufferAsync`, which stages through the transfer queue and returns a fence. Call `RetireCompletedFrame` periodically to reclaim completed staging buffers.
 - Submission: `SubmitCommandLists` has a simple overload and a `SubmitInfo` variant that wires wait semaphores with stage masks, signal semaphores, and an optional signal fence.
 - Synchronization helpers: `WaitQueueIdle`/`WaitIdle` block until work completes.
+- Query and profiling helpers: `GetTimestampPeriod`, `GetQueryPoolResults`, plus command-list query recording methods.
+- Memory telemetry: `GetMemoryStats` returns VMA budget/usage aggregates for device-local, host-visible, and total heaps.
 - Native Vulkan accessors are exposed under `RHI_VULKAN` for integration (instance, physical device, device, graphics queue, queue family index).
 
 ### Resources
@@ -38,20 +40,20 @@ No other backend is present.
 - Interface: `Map`/`Unmap`, `GetSize`. Index buffers remember the `IndexType` and the Vulkan backend uses it when binding.
 
 #### Textures (`IRHITexture`)
-- Implemented as 2D images; the backend creates `VK_IMAGE_TYPE_2D` images and `VK_IMAGE_VIEW_TYPE_2D` views. Array/cubemap/3D images are not supported yet.
+- Texture allocation supports `TEXTURE_2D`, `TEXTURE_2D_ARRAY`, `TEXTURE_3D`, and cube/cube-array modes (`TEXTURE_CUBE` or `isCubeMap`), with matching default Vulkan image/view types.
 - `isRenderTarget`/`isDepthStencil` toggle attachment usage bits. `ResourceUsage` maps to VMA similarly to buffers. Initial data uploads are only implemented for `Static`; providing initial data for other usages throws.
 
 #### Texture Views (`IRHITextureView`)
-- Supports format overrides, aspect masks, and mip/layer subranges, but views are always 2D. Width/height are derived from the base mip. Useful for depth-only or color-aspect selections.
+- Supports format overrides, aspect masks, and mip/layer subranges. Custom views created via `CreateTextureView` are currently always `VK_IMAGE_VIEW_TYPE_2D`; width/height are derived from the base mip.
 
 #### Shaders and Samplers
-- `ShaderDesc` expects SPIR-V bytecode plus an entry point (default `main`). `SamplerDesc` mirrors Vulkan sampler state options.
+- `ShaderDesc` expects SPIR-V bytecode and stage. The Vulkan backend currently uses `main` when creating pipeline stages (the `entryPoint` field is not consumed yet). `SamplerDesc` mirrors Vulkan sampler state options.
 
 ### Pipelines
 
 #### Graphics Pipelines
 - Described by `GraphicsPipelineDesc`: vertex/fragment shaders, vertex layout, topology (with optional primitive restart), rasterization/depth-stencil/multisample/color blend state, `RenderTargetSignature` (color formats list, optional depth format, sample count), descriptor set layouts, and push constant ranges.
-- Uses Vulkan dynamic rendering (`vkCmdBeginRendering`/`vkCmdEndRendering`); viewport and scissor are dynamic. Tessellation/geometry stages are not implemented.
+- Uses Vulkan dynamic rendering (`vkCmdBeginRendering`/`vkCmdEndRendering`); viewport and scissor are dynamic. Tessellation/geometry stages are not implemented. There is no render-pass recording fallback in command-list rendering paths.
 
 #### Compute Pipelines
 - Single compute shader plus descriptor set layouts and push constant ranges.
@@ -59,36 +61,40 @@ No other backend is present.
 ### Command Lists (`IRHICommandList`)
 - Lifecycle: `Begin` -> record -> `End`; `Reset` reuses the underlying command buffer. Recording must bracket dynamic rendering with `BeginRendering`/`EndRendering`. If render area is left zero, the backend infers it from the first attachment.
 - Binding and draw/dispatch: `SetPipeline`, `SetVertexBuffer`, `BindIndexBuffer` (uses buffer `IndexType`), `BindDescriptorSet` (pipeline must be bound; supports dynamic offsets), `PushConstants`, `SetViewport`/`SetScissor`, `Draw`, `DrawIndexed`, `DrawIndexedInstanced`, `DrawIndexedIndirect`, `Dispatch`, `DispatchIndirect`.
-- Copies and blits: `CopyBuffer`, `CopyTexture`, `BlitTexture` (linear/nearest). Caller is responsible for correct resource layouts.
+- Buffer/image utility ops: `CopyBuffer`, `FillBuffer`, `CopyTexture`, `BlitTexture` (linear/nearest). Caller is responsible for correct resource layouts.
 - Barriers: `Barrier` accepts buffer/texture transitions plus optional memory barriers. Stage/access masks default from `ResourceState` and `PipelineScope` when set to `Auto`; if every span is empty, no barrier is emitted.
 - Queue ownership: `ReleaseToQueue` and `AcquireFromQueue` emit queue-family ownership transfers based on the command list's queue and the target/source queue types.
+- Query ops are exposed on command lists: `ResetQueryPool`, `WriteTimestamp`, `BeginQuery`, `EndQuery`, and `CopyQueryPoolResults`.
+- `GetNativeCommandBuffer` is available under `RHI_VULKAN`.
 - The backend does not retain resource references; applications must keep resources alive until work completes.
 
 ### Synchronization and Submission
-- `ResourceState` enumerates common usages (render target, depth read/write, shader read/write, copy src/dst, present, indirect, vertex/index/uniform). Optional `StageMask`/`AccessMask` can override automatic inference.
+- `ResourceState` enumerates common usages (including resolve src/dst, render target, depth read/write, shader read/write, copy src/dst, present, indirect, vertex/index/uniform). Optional `StageMask`/`AccessMask` can override automatic inference.
 - `SemaphoreHandle`/`FenceHandle` represent Vulkan semaphores/fences. `CreateCompositeFence` wraps multiple fences and forwards `Wait`/`Reset`/`IsSignaled` to all of them.
 - `SubmitInfo` wires wait semaphores with per-semaphore stage masks, signal semaphores, and an optional fence; queues are selected explicitly per submission.
 
 ### Descriptor Sets and Layouts
 - `DescriptorType` covers uniform/storage buffers (static and dynamic), uniform/storage texel buffers, sampled/storage textures, and samplers.
 - `DescriptorSetLayoutDesc` is a list of `DescriptorBinding` entries (binding index, type, array count, stage flags). The Vulkan backend caches pool sizes from the layout.
-- `CreateDescriptorSet` requires the queue type to pick the correct descriptor pool. `IRHIDescriptorSet::BindBuffer`/`BindTexture` immediately call `vkUpdateDescriptorSets` for a single binding update.
+- `CreateDescriptorSet` requires the queue type to pick the correct descriptor pool. `IRHIDescriptorSet::BindBuffer`/`BindTexture` immediately call `vkUpdateDescriptorSets` for a single binding update. Texture binding currently uses the texture's default image view (no descriptor-time `IRHITextureView` override).
 
 ### Presentation (`IRHISwapchain`)
-- Created from a `SwapchainDesc` with a GLFW window handle, width/height, preferred format (defaults to BGRA8 UNORM), buffer count, and vsync toggle.
+- Created from a `SwapchainDesc` with a native `windowHandle`, `windowHandleType` (GLFW/AndroidNative/MetalLayer), width/height, preferred format (defaults to BGRA8 UNORM), buffer count, vsync toggle, and `disablePreRotation`.
 - Chooses the requested format when available; otherwise falls back to a compatible BGRA8 format. Present mode is FIFO unless vsync is false (tries MAILBOX then IMMEDIATE).
 - `AcquireNextImage`/`Present` return `SwapchainStatus` (success/out-of-date/suboptimal/error). `Resize` recreates the swapchain and image views. `GetBackBuffer`/`GetBackBufferView` expose textures for rendering; `GetImageCount` reflects the current swapchain size.
+- `GetPreTransform` exposes the surface transform applied by the swapchain (identity or rotation/mirror), which is useful for pre-rotation aware rendering.
 
 ### Resource Lifetime
 - All interfaces are intrusive reference-counted via `RefCntPtr`. `RetireCompletedFrame` polls fences from `UploadBufferAsync` calls and reclaims staging buffers/command buffers whose transfers have completed. Call it periodically (e.g., once per frame) to avoid accumulating staging memory. Command lists do not hold internal references; keep resources alive until the GPU has finished using them (e.g., wait on fences from submissions or call `WaitQueueIdle`/`WaitIdle`).
 
 ## Vulkan Backend Notes
-- Initialization: GLFW is initialized for surface creation; the first available physical device is selected. Validation layers are enabled when available in debug builds.
+- Initialization: GLFW is initialized on desktop for surface creation; Android uses native surfaces directly. The backend prefers discrete GPUs when selecting a physical device. Validation layers are enabled when available in debug builds.
 - Queue families: attempts to pick dedicated compute/transfer queues; falls back to the graphics family when needed. Separate command pools and descriptor pools exist per queue family.
-- Dynamic rendering: enabled via Vulkan 1.3 core or `VK_KHR_dynamic_rendering`. Function pointers are cached during device creation and are required for command recording.
+- Dynamic rendering: enabled via Vulkan 1.3 core or `VK_KHR_dynamic_rendering`. Synchronization2 functions are also loaded. Rendering command recording relies on these dynamic-rendering entry points.
 - Memory allocation: VMA is used for buffers/textures. `ResourceUsage` drives the VMA usage/flags (device-local for `Static`/`Transient`, host-visible with sequential or random access for `DynamicUpload`/`Readback`; transient render targets request lazy memory when available). Texture initial data uploads are implemented only for `Static` resources.
 - Buffer uploads: `UpdateBuffer` enforces host-visible allocations; `UploadBufferAsync` stages through the transfer queue and signals a fence. `RetireCompletedFrame` polls these fences and reclaims staging buffers/command buffers once their transfers complete.
-- Swapchain: picks a format/present mode as described above and creates `Texture`/`TextureView` wrappers for back buffers. `GetFramebuffer` can build a framebuffer for a provided render pass when needed.
+- Query support: timestamp, occlusion, and pipeline-statistics query pools are exposed; pipeline statistics are optional and may be unavailable (for example on MoltenVK).
+- Swapchain: picks a format/present mode as described above, handles optional pre-rotation disable, and creates `Texture`/`TextureView` wrappers for back buffers. `GetFramebuffer` can build a framebuffer for a provided render pass when needed.
 
 ## Usage Notes
 
@@ -154,5 +160,6 @@ Use `Barrier` to transition resources into the correct `ResourceState` before us
 
 ### Known Gaps
 - Command-list-side handle retention is not implemented; callers must keep resources alive until GPU work completes.
-- Only 2D textures and 2D views are supported; array/3D/cube paths are not implemented.
+- `CreateTextureView` is currently hardcoded to a 2D view type, so non-2D custom view creation paths are not exposed yet.
+- `ShaderDesc.entryPoint` is currently ignored by Vulkan pipeline creation (entry point is fixed to `main`).
 - Metal or other backends do not exist yet.

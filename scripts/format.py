@@ -165,7 +165,18 @@ def git_branch_diff_files() -> list[str]:
         ).decode("utf-8")
     except CalledProcessError:
         return []
-    return [f for f in out.splitlines() if f]
+
+    # Include untracked files so newly created files are formatted in default mode.
+    try:
+        out_u = check_output(["git", "ls-files", "-o", "--exclude-standard"]).decode(
+            "utf-8"
+        )
+    except CalledProcessError:
+        out_u = ""
+
+    branch_files = [f for f in out.splitlines() if f]
+    untracked_files = [f for f in out_u.splitlines() if f]
+    return sorted(set(branch_files + untracked_files))
 
 
 def main() -> int:
