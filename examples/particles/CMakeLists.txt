@@ -36,4 +36,4 @@ if(MSVC)
 endif()
 
 include(${CMAKE_SOURCE_DIR}/cmake/compileshaders.cmake)
-add_shader_directory(particles ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
+add_hlsl_shader_directory(particles ${CMAKE_CURRENT_SOURCE_DIR}/shaders)

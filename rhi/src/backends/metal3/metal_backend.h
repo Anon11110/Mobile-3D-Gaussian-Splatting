@@ -1,10 +1,17 @@
 #pragma once
 
+#include <Foundation/Foundation.hpp>
+#include <Metal/Metal.hpp>
+#include <QuartzCore/QuartzCore.hpp>
+
+#include <array>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <span>
+#include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -13,32 +20,41 @@
 namespace rhi::metal3
 {
 
-[[noreturn]] void ThrowMetalPhase0NotImplemented(const char *apiName);
+class MetalDevice;
 
 class MetalBuffer final : public RefCounter<IRHIBuffer>
 {
   public:
-	explicit MetalBuffer(const BufferDesc &desc);
-	~MetalBuffer() override = default;
+	MetalBuffer(MTL::Buffer *buffer, size_t size, IndexType indexType, MTL::StorageMode storageMode);
+	~MetalBuffer() override;
 
 	void  *Map() override;
 	void   Unmap() override;
 	size_t GetSize() const override;
 
-	void      Update(const void *data, size_t size, size_t offset);
-	IndexType GetIndexType() const;
+	void Update(const void *data, size_t size, size_t offset);
+
+	[[nodiscard]] MTL::Buffer     *GetHandle() const;
+	[[nodiscard]] IndexType        GetIndexType() const;
+	[[nodiscard]] MTL::StorageMode GetStorageMode() const;
+	[[nodiscard]] bool             IsCpuVisible() const;
 
   private:
-	std::vector<std::byte> storage_;
-	IndexType              indexType_ = IndexType::UINT32;
-	bool                   isMapped_  = false;
+	MTL::Buffer     *buffer_      = nullptr;
+	size_t           size_        = 0;
+	IndexType        indexType_   = IndexType::UINT32;
+	MTL::StorageMode storageMode_ = MTL::StorageModePrivate;
+	bool             isMapped_    = false;
 };
 
 class MetalTexture final : public RefCounter<IRHITexture>
 {
   public:
-	explicit MetalTexture(const TextureDesc &desc);
-	~MetalTexture() override = default;
+	MetalTexture(MTL::Texture *texture, const TextureDesc &desc, bool ownsTexture);
+	MetalTexture(MTL::Texture *texture, TextureFormat format, uint32_t width, uint32_t height,
+	             uint32_t depth, uint32_t mipLevels, uint32_t arrayLayers, TextureType type,
+	             bool ownsTexture);
+	~MetalTexture() override;
 
 	uint32_t      GetWidth() const override;
 	uint32_t      GetHeight() const override;
@@ -47,12 +63,19 @@ class MetalTexture final : public RefCounter<IRHITexture>
 	uint32_t      GetArrayLayers() const override;
 	TextureFormat GetFormat() const override;
 
+	[[nodiscard]] MTL::Texture *GetHandle() const;
+	[[nodiscard]] TextureType   GetType() const;
+
   private:
+	MTL::Texture *texture_     = nullptr;
+	bool          ownsTexture_ = false;
+
 	uint32_t      width_       = 0;
 	uint32_t      height_      = 0;
 	uint32_t      depth_       = 0;
 	uint32_t      mipLevels_   = 1;
 	uint32_t      arrayLayers_ = 1;
+	TextureType   type_        = TextureType::TEXTURE_2D;
 	TextureFormat format_      = TextureFormat::UNDEFINED;
 };
 
@@ -71,8 +94,13 @@ class MetalTextureView final : public RefCounter<IRHITextureView>
 	uint32_t      GetBaseArrayLayer() const override;
 	uint32_t      GetArrayLayerCount() const override;
 
+	[[nodiscard]] MTL::Texture *GetHandle() const;
+
   private:
 	MetalTexture *texture_         = nullptr;
+	MTL::Texture *viewTexture_     = nullptr;
+	bool          ownsViewTexture_ = false;
+
 	TextureFormat format_          = TextureFormat::UNDEFINED;
 	uint32_t      baseMipLevel_    = 0;
 	uint32_t      mipLevelCount_   = 1;
@@ -83,33 +111,74 @@ class MetalTextureView final : public RefCounter<IRHITextureView>
 class MetalShader final : public RefCounter<IRHIShader>
 {
   public:
-	explicit MetalShader(const ShaderDesc &desc);
-	~MetalShader() override = default;
+	MetalShader(const ShaderDesc &desc, MTL::Library *library, MTL::Function *function);
+	~MetalShader() override;
 
 	ShaderStage GetStage() const override;
 
+	[[nodiscard]] MTL::Function     *GetFunction() const;
+	[[nodiscard]] const char        *GetEntryPoint() const;
+	[[nodiscard]] const std::string &GetEntryPointString() const;
+
   private:
-	ShaderStage stage_ = ShaderStage::VERTEX;
+	ShaderStage    stage_ = ShaderStage::VERTEX;
+	std::string    entryPoint_;
+	MTL::Library  *library_  = nullptr;
+	MTL::Function *function_ = nullptr;
 };
 
 class MetalPipeline final : public RefCounter<IRHIPipeline>
 {
   public:
-	explicit MetalPipeline(const GraphicsPipelineDesc &desc);
-	explicit MetalPipeline(const ComputePipelineDesc &desc);
-	~MetalPipeline() override = default;
+	MetalPipeline(const GraphicsPipelineDesc &desc, MTL::RenderPipelineState *renderPipelineState,
+	              MTL::DepthStencilState *depthStencilState);
+	MetalPipeline(const ComputePipelineDesc &desc, MTL::ComputePipelineState *computePipelineState,
+	              MTL::Size threadsPerThreadgroup);
+	~MetalPipeline() override;
 
-	PipelineType GetPipelineType() const;
+	[[nodiscard]] PipelineType                                  GetPipelineType() const;
+	[[nodiscard]] MTL::RenderPipelineState                     *GetRenderPipelineState() const;
+	[[nodiscard]] MTL::DepthStencilState                       *GetDepthStencilState() const;
+	[[nodiscard]] MTL::ComputePipelineState                    *GetComputePipelineState() const;
+	[[nodiscard]] MTL::PrimitiveType                            GetPrimitiveType() const;
+	[[nodiscard]] MTL::CullMode                                 GetCullMode() const;
+	[[nodiscard]] MTL::Winding                                  GetFrontFacingWinding() const;
+	[[nodiscard]] MTL::TriangleFillMode                         GetTriangleFillMode() const;
+	[[nodiscard]] bool                                          IsDepthBiasEnabled() const;
+	[[nodiscard]] float                                         GetDepthBiasConstantFactor() const;
+	[[nodiscard]] float                                         GetDepthBiasSlopeFactor() const;
+	[[nodiscard]] float                                         GetDepthBiasClamp() const;
+	[[nodiscard]] const std::vector<PushConstantRange>         &GetPushConstantRanges() const;
+	[[nodiscard]] const std::vector<IRHIDescriptorSetLayout *> &GetDescriptorSetLayouts() const;
+	[[nodiscard]] MTL::Size                                     GetThreadsPerThreadgroup() const;
 
   private:
 	PipelineType pipelineType_ = PipelineType::GRAPHICS;
+
+	MTL::RenderPipelineState  *renderPipelineState_  = nullptr;
+	MTL::DepthStencilState    *depthStencilState_    = nullptr;
+	MTL::ComputePipelineState *computePipelineState_ = nullptr;
+
+	MTL::PrimitiveType    primitiveType_      = MTL::PrimitiveTypeTriangle;
+	MTL::CullMode         cullMode_           = MTL::CullModeNone;
+	MTL::Winding          frontFacingWinding_ = MTL::WindingCounterClockwise;
+	MTL::TriangleFillMode triangleFillMode_   = MTL::TriangleFillModeFill;
+
+	bool  depthBiasEnable_         = false;
+	float depthBiasConstantFactor_ = 0.0f;
+	float depthBiasSlopeFactor_    = 0.0f;
+	float depthBiasClamp_          = 0.0f;
+
+	std::vector<IRHIDescriptorSetLayout *> descriptorSetLayouts_;
+	std::vector<PushConstantRange>         pushConstantRanges_;
+	MTL::Size                              threadsPerThreadgroup_ = {1, 1, 1};
 };
 
 class MetalCommandList final : public RefCounter<IRHICommandList>
 {
   public:
-	explicit MetalCommandList(QueueType queueType);
-	~MetalCommandList() override = default;
+	MetalCommandList(MetalDevice *device, QueueType queueType);
+	~MetalCommandList() override;
 
 	void Begin() override;
 	void End() override;
@@ -163,18 +232,78 @@ class MetalCommandList final : public RefCounter<IRHICommandList>
 	void AcquireFromQueue(QueueType srcQueue, std::span<const BufferTransition> buffer_transitions,
 	                      std::span<const TextureTransition> texture_transitions) override;
 
-	QueueType GetQueueType() const;
+	[[nodiscard]] QueueType           GetQueueType() const;
+	[[nodiscard]] MTL::CommandBuffer *GetHandle() const;
 
   private:
-	QueueType queueType_   = QueueType::GRAPHICS;
-	bool      isRecording_ = false;
+	void RequireRecording(const char *apiName) const;
+	void EndActiveEncoders();
+
+	MTL::BlitCommandEncoder    *EnsureBlitEncoder();
+	MTL::ComputeCommandEncoder *EnsureComputeEncoder();
+
+	void ApplyCurrentPipelineState();
+	void ApplyDescriptorSetBindings(uint32_t setIndex, class MetalDescriptorSet *descriptorSet,
+	                                std::span<const uint32_t> dynamicOffsets);
+	void TrackBufferBinding(ShaderStageFlags stageFlags, uint32_t slot, MTL::Buffer *buffer,
+	                        size_t offset, size_t range);
+	void ApplyTopLevelArgumentBufferForRenderStage(ShaderStageFlags stage);
+	void ApplyTopLevelArgumentBufferForCompute();
+	void ClearTrackedBindings();
+	void EnsureTopLevelArgumentBufferCapacity(size_t requiredBytes);
+	void ResetTopLevelArgumentBufferAllocator();
+
+	struct TopLevelArgumentAllocation
+	{
+		std::byte *cpuPtr = nullptr;
+		size_t     offset = 0;
+	};
+
+	[[nodiscard]] TopLevelArgumentAllocation AllocateTopLevelArgumentData(size_t bytes, size_t alignment);
+
+  private:
+	struct TrackedBufferBinding
+	{
+		MTL::Buffer *buffer = nullptr;
+		uint64_t     offset = 0;
+		uint64_t     size   = 0;
+		bool         valid  = false;
+	};
+
+	MetalDevice *device_    = nullptr;
+	QueueType    queueType_ = QueueType::GRAPHICS;
+
+	NS::AutoreleasePool *autoreleasePool_ = nullptr;
+	MTL::CommandBuffer  *commandBuffer_   = nullptr;
+
+	MTL::RenderCommandEncoder  *renderEncoder_  = nullptr;
+	MTL::ComputeCommandEncoder *computeEncoder_ = nullptr;
+	MTL::BlitCommandEncoder    *blitEncoder_    = nullptr;
+
+	MetalPipeline *currentPipeline_ = nullptr;
+
+	MetalBuffer *indexBuffer_       = nullptr;
+	size_t       indexBufferOffset_ = 0;
+	IndexType    indexType_         = IndexType::UINT32;
+
+	// Metal shader converter top-level argument buffer uses slot 2.
+	// Track root CBV bindings by register index [0..30].
+	std::array<TrackedBufferBinding, 31> vertexTrackedBuffers_{};
+	std::array<TrackedBufferBinding, 31> fragmentTrackedBuffers_{};
+	std::array<TrackedBufferBinding, 31> computeTrackedBuffers_{};
+	MTL::Buffer                         *pushConstantBackingBuffer_      = nullptr;
+	MTL::Buffer                         *topLevelArgumentBuffer_         = nullptr;
+	size_t                               topLevelArgumentBufferCapacity_ = 0;
+	size_t                               topLevelArgumentBufferOffset_   = 0;
+
+	bool isRecording_ = false;
 };
 
 class MetalSwapchain final : public RefCounter<IRHISwapchain>
 {
   public:
-	explicit MetalSwapchain(const SwapchainDesc &desc);
-	~MetalSwapchain() override = default;
+	MetalSwapchain(MetalDevice *device, const SwapchainDesc &desc);
+	~MetalSwapchain() override;
 
 	SwapchainStatus  AcquireNextImage(uint32_t &imageIndex, IRHISemaphore *signalSemaphore = nullptr) override;
 	SwapchainStatus  Present(uint32_t imageIndex, IRHISemaphore *waitSemaphore = nullptr) override;
@@ -185,12 +314,22 @@ class MetalSwapchain final : public RefCounter<IRHISwapchain>
 	SurfaceTransform GetPreTransform() const override;
 
   private:
-	uint32_t                       width_      = 0;
-	uint32_t                       height_     = 0;
-	uint32_t                       imageCount_ = 0;
-	uint32_t                       frameIndex_ = 0;
-	std::vector<TextureHandle>     backBuffers_;
-	std::vector<TextureViewHandle> backBufferViews_;
+	void ReleaseDrawables();
+	void RebuildBackBufferWrappers(uint32_t index, CA::MetalDrawable *drawable);
+
+  private:
+	MetalDevice    *device_     = nullptr;
+	CA::MetalLayer *layer_      = nullptr;
+	bool            ownsLayer_  = false;
+	TextureFormat   format_     = TextureFormat::B8G8R8A8_UNORM;
+	uint32_t        width_      = 0;
+	uint32_t        height_     = 0;
+	uint32_t        imageCount_ = 0;
+	uint32_t        frameIndex_ = 0;
+
+	std::vector<CA::MetalDrawable *> drawables_;
+	std::vector<TextureHandle>       backBuffers_;
+	std::vector<TextureViewHandle>   backBufferViews_;
 };
 
 class MetalSemaphore final : public RefCounter<IRHISemaphore>
@@ -238,22 +377,26 @@ class MetalDescriptorSetLayout final : public RefCounter<IRHIDescriptorSetLayout
 	explicit MetalDescriptorSetLayout(const DescriptorSetLayoutDesc &desc);
 	~MetalDescriptorSetLayout() override = default;
 
-	const DescriptorSetLayoutDesc &GetDesc() const;
+	[[nodiscard]] const DescriptorSetLayoutDesc &GetDesc() const;
+	[[nodiscard]] const DescriptorBinding       *FindBinding(uint32_t binding) const;
 
   private:
-	DescriptorSetLayoutDesc desc_{};
+	DescriptorSetLayoutDesc              desc_{};
+	std::unordered_map<uint32_t, size_t> bindingLookup_;
 };
 
 class MetalSampler final : public RefCounter<IRHISampler>
 {
   public:
-	explicit MetalSampler(const SamplerDesc &desc);
-	~MetalSampler() override = default;
+	MetalSampler(const SamplerDesc &desc, MTL::SamplerState *samplerState);
+	~MetalSampler() override;
 
-	const SamplerDesc &GetDesc() const;
+	[[nodiscard]] const SamplerDesc &GetDesc() const;
+	[[nodiscard]] MTL::SamplerState *GetHandle() const;
 
   private:
-	SamplerDesc desc_{};
+	SamplerDesc        desc_{};
+	MTL::SamplerState *samplerState_ = nullptr;
 };
 
 class MetalDescriptorSet final : public RefCounter<IRHIDescriptorSet>
@@ -264,6 +407,12 @@ class MetalDescriptorSet final : public RefCounter<IRHIDescriptorSet>
 
 	void BindBuffer(uint32_t binding, const BufferBinding &bufferBinding) override;
 	void BindTexture(uint32_t binding, const TextureBinding &textureBinding) override;
+
+	[[nodiscard]] const MetalDescriptorSetLayout                         *GetLayout() const;
+	[[nodiscard]] const std::vector<std::pair<uint32_t, BufferBinding>>  &GetBufferBindings() const;
+	[[nodiscard]] const std::vector<std::pair<uint32_t, TextureBinding>> &GetTextureBindings() const;
+	[[nodiscard]] const BufferBinding                                    *FindBufferBinding(uint32_t binding) const;
+	[[nodiscard]] const TextureBinding                                   *FindTextureBinding(uint32_t binding) const;
 
   private:
 	RefCntPtr<IRHIDescriptorSetLayout>               layout_;
@@ -335,8 +484,22 @@ class MetalDevice final : public RefCounter<IRHIDevice>
 
 	GpuMemoryStats GetMemoryStats() const override;
 
+	[[nodiscard]] MTL::Device       *GetMTLDevice() const;
+	[[nodiscard]] MTL::CommandQueue *GetCommandQueue(QueueType queueType) const;
+	[[nodiscard]] bool               IsUnifiedMemory() const;
+
   private:
 	void SignalFence(IRHIFence *fence);
+	void WaitForQueue(MTL::CommandQueue *queue) const;
+
+  private:
+	MTL::Device       *device_        = nullptr;
+	MTL::CommandQueue *graphicsQueue_ = nullptr;
+	MTL::CommandQueue *computeQueue_  = nullptr;
+	MTL::CommandQueue *transferQueue_ = nullptr;
+	bool               unifiedMemory_ = true;
+
+	mutable std::mutex submitMutex_;
 };
 
 }        // namespace rhi::metal3

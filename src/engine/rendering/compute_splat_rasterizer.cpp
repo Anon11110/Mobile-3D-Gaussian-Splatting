@@ -189,7 +189,7 @@ void ComputeSplatRasterizer::CreateComputePipelines()
 
 	// --- Preprocess pipeline ---
 	rhi::ShaderHandle preprocessShader = shaderFactory.getOrCreateShader(
-	    "shaders/compiled/preprocess.comp.spv",
+	    "shaders/compiled/preprocess_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	if (!preprocessShader)
@@ -245,7 +245,7 @@ void ComputeSplatRasterizer::CreateComputePipelines()
 
 	// --- Identify Ranges pipeline ---
 	rhi::ShaderHandle rangesShader = shaderFactory.getOrCreateShader(
-	    "shaders/compiled/identify_ranges.comp.spv",
+	    "shaders/compiled/identify_ranges_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	if (!rangesShader)
@@ -283,7 +283,7 @@ void ComputeSplatRasterizer::CreateComputePipelines()
 
 	// --- Rasterize pipeline ---
 	rhi::ShaderHandle rasterShader = shaderFactory.getOrCreateShader(
-	    "shaders/compiled/splat_raster_compute.comp.spv",
+	    "shaders/compiled/splat_raster_compute_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	if (!rasterShader)

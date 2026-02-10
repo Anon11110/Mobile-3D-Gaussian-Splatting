@@ -41,6 +41,6 @@ if(MSVC)
     set_property(TARGET triangle PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:triangle>)
 endif()
 
-# Use the improved shader compilation system
+# Use HLSL shader compilation for all backends (Vulkan: HLSL→SPIR-V, Metal3: HLSL→DXIL→MetalIR)
 include(${CMAKE_SOURCE_DIR}/cmake/compileshaders.cmake)
-add_shader_directory(triangle ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
+add_hlsl_shader_directory(triangle ${CMAKE_CURRENT_SOURCE_DIR}/shaders)

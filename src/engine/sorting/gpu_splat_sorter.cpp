@@ -141,33 +141,33 @@ void GpuSplatSorter::CreateComputePipelines()
 	ShaderFactory shaderFactory(device, vfs);
 
 	rhi::ShaderHandle depthCalcShader = shaderFactory.getOrCreateShader(
-	    "shaders/compiled/depth_calc.comp.spv",
+	    "shaders/compiled/depth_calc_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	// Portable shaders
 	rhi::ShaderHandle histogramShader = shaderFactory.getOrCreateShader(
-	    "shaders/compiled/radix_histogram.comp.spv",
+	    "shaders/compiled/radix_histogram_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	rhi::ShaderHandle radixPrefixScanShader = shaderFactory.getOrCreateShader(
-	    "shaders/compiled/radix_prefix_scan.comp.spv",
+	    "shaders/compiled/radix_prefix_scan_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	// Subgroup-optimized shaders
 	rhi::ShaderHandle histogramSubgroupShader = shaderFactory.getOrCreateShader(
-	    "shaders/compiled/radix_histogram_subgroup.comp.spv",
+	    "shaders/compiled/radix_histogram_subgroup_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	rhi::ShaderHandle radixPrefixScanSubgroupShader = shaderFactory.getOrCreateShader(
-	    "shaders/compiled/radix_prefix_scan_subgroup.comp.spv",
+	    "shaders/compiled/radix_prefix_scan_subgroup_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	rhi::ShaderHandle scatterPairsShader = shaderFactory.getOrCreateShader(
-	    "shaders/compiled/radix_scatter_pairs.comp.spv",
+	    "shaders/compiled/radix_scatter_pairs_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	rhi::ShaderHandle scatterPairsPrescanShader = shaderFactory.getOrCreateShader(
-	    "shaders/compiled/radix_scatter_pairs_prescan.comp.spv",
+	    "shaders/compiled/radix_scatter_pairs_prescan_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	// Create descriptor set layouts
@@ -2139,13 +2139,13 @@ void GpuSplatSorter::ReadTimingResults()
 
 	uint64_t timestamps[2];
 	bool     valid = device->GetQueryPoolResults(
-        timestampQueryPool.Get(),
-        timestampOffset,
-        2,
-        timestamps,
-        sizeof(timestamps),
-        sizeof(uint64_t),
-        rhi::QueryResultFlags::WAIT);
+	        timestampQueryPool.Get(),
+	        timestampOffset,
+	        2,
+	        timestamps,
+	        sizeof(timestamps),
+	        sizeof(uint64_t),
+	        rhi::QueryResultFlags::WAIT);
 
 	if (valid)
 	{
@@ -2167,13 +2167,13 @@ bool GpuSplatSorter::ReadTimingResultsNonBlocking()
 
 	uint64_t timestamps[2];
 	bool     valid = device->GetQueryPoolResults(
-        timestampQueryPool.Get(),
-        timestampOffset,
-        2,
-        timestamps,
-        sizeof(timestamps),
-        sizeof(uint64_t),
-        rhi::QueryResultFlags::NONE);
+	        timestampQueryPool.Get(),
+	        timestampOffset,
+	        2,
+	        timestamps,
+	        sizeof(timestamps),
+	        sizeof(uint64_t),
+	        rhi::QueryResultFlags::NONE);
 
 	if (valid)
 	{

@@ -149,8 +149,8 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	}
 
 	// Load splat rendering shaders
-	m_vertexShader   = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster.vert.spv", rhi::ShaderStage::VERTEX);
-	m_fragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster.frag.spv", rhi::ShaderStage::FRAGMENT);
+	m_vertexShader   = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster_vs", rhi::ShaderStage::VERTEX);
+	m_fragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster_fs", rhi::ShaderStage::FRAGMENT);
 	LOG_INFO("Render shaders loaded: vertex={}, fragment={}", m_vertexShader != nullptr, m_fragmentShader != nullptr);
 
 	// Create UBO
@@ -1577,8 +1577,8 @@ void HybridSplatRendererApp::RecreateSwapchain()
 #else
 	// On Android, swapchain is already resized by the platform
 	rhi::IRHITextureView *resizeBackbufferView = swapchain->GetBackBufferView(0);
-	uint32_t              width                = resizeBackbufferView->GetWidth();
-	uint32_t              height               = resizeBackbufferView->GetHeight();
+	uint32_t width = resizeBackbufferView->GetWidth();
+	uint32_t height = resizeBackbufferView->GetHeight();
 #endif
 
 	// Update camera aspect ratio
@@ -1909,13 +1909,13 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 	{
 		uint64_t fragmentInvocations;
 		bool     statsValid = device->GetQueryPoolResults(
-            m_pipelineStatsQueryPool.Get(),
-            readFrameIndex,
-            1,
-            &fragmentInvocations,
-            sizeof(fragmentInvocations),
-            sizeof(uint64_t),
-            rhi::QueryResultFlags::NONE);
+		        m_pipelineStatsQueryPool.Get(),
+		        readFrameIndex,
+		        1,
+		        &fragmentInvocations,
+		        sizeof(fragmentInvocations),
+		        sizeof(uint64_t),
+		        rhi::QueryResultFlags::NONE);
 
 		if (statsValid)
 		{

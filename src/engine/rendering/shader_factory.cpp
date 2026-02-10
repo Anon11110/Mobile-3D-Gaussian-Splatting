@@ -29,10 +29,14 @@ ShaderFactory::ShaderFactory(rhi::IRHIDevice *device, container::shared_ptr<vfs:
 rhi::ShaderHandle ShaderFactory::getOrCreateShader(
     const container::string           &filepath,
     rhi::ShaderStage                   stage,
-    container::span<const ShaderMacro> macros)
+    container::span<const ShaderMacro> macros,
+    const char                        *entryPoint)
 {
+	container::string resolvedPath = resolveBackendShaderPath(filepath);
+	container::string entryPointStr(entryPoint != nullptr ? entryPoint : "main");
+
 	// Generate cache key for this shader variant
-	size_t cacheKey = generateCacheKey(filepath, stage, macros);
+	size_t cacheKey = generateCacheKey(resolvedPath, stage, macros, entryPointStr);
 
 	// Check if shader is already cached
 	auto it = m_shaderCache.find(cacheKey);
@@ -49,10 +53,10 @@ rhi::ShaderHandle ShaderFactory::getOrCreateShader(
 	}
 
 	// Load shader bytecode (from cache or file)
-	container::vector<uint8_t> bytecode = loadShaderBytecode(filepath);
+	container::vector<uint8_t> bytecode = loadShaderBytecode(resolvedPath);
 	if (bytecode.empty())
 	{
-		LOG_ERROR("Failed to load shader bytecode from: {}", container::to_std_string(filepath));
+		LOG_ERROR("Failed to load shader bytecode from: {}", container::to_std_string(resolvedPath));
 		return nullptr;
 	}
 
@@ -61,20 +65,20 @@ rhi::ShaderHandle ShaderFactory::getOrCreateShader(
 	shaderDesc.stage      = stage;
 	shaderDesc.code       = bytecode.data();
 	shaderDesc.codeSize   = bytecode.size();
-	shaderDesc.entryPoint = "main";        // SPIR-V shaders typically use "main"
+	shaderDesc.entryPoint = entryPointStr.c_str();
 
 	// Create the shader object
 	rhi::ShaderHandle shader = m_device->CreateShader(shaderDesc);
 	if (!shader)
 	{
 		LOG_ERROR("Failed to create shader from: {} (stage: {})",
-		          container::to_std_string(filepath),
+		          container::to_std_string(resolvedPath),
 		          static_cast<int>(stage));
 		return nullptr;
 	}
 
 	LOG_DEBUG("Successfully created shader from: {} (stage: {}, size: {} bytes)",
-	          container::to_std_string(filepath),
+	          container::to_std_string(resolvedPath),
 	          static_cast<int>(stage),
 	          bytecode.size());
 
@@ -83,6 +87,35 @@ rhi::ShaderHandle ShaderFactory::getOrCreateShader(
 	m_shaderCache[cacheKey] = shader.Get();
 
 	return shader;
+}
+
+container::string ShaderFactory::resolveBackendShaderPath(const container::string &filepath) const
+{
+	std::string stdPath = container::to_std_string(filepath);
+
+	// Handle explicit .spv extension (backward compatibility)
+	const std::string spvExt = ".spv";
+	if (stdPath.size() >= spvExt.size() &&
+	    stdPath.substr(stdPath.size() - spvExt.size()) == spvExt)
+	{
+#ifdef RHI_METAL3
+		return container::to_string(
+		    stdPath.substr(0, stdPath.size() - spvExt.size()) + ".metallib");
+#endif
+		return filepath;
+	}
+
+	// Handle extension-less paths (new approach)
+	// Append backend-specific extension
+#ifdef RHI_METAL3
+	return container::to_string(stdPath + ".metallib");
+#elif defined(RHI_VULKAN)
+	return container::to_string(stdPath + ".spv");
+#elif defined(RHI_DIRECTX12)
+	return container::to_string(stdPath + ".dxil");
+#else
+#	error "Unknown RHI backend - define RHI_VULKAN, RHI_METAL3, or RHI_DIRECTX12"
+#endif
 }
 
 void ShaderFactory::clearCache()
@@ -161,7 +194,8 @@ container::vector<uint8_t> ShaderFactory::loadShaderBytecode(const container::st
 
 size_t ShaderFactory::generateCacheKey(const container::string           &filepath,
                                        rhi::ShaderStage                   stage,
-                                       container::span<const ShaderMacro> macros) const
+                                       container::span<const ShaderMacro> macros,
+                                       const container::string           &entryPoint) const
 {
 	// Use the custom hash implementation from container::hash
 	container::hash<container::string> stringHasher;
@@ -183,6 +217,9 @@ size_t ShaderFactory::generateCacheKey(const container::string           &filepa
 		size_t valueHash = stringHasher(macro.value);
 		hash ^= (valueHash << 3) | (valueHash >> (sizeof(size_t) * 8 - 3));
 	}
+
+	size_t entryPointHash = stringHasher(entryPoint);
+	hash ^= (entryPointHash << 4) | (entryPointHash >> (sizeof(size_t) * 8 - 4));
 
 	return hash;
 }

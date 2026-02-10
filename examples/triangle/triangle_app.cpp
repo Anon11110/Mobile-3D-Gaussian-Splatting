@@ -49,12 +49,20 @@ bool TriangleApp::OnInit(app::DeviceManager *deviceManager)
 	auto vfs        = m_deviceManager->GetVFS();
 	m_shaderFactory = container::make_unique<engine::ShaderFactory>(device, vfs);
 
+	// All backends now use HLSL shaders with these entry points
+	constexpr const char *kTriangleVertexEntryPoint   = "vs_main";
+	constexpr const char *kTriangleFragmentEntryPoint = "fs_main";
+
 	m_vertexShader = m_shaderFactory->getOrCreateShader(
-	    "shaders/compiled/triangle.vert.spv",
-	    rhi::ShaderStage::VERTEX);
+	    "shaders/compiled/triangle_vs",
+	    rhi::ShaderStage::VERTEX,
+	    {},
+	    kTriangleVertexEntryPoint);
 	m_fragmentShader = m_shaderFactory->getOrCreateShader(
-	    "shaders/compiled/triangle.frag.spv",
-	    rhi::ShaderStage::FRAGMENT);
+	    "shaders/compiled/triangle_fs",
+	    rhi::ShaderStage::FRAGMENT,
+	    {},
+	    kTriangleFragmentEntryPoint);
 
 	// Create descriptor set layout for uniform buffer
 	rhi::DescriptorSetLayoutDesc layoutDesc{};

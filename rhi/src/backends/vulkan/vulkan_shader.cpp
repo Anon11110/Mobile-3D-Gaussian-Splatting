@@ -1,4 +1,5 @@
 #include <stdexcept>
+#include <utility>
 
 #include "vulkan_backend.h"
 
@@ -6,7 +7,7 @@ namespace rhi::vulkan
 {
 
 VulkanShader::VulkanShader(VkDevice device, const ShaderDesc &desc) :
-    device(device), shaderModule(VK_NULL_HANDLE), stage(desc.stage)
+    device(device), shaderModule(VK_NULL_HANDLE), stage(desc.stage), entryPoint(desc.entryPoint != nullptr ? desc.entryPoint : "main")
 {
 	VkShaderModuleCreateInfo createInfo{};
 	createInfo.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -30,11 +31,13 @@ VulkanShader::~VulkanShader()
 VulkanShader::VulkanShader(VulkanShader &&other) noexcept :
     device(other.device),
     shaderModule(other.shaderModule),
-    stage(other.stage)
+    stage(other.stage),
+    entryPoint(std::move(other.entryPoint))
 {
 	other.device       = VK_NULL_HANDLE;
 	other.shaderModule = VK_NULL_HANDLE;
 	other.stage        = ShaderStage::VERTEX;
+	other.entryPoint   = "main";
 }
 
 VulkanShader &VulkanShader::operator=(VulkanShader &&other) noexcept
@@ -49,10 +52,12 @@ VulkanShader &VulkanShader::operator=(VulkanShader &&other) noexcept
 		device       = other.device;
 		shaderModule = other.shaderModule;
 		stage        = other.stage;
+		entryPoint   = std::move(other.entryPoint);
 
 		other.device       = VK_NULL_HANDLE;
 		other.shaderModule = VK_NULL_HANDLE;
 		other.stage        = ShaderStage::VERTEX;
+		other.entryPoint   = "main";
 	}
 	return *this;
 }

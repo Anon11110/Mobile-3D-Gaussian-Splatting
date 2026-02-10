@@ -12,6 +12,18 @@
 namespace msplat::app
 {
 
+// Get the name of the current RHI backend
+static const char *GetRHIBackendName()
+{
+#if defined(RHI_VULKAN)
+	return "Vulkan";
+#elif defined(RHI_METAL3)
+	return "Metal3";
+#else
+	return "Unknown";
+#endif
+}
+
 // Framebuffer size callback that bridges to DeviceManager
 static void OnFramebufferResizeCallback(IApplication *app, int width, int height);
 
@@ -156,8 +168,10 @@ int DeviceManager::Run(int width, int height, const char *title)
 			return -1;
 		}
 
-		// Initialize window
-		if (!m_platformAdapter->Initialize(width, height, title))
+		// Initialize window with RHI backend name in title
+		char titleBuffer[256];
+		snprintf(titleBuffer, sizeof(titleBuffer), "%s (%s)", title, GetRHIBackendName());
+		if (!m_platformAdapter->Initialize(width, height, titleBuffer))
 		{
 			LOG_FATAL("Failed to initialize platform adapter");
 			Shutdown();

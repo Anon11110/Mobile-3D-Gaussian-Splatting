@@ -21,14 +21,14 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc
 	vertShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	vertShaderStageInfo.stage  = VK_SHADER_STAGE_VERTEX_BIT;
 	vertShaderStageInfo.module = vertexShader->GetHandle();
-	vertShaderStageInfo.pName  = "main";
+	vertShaderStageInfo.pName  = vertexShader->GetEntryPoint();
 	shaderStages.push_back(vertShaderStageInfo);
 
 	VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
 	fragShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	fragShaderStageInfo.stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
 	fragShaderStageInfo.module = fragmentShader->GetHandle();
-	fragShaderStageInfo.pName  = "main";
+	fragShaderStageInfo.pName  = fragmentShader->GetEntryPoint();
 	shaderStages.push_back(fragShaderStageInfo);
 
 	// Vertex input
@@ -250,7 +250,7 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const ComputePipelineDesc &desc)
 	computeShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	computeShaderStageInfo.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
 	computeShaderStageInfo.module = computeShader->GetHandle();
-	computeShaderStageInfo.pName  = "main";
+	computeShaderStageInfo.pName  = computeShader->GetEntryPoint();
 
 	// Collect descriptor set layouts
 	std::vector<VkDescriptorSetLayout> descriptorSetLayouts;

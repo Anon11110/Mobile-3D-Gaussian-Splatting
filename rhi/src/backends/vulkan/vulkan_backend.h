@@ -3,6 +3,7 @@
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
 
+#include <string>
 #include <vector>
 
 #include "../../../include/rhi/rhi.h"
@@ -193,6 +194,7 @@ class VulkanShader final : public RefCounter<IRHIShader>
 	VkDevice       device;
 	VkShaderModule shaderModule;
 	ShaderStage    stage;
+	std::string    entryPoint;
 
   public:
 	VulkanShader(VkDevice device, const ShaderDesc &desc);
@@ -206,6 +208,10 @@ class VulkanShader final : public RefCounter<IRHIShader>
 	ShaderStage GetStage() const override
 	{
 		return stage;
+	}
+	const char *GetEntryPoint() const
+	{
+		return entryPoint.c_str();
 	}
 	[[nodiscard]] VkShaderModule GetHandle() const
 	{

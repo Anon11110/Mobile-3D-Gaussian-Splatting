@@ -6,33 +6,62 @@
 namespace rhi::metal3
 {
 
-MetalBuffer::MetalBuffer(const BufferDesc &desc) :
-    storage_(desc.size), indexType_(desc.indexType)
-{}
+MetalBuffer::MetalBuffer(MTL::Buffer *buffer, size_t size, IndexType indexType, MTL::StorageMode storageMode) :
+    buffer_(buffer), size_(size), indexType_(indexType), storageMode_(storageMode)
+{
+	if (buffer_ == nullptr)
+	{
+		throw std::invalid_argument("MetalBuffer requires a valid MTL::Buffer");
+	}
+}
+
+MetalBuffer::~MetalBuffer()
+{
+	if (buffer_ != nullptr)
+	{
+		buffer_->release();
+		buffer_ = nullptr;
+	}
+}
 
 void *MetalBuffer::Map()
 {
-	isMapped_ = true;
-	if (storage_.empty())
+	if (!IsCpuVisible())
 	{
-		return nullptr;
+		throw std::logic_error("Cannot map a private Metal buffer");
 	}
-	return storage_.data();
+
+	isMapped_ = true;
+	return buffer_->contents();
 }
 
 void MetalBuffer::Unmap()
 {
+	if (!isMapped_)
+	{
+		return;
+	}
+
+	if (storageMode_ == MTL::StorageModeManaged)
+	{
+		buffer_->didModifyRange(NS::Range(0, size_));
+	}
+
 	isMapped_ = false;
 }
 
 size_t MetalBuffer::GetSize() const
 {
-	return storage_.size();
+	return size_;
 }
 
 void MetalBuffer::Update(const void *data, size_t size, size_t offset)
 {
-	if (offset > storage_.size() || size > (storage_.size() - offset))
+	if (!IsCpuVisible())
+	{
+		throw std::logic_error("Update requires CPU-visible Metal buffer (shared/managed)");
+	}
+	if (offset > size_ || size > (size_ - offset))
 	{
 		throw std::out_of_range("MetalBuffer::Update range exceeds buffer size");
 	}
@@ -45,13 +74,31 @@ void MetalBuffer::Update(const void *data, size_t size, size_t offset)
 		return;
 	}
 
-	std::byte *dst = storage_.data() + offset;
-	std::memcpy(dst, data, size);
+	std::memcpy(static_cast<std::byte *>(buffer_->contents()) + offset, data, size);
+	if (storageMode_ == MTL::StorageModeManaged)
+	{
+		buffer_->didModifyRange(NS::Range(offset, size));
+	}
+}
+
+MTL::Buffer *MetalBuffer::GetHandle() const
+{
+	return buffer_;
 }
 
 IndexType MetalBuffer::GetIndexType() const
 {
 	return indexType_;
+}
+
+MTL::StorageMode MetalBuffer::GetStorageMode() const
+{
+	return storageMode_;
+}
+
+bool MetalBuffer::IsCpuVisible() const
+{
+	return storageMode_ == MTL::StorageModeShared || storageMode_ == MTL::StorageModeManaged;
 }
 
 }        // namespace rhi::metal3

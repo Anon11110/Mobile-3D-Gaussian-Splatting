@@ -55,21 +55,33 @@ class ShaderFactory
 
 	/**
 	 * @brief Loads a shader or returns a cached instance.
-	 * @param filepath Path to the compiled shader file (e.g., "shaders/compiled/basic.vert.spv")
+	 * @param filepath Path to the compiled shader WITHOUT backend extension.
+	 *                 Examples:
+	 *                   - "shaders/compiled/triangle_vs" → .spv (Vulkan) or .metallib (Metal)
+	 *                   - "shaders/compiled/lighting_fs" → .spv (Vulkan) or .metallib (Metal)
+	 *                   - "shaders/compiled/particles_cs" → .spv (Vulkan) or .metallib (Metal)
+	 *
+	 *                 Naming convention: <name>_<stage> where stage is vs/fs/cs/etc.
+	 *                 ShaderFactory automatically appends the backend-specific extension.
+	 *
+	 *                 Legacy: Paths ending in .spv are also supported for backward compatibility.
 	 * @param stage The shader stage (VERTEX, FRAGMENT, or COMPUTE)
 	 * @param macros Optional array of macros for shader permutations (currently reserved for future use)
+	 * @param entryPoint The shader entry point function name (default: "main")
 	 * @return A ShaderHandle to the shader object, or nullptr on failure
 	 *
 	 * This method will:
-	 * 1. Check if the shader is already cached (based on filepath + stage + macros)
-	 * 2. If not cached, load the bytecode (checking bytecode cache first)
-	 * 3. Create the shader object via RHI
-	 * 4. Cache and return the result
+	 * 1. Resolve backend-specific path (e.g., append .spv or .metallib)
+	 * 2. Check if the shader is already cached (based on filepath + stage + macros + entryPoint)
+	 * 3. If not cached, load the bytecode (checking bytecode cache first)
+	 * 4. Create the shader object via RHI
+	 * 5. Cache and return the result
 	 */
 	rhi::ShaderHandle getOrCreateShader(
 	    const container::string           &filepath,
 	    rhi::ShaderStage                   stage,
-	    container::span<const ShaderMacro> macros = {});
+	    container::span<const ShaderMacro> macros     = {},
+	    const char                        *entryPoint = "main");
 
 	/**
 	 * @brief Clears all internal caches.
@@ -131,6 +143,14 @@ class ShaderFactory
 	container::vector<uint8_t> loadShaderBytecode(const container::string &filepath);
 
 	/**
+	 * @brief Resolve backend-specific shader path.
+	 *
+	 * Metal backend expects .metallib bytecode while Vulkan expects .spv.
+	 * This keeps call sites backend-agnostic.
+	 */
+	container::string resolveBackendShaderPath(const container::string &filepath) const;
+
+	/**
 	 * @brief Generates a unique cache key for a shader variant.
 	 * @param filepath The shader file path
 	 * @param stage The shader stage
@@ -142,7 +162,8 @@ class ShaderFactory
 	 */
 	size_t generateCacheKey(const container::string           &filepath,
 	                        rhi::ShaderStage                   stage,
-	                        container::span<const ShaderMacro> macros) const;
+	                        container::span<const ShaderMacro> macros,
+	                        const container::string           &entryPoint) const;
 
 	// Non-owning pointer to the RHI device
 	rhi::IRHIDevice *m_device;

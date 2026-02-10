@@ -40,6 +40,8 @@ SKIPPED_FILES = {
 # Edit this list to add/remove directories.
 FORMAT_DIRS = [
     "rhi/src/",
+    "rhi/src/backends/metal3/",
+    "rhi/src/backends/vulkan/",
     "rhi/include/",
     "examples/triangle/",
     "examples/unit-tests/",

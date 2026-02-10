@@ -61,7 +61,7 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 	m_shaderFactory = container::make_unique<engine::ShaderFactory>(device);
 
 	m_computeShader = m_shaderFactory->getOrCreateShader(
-	    "shaders/compiled/particle_compute.comp.spv",
+	    "shaders/compiled/particle_compute_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	// Create compute descriptor set layout
@@ -116,10 +116,10 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 
 	// --- Graphics Resources for Particles ---
 	m_vertexShader = m_shaderFactory->getOrCreateShader(
-	    "shaders/compiled/particle_render.vert.spv",
+	    "shaders/compiled/particle_render_vs",
 	    rhi::ShaderStage::VERTEX);
 	m_fragmentShader = m_shaderFactory->getOrCreateShader(
-	    "shaders/compiled/particle_render.frag.spv",
+	    "shaders/compiled/particle_render_fs",
 	    rhi::ShaderStage::FRAGMENT);
 
 	// Create MVP uniform buffer
@@ -191,10 +191,10 @@ bool ParticlesApp::OnInit(app::DeviceManager *deviceManager)
 	// Always initialize debug resources for runtime toggling
 
 	m_debugVertexShader = m_shaderFactory->getOrCreateShader(
-	    "shaders/compiled/debug_sphere.vert.spv",
+	    "shaders/compiled/debug_sphere_vs",
 	    rhi::ShaderStage::VERTEX);
 	m_debugFragmentShader = m_shaderFactory->getOrCreateShader(
-	    "shaders/compiled/debug_sphere.frag.spv",
+	    "shaders/compiled/debug_sphere_fs",
 	    rhi::ShaderStage::FRAGMENT);
 
 	// Generate sphere wireframe with icosahedron subdivision
