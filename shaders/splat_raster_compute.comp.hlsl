@@ -52,8 +52,8 @@ void main(uint3 localID : SV_GroupThreadID, uint3 groupID : SV_GroupID, uint3 gl
 
                 GaussianShared gs;
                 gs.screenPos     = g.screenPos;
-                gs.conicXY       = PackFloat16x2(g.conic.xy);
-                gs.conicZOpacity = PackFloat16x2(float2(g.conic.z, g.opacity));
+                gs.conicXY       = PackFloat16x2(g.conicOpacity.xy);
+                gs.conicZOpacity = PackFloat16x2(g.conicOpacity.zw);  // conic.z + opacity
                 gs.colorRG       = PackFloat16x2(g.color.rg);
                 gs.colorBA       = PackFloat16x2(g.color.ba);
                 sharedSplats[lid] = gs;

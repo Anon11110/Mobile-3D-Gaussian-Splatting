@@ -6,13 +6,12 @@
 // Gaussian2D: Pre-computed 2D projection data for rasterization
 struct Gaussian2D
 {
-    float2 screenPos;   // Screen-space center position (pixels)
-    float3 conic;       // Inverse 2D covariance matrix (a, b, c)
-                        // where the quadratic form is: a*x^2 + 2*b*x*y + c*y^2
-    float  opacity;     // Pre-multiplied opacity (after EWA alpha compensation)
-    float4 color;       // Final RGB color (after SH evaluation) + alpha
-    float  radius;      // Maximum bounding radius for tile coverage (pixels)
-    float  depth;       // Linear view-space depth (for debugging/verification)
+    float4 conicOpacity;    // Inverse 2D covariance (a, b, c) + opacity in w
+                            // Quadratic form: a*x^2 + 2*b*x*y + c*y^2
+    float4 color;           // Final RGB color (after SH evaluation) + alpha
+    float2 screenPos;       // Screen-space center position (pixels)
+    float  radius;          // Maximum bounding radius for tile coverage (pixels)
+    float  depth;           // Linear view-space depth (for debugging/verification)
 };
 // Size: 48 bytes (12 floats), naturally aligned
 

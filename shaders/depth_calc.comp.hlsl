@@ -1,5 +1,5 @@
 // Binding 0: Positions buffer
-[[vk::binding(0, 0)]] StructuredBuffer<float3> positions;
+[[vk::binding(0, 0)]] StructuredBuffer<float4> positions;
 
 // Binding 1: Output buffer for sortable depth keys
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> splatKeys;
@@ -40,7 +40,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     // Get local position and transform to world space
-    float3 localPos = positions[splatID];
+    float3 localPos = positions[splatID].xyz;
     uint meshIdx = meshIndices[splatID];
     float4x4 modelMat = modelMatrices[meshIdx];
     float4 worldPos4 = mul(modelMat, float4(localPos, 1.0));

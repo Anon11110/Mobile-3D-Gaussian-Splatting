@@ -16,8 +16,8 @@ static const float SH_C3_5 = 1.445305721320277;
 static const float SH_C3_6 = -0.5900435899266435;
 
 [[vk::binding(0, 0)]] ConstantBuffer<FrameUBO> ubo;
-[[vk::binding(1, 0)]] StructuredBuffer<float3> positions;
-[[vk::binding(2, 0)]] StructuredBuffer<float3> cov3DPacked;
+[[vk::binding(1, 0)]] StructuredBuffer<float4> positions;
+[[vk::binding(2, 0)]] StructuredBuffer<float4> cov3DPacked;
 [[vk::binding(3, 0)]] StructuredBuffer<float4> colors;
 [[vk::binding(4, 0)]] StructuredBuffer<float> shRest;
 [[vk::binding(5, 0)]] StructuredBuffer<uint> indices;
@@ -124,9 +124,9 @@ float3 ComputeSH(uint splatIndex, float3 dir, float3 baseColor)
 // Helper to fetch pre-computed 3D covariance matrix from buffer
 float3x3 GetCovariance3D(uint splatIndex)
 {
-    // Fetch packed covariance (6 floats stored as 2 float3)
-    float3 upper = cov3DPacked[splatIndex * 2];       // M11, M12, M13
-    float3 lower = cov3DPacked[splatIndex * 2 + 1];   // M22, M23, M33
+    // Fetch packed covariance (6 floats stored as 2 float4 with padding)
+    float3 upper = cov3DPacked[splatIndex * 2].xyz;       // M11, M12, M13
+    float3 lower = cov3DPacked[splatIndex * 2 + 1].xyz;   // M22, M23, M33
 
     return float3x3(
         upper.x, upper.y, upper.z,   // Row 1: M11, M12, M13
@@ -280,7 +280,7 @@ VSOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
     uint splatId    = instanceId;
     uint splatIndex = indices[splatId];
 
-    float3 localCenter = positions[splatIndex];
+    float3 localCenter = positions[splatIndex].xyz;
     float4 baseColor   = colors[splatIndex];
     float3x3 cov3D     = GetCovariance3D(splatIndex);
 

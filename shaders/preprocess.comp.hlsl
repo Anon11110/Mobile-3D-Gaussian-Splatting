@@ -17,8 +17,8 @@ static const float SH_C3_5 = 1.445305721320277;
 static const float SH_C3_6 = -0.5900435899266435;
 
 [[vk::binding(0, 0)]] ConstantBuffer<FrameUBO> ubo;
-[[vk::binding(1, 0)]] StructuredBuffer<float3> positions;
-[[vk::binding(2, 0)]] StructuredBuffer<float3> cov3DPacked;
+[[vk::binding(1, 0)]] StructuredBuffer<float4> positions;
+[[vk::binding(2, 0)]] StructuredBuffer<float4> cov3DPacked;
 [[vk::binding(3, 0)]] StructuredBuffer<float4> colors;
 [[vk::binding(4, 0)]] StructuredBuffer<float> shRest;
 [[vk::binding(5, 0)]] StructuredBuffer<uint> meshIndices;
@@ -33,10 +33,9 @@ static const float SH_C3_6 = -0.5900435899266435;
 void KillSplat(uint splatIndex)
 {
     Gaussian2D invalid;
-    invalid.screenPos = float2(-10000, -10000);
-    invalid.conic = float3(0, 0, 0);
-    invalid.opacity = 0;
+    invalid.conicOpacity = float4(0, 0, 0, 0);  // conic.xyz + opacity in w
     invalid.color = float4(0, 0, 0, 0);
+    invalid.screenPos = float2(-10000, -10000);
     invalid.radius = 0;
     invalid.depth = 0;
     geometryBuffer[splatIndex] = invalid;
@@ -52,7 +51,7 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupID : SV_Group
         return;
     }
 
-    float3 localPos = positions[splatIndex];
+    float3 localPos = positions[splatIndex].xyz;
     float4 baseColor = colors[splatIndex];
     float  opacity = baseColor.a;
 
@@ -63,8 +62,8 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupID : SV_Group
         return;
     }
 
-    float3 covUpper = cov3DPacked[splatIndex * 2];       // M11, M12, M13
-    float3 covLower = cov3DPacked[splatIndex * 2 + 1];   // M22, M23, M33
+    float3 covUpper = cov3DPacked[splatIndex * 2].xyz;       // M11, M12, M13
+    float3 covLower = cov3DPacked[splatIndex * 2 + 1].xyz;   // M22, M23, M33
 
     float3x3 cov3D = float3x3(
         covUpper.x, covUpper.y, covUpper.z,  // Row 1: M11, M12, M13
@@ -254,10 +253,9 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupID : SV_Group
 
     // Write Gaussian2D to geometry buffer
     Gaussian2D g;
-    g.screenPos = screenPos;
-    g.conic = conic;
-    g.opacity = opacity;
+    g.conicOpacity = float4(conic, opacity);
     g.color = float4(shColor, 1.0);
+    g.screenPos = screenPos;
     g.radius = boundingRadius;
     g.depth = linearDepth;
     geometryBuffer[splatIndex] = g;
