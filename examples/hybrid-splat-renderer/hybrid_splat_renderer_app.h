@@ -219,12 +219,20 @@ class HybridSplatRendererApp : public app::IApplication
 
 	// Transmittance culling resources
 	bool                m_transmittanceCullingEnabled = false;
+	uint32_t            m_chunkCount                  = 4;
+	float               m_saturationThreshold         = 0.01f;
 	rhi::ShaderHandle   m_transmCullingFragmentShader;
-	rhi::PipelineHandle m_transmCullingPipeline;
+	rhi::ShaderHandle   m_stencilUpdateFragmentShader;
+	rhi::PipelineHandle m_stencilUpdatePipeline;
+	rhi::PipelineHandle m_splatTransmCullingPipeline;
 
-	// Accumulation render target for transmittance culling
-	rhi::TextureHandle     m_accumTexture;
-	rhi::TextureViewHandle m_accumTextureView;
+	// Transmittance culling render targets
+	rhi::TextureHandle             m_accumTexture;
+	rhi::TextureViewHandle         m_accumTextureView;
+	rhi::TextureHandle             m_depthStencilTexture;
+	rhi::TextureViewHandle         m_depthStencilView;
+	rhi::DescriptorSetLayoutHandle m_stencilUpdateDescriptorLayout;
+	rhi::DescriptorSetHandle       m_stencilUpdateDescriptorSet;
 
 	// Composite pass resources
 	rhi::ShaderHandle              m_fullscreenVertexShader;
@@ -323,8 +331,9 @@ class HybridSplatRendererApp : public app::IApplication
 	size_t                              m_fpsHistoryIndex = 0;
 
 	// Profiling infrastructure (GPU timing + memory, disabled by default)
-	bool m_profilingEnabled     = false;
-	bool m_profilingJustEnabled = false;        // Skip queries for rest of frame when enabled mid-frame
+	bool m_profilingEnabled         = false;
+	bool m_profilingJustEnabled     = false;        // Skip queries for rest of frame when enabled mid-frame
+	bool m_pipelineStatsQueryActive = false;
 
 	// Timestamp indices within a frame
 	// Hardware rasterization pipeline: indices 0-3
@@ -359,6 +368,7 @@ class HybridSplatRendererApp : public app::IApplication
 		// Hardware rasterization pipeline timings
 		double   sortTimeMs          = 0.0;
 		double   renderTimeMs        = 0.0;
+		uint64_t vertexInvocations   = 0;
 		uint64_t fragmentInvocations = 0;
 
 		// Compute rasterization pipeline timings
@@ -414,4 +424,6 @@ class HybridSplatRendererApp : public app::IApplication
 	// Transmittance culling helpers
 	void CreateTransmCullingResources();
 	void ResizeTransmCullingResources(uint32_t width, uint32_t height);
+	void RenderTransmittanceCulling(rhi::IRHICommandList *cmdList, uint32_t splatCount,
+	                                uint32_t width, uint32_t height, uint32_t imageIndex);
 };

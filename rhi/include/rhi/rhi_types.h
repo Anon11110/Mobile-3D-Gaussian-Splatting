@@ -209,6 +209,7 @@ enum class TextureFormat
 	// Depth/stencil formats
 	D32_FLOAT,
 	D24_UNORM_S8_UINT,
+	D32_SFLOAT_S8_UINT,
 
 	// Single channel formats
 	R8_UNORM,
@@ -303,6 +304,9 @@ enum class DescriptorType
 	// Samplers
 	SAMPLER,                       // VK: SAMPLER
 	COMBINED_IMAGE_SAMPLER,        // VK: COMBINED_IMAGE_SAMPLER
+
+	// Input attachments
+	INPUT_ATTACHMENT,        // VK: INPUT_ATTACHMENT
 };
 
 enum class ShaderStageFlags : uint32_t
@@ -344,7 +348,8 @@ enum class ImageLayout
 	SHADER_READ_ONLY,
 	TRANSFER_SRC,
 	TRANSFER_DST,
-	PRESENT_SRC
+	PRESENT_SRC,
+	RENDERING_LOCAL_READ        // Vulkan-specific: For reading attachment within dynamic rendering
 };
 
 // Sampler filtering modes
@@ -432,6 +437,7 @@ enum class ResourceState : uint8_t
 	ShaderReadWrite,        // Read/write storage (UAV/SSBO)
 	ShaderWrite,            // Write-only storage (UAV/SSBO)
 	RenderTarget,
+	RenderingLocalRead,        // Vulkan-specific: Color attachment + input attachment within dynamic rendering
 	DepthStencilRead,
 	DepthStencilWrite,
 	ResolveSource,
@@ -457,18 +463,20 @@ enum class PipelineScope : uint8_t
 // Fine-grained pipeline execution stages
 enum class StageMask : uint64_t
 {
-	Auto           = 0,
-	DrawIndirect   = 1ull << 1,
-	VertexInput    = 1ull << 2,
-	VertexShader   = 1ull << 3,
-	FragmentShader = 1ull << 4,
-	DepthTests     = 1ull << 5,        // Early & Late
-	RenderTarget   = 1ull << 6,
-	ComputeShader  = 1ull << 7,
-	Transfer       = 1ull << 8,
-	Host           = 1ull << 9,
-	AllGraphics    = 1ull << 10,
-	AllCommands    = 1ull << 11,
+	Auto               = 0,
+	DrawIndirect       = 1ull << 1,
+	VertexInput        = 1ull << 2,
+	VertexShader       = 1ull << 3,
+	FragmentShader     = 1ull << 4,
+	DepthTests         = 1ull << 5,        // Early & Late
+	RenderTarget       = 1ull << 6,
+	ComputeShader      = 1ull << 7,
+	Transfer           = 1ull << 8,
+	Host               = 1ull << 9,
+	AllGraphics        = 1ull << 10,
+	AllCommands        = 1ull << 11,
+	EarlyFragmentTests = 1ull << 12,        // Early only
+	LateFragmentTests  = 1ull << 13,        // Late only
 };
 
 // Fine-grained memory access types
@@ -491,6 +499,7 @@ enum class AccessMask : uint64_t
 	HostWrite           = 1ull << 14,
 	MemoryRead          = 1ull << 15,
 	MemoryWrite         = 1ull << 16,
+	InputAttachmentRead = 1ull << 17,
 };
 
 constexpr inline StageMask operator|(StageMask lhs, StageMask rhs)
@@ -523,6 +532,18 @@ inline AccessMask &operator|=(AccessMask &lhs, AccessMask rhs)
 {
 	lhs = lhs | rhs;
 	return lhs;
+}
+
+// Dependency flags for pipeline barriers
+enum class DependencyFlags : uint32_t
+{
+	NONE      = 0,
+	BY_REGION = 1 << 0,
+};
+
+constexpr inline DependencyFlags operator|(DependencyFlags lhs, DependencyFlags rhs)
+{
+	return static_cast<DependencyFlags>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
 }
 
 enum class ResolveMode
@@ -574,15 +595,16 @@ struct TextureDesc
 	uint32_t        mipLevels   = 1;
 	uint32_t        arrayLayers = 1;
 	TextureFormat   format;
-	TextureType     type            = TextureType::TEXTURE_2D;
-	ResourceUsage   resourceUsage   = ResourceUsage::Static;
-	AllocationHints hints           = {};
-	bool            isRenderTarget  = false;
-	bool            isDepthStencil  = false;
-	bool            isStorageImage  = false;
-	bool            isCubeMap       = false;
-	const void     *initialData     = nullptr;
-	size_t          initialDataSize = 0;
+	TextureType     type              = TextureType::TEXTURE_2D;
+	ResourceUsage   resourceUsage     = ResourceUsage::Static;
+	AllocationHints hints             = {};
+	bool            isRenderTarget    = false;
+	bool            isDepthStencil    = false;
+	bool            isStorageImage    = false;
+	bool            isInputAttachment = false;
+	bool            isCubeMap         = false;
+	const void     *initialData       = nullptr;
+	size_t          initialDataSize   = 0;
 };
 
 struct TextureViewDesc
@@ -856,6 +878,9 @@ struct ColorAttachment
 	StoreOp          storeOp       = StoreOp::STORE;
 	ResolveMode      resolveMode   = ResolveMode::NONE;
 	ClearValue       clearValue    = {{0.0f, 0.0f, 0.0f, 1.0f}};
+
+	// Vulkan-specific: Use RENDERING_LOCAL_READ for local read
+	ImageLayout layout = ImageLayout::COLOR_ATTACHMENT;
 };
 
 struct DepthStencilAttachment
@@ -878,6 +903,16 @@ struct RenderingInfo
 	uint32_t                     layerCount       = 1;
 	std::vector<ColorAttachment> colorAttachments;
 	DepthStencilAttachment       depthStencilAttachment;
+
+	// Vulkan-specific: Local read mapping table
+	// Index i is used both as:
+	//   - fragment output location i, and
+	//   - input_attachment_index i,
+	// and maps to colorAttachments[ colorAttachmentLocations[i] ]
+	bool                  enableLocalRead = false;
+	std::vector<uint32_t> colorAttachmentLocations;
+	uint32_t              depthInputAttachmentIndex   = ~0u;
+	uint32_t              stencilInputAttachmentIndex = ~0u;
 };
 
 struct TextureTransition

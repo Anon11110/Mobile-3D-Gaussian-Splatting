@@ -110,6 +110,10 @@ VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, const Text
 	{
 		imageInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	}
+	if (desc.isInputAttachment)
+	{
+		imageInfo.usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+	}
 
 	VmaAllocationCreateInfo allocInfo{};
 	switch (desc.resourceUsage)
@@ -179,7 +183,7 @@ VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, const Text
 	if (desc.isDepthStencil)
 	{
 		viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-		if (desc.format == TextureFormat::D24_UNORM_S8_UINT)
+		if (desc.format == TextureFormat::D24_UNORM_S8_UINT || desc.format == TextureFormat::D32_SFLOAT_S8_UINT)
 		{
 			viewInfo.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
 		}

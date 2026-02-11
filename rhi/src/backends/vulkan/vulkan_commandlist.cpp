@@ -7,11 +7,13 @@ namespace rhi::vulkan
 
 VulkanCommandList::VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType, uint32_t queueFamily,
                                      uint32_t graphicsFamily, uint32_t computeFamily, uint32_t transferFamily,
-                                     PFN_vkCmdBeginRenderingKHR beginFunc,
-                                     PFN_vkCmdEndRenderingKHR   endFunc,
-                                     PFN_vkCmdPipelineBarrier2  barrier2Func,
-                                     PFN_vkCmdWriteTimestamp2   timestamp2Func) :
-    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), queueType(queueType), queueFamily(queueFamily), graphicsQueueFamily(graphicsFamily), computeQueueFamily(computeFamily), transferQueueFamily(transferFamily), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc), vkCmdPipelineBarrier2(barrier2Func), vkCmdWriteTimestamp2(timestamp2Func)
+                                     PFN_vkCmdBeginRenderingKHR                     beginFunc,
+                                     PFN_vkCmdEndRenderingKHR                       endFunc,
+                                     PFN_vkCmdPipelineBarrier2                      barrier2Func,
+                                     PFN_vkCmdWriteTimestamp2                       timestamp2Func,
+                                     PFN_vkCmdSetRenderingAttachmentLocationsKHR    localReadAttachLocFunc,
+                                     PFN_vkCmdSetRenderingInputAttachmentIndicesKHR localReadInputIdxFunc) :
+    device(device), commandBuffer(VK_NULL_HANDLE), currentPipeline(nullptr), inRendering(false), queueType(queueType), queueFamily(queueFamily), graphicsQueueFamily(graphicsFamily), computeQueueFamily(computeFamily), transferQueueFamily(transferFamily), vkCmdBeginRenderingKHR(beginFunc), vkCmdEndRenderingKHR(endFunc), vkCmdPipelineBarrier2(barrier2Func), vkCmdWriteTimestamp2(timestamp2Func), vkCmdSetRenderingAttachmentLocationsKHR(localReadAttachLocFunc), vkCmdSetRenderingInputAttachmentIndicesKHR(localReadInputIdxFunc)
 {
 	// Allocate command buffer
 	VkCommandBufferAllocateInfo allocInfo{};
@@ -93,7 +95,7 @@ void VulkanCommandList::BeginRendering(const RenderingInfo &info)
 		{
 			auto *vkView                = static_cast<VulkanTextureView *>(attachment.view);
 			colorAttachment.imageView   = vkView->GetHandle();
-			colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			colorAttachment.imageLayout = ImageLayoutToVulkan(attachment.layout);
 		}
 
 		if (attachment.resolveTarget)
@@ -150,8 +152,9 @@ void VulkanCommandList::BeginRendering(const RenderingInfo &info)
 		colorAttachments.push_back(colorAttachment);
 	}
 
-	// Setup depth-stencil attachment (single attachment for combined depth/stencil)
-	VkRenderingAttachmentInfoKHR  depthStencilAttachment{};
+	// Setup depth-stencil attachment
+	VkRenderingAttachmentInfoKHR  depthAttachment{};
+	VkRenderingAttachmentInfoKHR  stencilAttachment{};
 	VkRenderingAttachmentInfoKHR *pDepthAttachment   = nullptr;
 	VkRenderingAttachmentInfoKHR *pStencilAttachment = nullptr;
 
@@ -159,31 +162,35 @@ void VulkanCommandList::BeginRendering(const RenderingInfo &info)
 	{
 		auto *vkDepthView = static_cast<VulkanTextureView *>(renderingInfo.depthStencilAttachment.view);
 
-		// Setup combined depth/stencil attachment
-		depthStencilAttachment.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
-		depthStencilAttachment.imageView   = vkDepthView->GetHandle();
-		depthStencilAttachment.imageLayout = renderingInfo.depthStencilAttachment.readOnly ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		VkImageLayout dsLayout = renderingInfo.depthStencilAttachment.readOnly ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-		VkClearValue depthClearValue{};
-		depthClearValue.depthStencil.depth   = renderingInfo.depthStencilAttachment.clearValue.depthStencil.depth;
-		depthClearValue.depthStencil.stencil = renderingInfo.depthStencilAttachment.clearValue.depthStencil.stencil;
-		depthStencilAttachment.clearValue    = depthClearValue;
+		VkClearValue clearValue{};
+		clearValue.depthStencil.depth   = renderingInfo.depthStencilAttachment.clearValue.depthStencil.depth;
+		clearValue.depthStencil.stencil = renderingInfo.depthStencilAttachment.clearValue.depthStencil.stencil;
 
-		VkFormat format = TextureFormatToVulkan(vkDepthView->GetFormat());
-		if (format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT)
+		VkFormat format     = TextureFormatToVulkan(vkDepthView->GetFormat());
+		bool     hasStencil = (format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT);
+
+		// Setup depth attachment
+		depthAttachment.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
+		depthAttachment.imageView   = vkDepthView->GetHandle();
+		depthAttachment.imageLayout = dsLayout;
+		depthAttachment.loadOp      = LoadOpToVulkan(renderingInfo.depthStencilAttachment.depthLoadOp);
+		depthAttachment.storeOp     = StoreOpToVulkan(renderingInfo.depthStencilAttachment.depthStoreOp);
+		depthAttachment.clearValue  = clearValue;
+		pDepthAttachment            = &depthAttachment;
+
+		// Setup stencil attachment
+		if (hasStencil)
 		{
-			// Use stencil ops for combined format
-			depthStencilAttachment.loadOp  = LoadOpToVulkan(renderingInfo.depthStencilAttachment.stencilLoadOp);
-			depthStencilAttachment.storeOp = StoreOpToVulkan(renderingInfo.depthStencilAttachment.stencilStoreOp);
+			stencilAttachment.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
+			stencilAttachment.imageView   = vkDepthView->GetHandle();
+			stencilAttachment.imageLayout = dsLayout;
+			stencilAttachment.loadOp      = LoadOpToVulkan(renderingInfo.depthStencilAttachment.stencilLoadOp);
+			stencilAttachment.storeOp     = StoreOpToVulkan(renderingInfo.depthStencilAttachment.stencilStoreOp);
+			stencilAttachment.clearValue  = clearValue;
+			pStencilAttachment            = &stencilAttachment;
 		}
-		else
-		{
-			// Use depth ops for depth-only format
-			depthStencilAttachment.loadOp  = LoadOpToVulkan(renderingInfo.depthStencilAttachment.depthLoadOp);
-			depthStencilAttachment.storeOp = StoreOpToVulkan(renderingInfo.depthStencilAttachment.depthStoreOp);
-		}
-
-		pDepthAttachment = &depthStencilAttachment;
 	}
 
 	// Begin dynamic rendering
@@ -206,6 +213,30 @@ void VulkanCommandList::BeginRendering(const RenderingInfo &info)
 
 	vkCmdBeginRenderingKHR(commandBuffer, &vkRenderingInfo);
 	inRendering = true;
+
+	// If local read is enabled, maps color attachments to shader output locations and input attachments to color/depth/stencil attachments
+	if (renderingInfo.enableLocalRead && !renderingInfo.colorAttachmentLocations.empty())
+	{
+		if (vkCmdSetRenderingAttachmentLocationsKHR)
+		{
+			VkRenderingAttachmentLocationInfoKHR attachmentLocationInfo{};
+			attachmentLocationInfo.sType                     = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO_KHR;
+			attachmentLocationInfo.colorAttachmentCount      = static_cast<uint32_t>(renderingInfo.colorAttachmentLocations.size());
+			attachmentLocationInfo.pColorAttachmentLocations = renderingInfo.colorAttachmentLocations.data();
+			vkCmdSetRenderingAttachmentLocationsKHR(commandBuffer, &attachmentLocationInfo);
+		}
+
+		if (vkCmdSetRenderingInputAttachmentIndicesKHR)
+		{
+			VkRenderingInputAttachmentIndexInfoKHR inputAttachmentInfo{};
+			inputAttachmentInfo.sType                        = VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR;
+			inputAttachmentInfo.colorAttachmentCount         = static_cast<uint32_t>(renderingInfo.colorAttachmentLocations.size());
+			inputAttachmentInfo.pColorAttachmentInputIndices = renderingInfo.colorAttachmentLocations.data();
+			inputAttachmentInfo.pDepthInputAttachmentIndex   = renderingInfo.depthInputAttachmentIndex != ~0u ? &renderingInfo.depthInputAttachmentIndex : nullptr;
+			inputAttachmentInfo.pStencilInputAttachmentIndex = renderingInfo.stencilInputAttachmentIndex != ~0u ? &renderingInfo.stencilInputAttachmentIndex : nullptr;
+			vkCmdSetRenderingInputAttachmentIndicesKHR(commandBuffer, &inputAttachmentInfo);
+		}
+	}
 }
 
 void VulkanCommandList::EndRendering()
@@ -479,7 +510,8 @@ void VulkanCommandList::Barrier(
     PipelineScope                      dst_scope,
     std::span<const BufferTransition>  buffer_transitions,
     std::span<const TextureTransition> texture_transitions,
-    std::span<const MemoryBarrier>     memory_barriers)
+    std::span<const MemoryBarrier>     memory_barriers,
+    DependencyFlags                    dependencyFlags)
 {
 	std::vector<VkBufferMemoryBarrier2> bufferBarriers;
 	std::vector<VkImageMemoryBarrier2>  imageBarriers;
@@ -566,7 +598,7 @@ void VulkanCommandList::Barrier(
 		{
 			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 		}
-		else if (format == TextureFormat::D24_UNORM_S8_UINT)
+		else if (format == TextureFormat::D24_UNORM_S8_UINT || format == TextureFormat::D32_SFLOAT_S8_UINT)
 		{
 			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
 		}
@@ -656,6 +688,7 @@ void VulkanCommandList::Barrier(
 	{
 		VkDependencyInfo depInfo{};
 		depInfo.sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		depInfo.dependencyFlags          = (static_cast<uint32_t>(dependencyFlags) & static_cast<uint32_t>(DependencyFlags::BY_REGION)) ? VK_DEPENDENCY_BY_REGION_BIT : 0;
 		depInfo.memoryBarrierCount       = static_cast<uint32_t>(memBarriers.size());
 		depInfo.pMemoryBarriers          = memBarriers.empty() ? nullptr : memBarriers.data();
 		depInfo.bufferMemoryBarrierCount = static_cast<uint32_t>(bufferBarriers.size());
@@ -752,7 +785,7 @@ void VulkanCommandList::ReleaseToQueue(
 		{
 			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 		}
-		else if (format == TextureFormat::D24_UNORM_S8_UINT)
+		else if (format == TextureFormat::D24_UNORM_S8_UINT || format == TextureFormat::D32_SFLOAT_S8_UINT)
 		{
 			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
 		}
@@ -874,7 +907,7 @@ void VulkanCommandList::AcquireFromQueue(
 		{
 			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 		}
-		else if (format == TextureFormat::D24_UNORM_S8_UINT)
+		else if (format == TextureFormat::D24_UNORM_S8_UINT || format == TextureFormat::D32_SFLOAT_S8_UINT)
 		{
 			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
 		}

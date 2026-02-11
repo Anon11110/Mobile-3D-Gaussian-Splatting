@@ -283,13 +283,19 @@ class VulkanCommandList final : public RefCounter<IRHICommandList>
 	PFN_vkCmdPipelineBarrier2  vkCmdPipelineBarrier2;
 	PFN_vkCmdWriteTimestamp2   vkCmdWriteTimestamp2;
 
+	// Dynamic rendering local read function pointers
+	PFN_vkCmdSetRenderingAttachmentLocationsKHR    vkCmdSetRenderingAttachmentLocationsKHR;
+	PFN_vkCmdSetRenderingInputAttachmentIndicesKHR vkCmdSetRenderingInputAttachmentIndicesKHR;
+
   public:
 	VulkanCommandList(VkDevice device, VkCommandPool commandPool, QueueType queueType, uint32_t queueFamily,
 	                  uint32_t graphicsFamily, uint32_t computeFamily, uint32_t transferFamily,
-	                  PFN_vkCmdBeginRenderingKHR beginFunc,
-	                  PFN_vkCmdEndRenderingKHR   endFunc,
-	                  PFN_vkCmdPipelineBarrier2  barrier2Func,
-	                  PFN_vkCmdWriteTimestamp2   timestamp2Func);
+	                  PFN_vkCmdBeginRenderingKHR                     beginFunc,
+	                  PFN_vkCmdEndRenderingKHR                       endFunc,
+	                  PFN_vkCmdPipelineBarrier2                      barrier2Func,
+	                  PFN_vkCmdWriteTimestamp2                       timestamp2Func,
+	                  PFN_vkCmdSetRenderingAttachmentLocationsKHR    localReadAttachLocFunc = nullptr,
+	                  PFN_vkCmdSetRenderingInputAttachmentIndicesKHR localReadInputIdxFunc  = nullptr);
 	~VulkanCommandList() override = default;
 
 	VulkanCommandList(const VulkanCommandList &)            = delete;
@@ -331,7 +337,8 @@ class VulkanCommandList final : public RefCounter<IRHICommandList>
 	    PipelineScope                      dst_scope,
 	    std::span<const BufferTransition>  buffer_transitions,
 	    std::span<const TextureTransition> texture_transitions,
-	    std::span<const MemoryBarrier>     memory_barriers = {}) override;
+	    std::span<const MemoryBarrier>     memory_barriers = {},
+	    DependencyFlags                    dependencyFlags = DependencyFlags::NONE) override;
 
 	void ReleaseToQueue(
 	    QueueType                          dstQueue,

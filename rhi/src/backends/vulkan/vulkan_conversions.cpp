@@ -25,6 +25,8 @@ VkFormat TextureFormatToVulkan(TextureFormat format)
 			return VK_FORMAT_D32_SFLOAT;
 		case TextureFormat::D24_UNORM_S8_UINT:
 			return VK_FORMAT_D24_UNORM_S8_UINT;
+		case TextureFormat::D32_SFLOAT_S8_UINT:
+			return VK_FORMAT_D32_SFLOAT_S8_UINT;
 
 		// Single channel formats
 		case TextureFormat::R8_UNORM:
@@ -167,6 +169,8 @@ TextureFormat VulkanFormatToTexture(VkFormat format)
 			return TextureFormat::D32_FLOAT;
 		case VK_FORMAT_D24_UNORM_S8_UINT:
 			return TextureFormat::D24_UNORM_S8_UINT;
+		case VK_FORMAT_D32_SFLOAT_S8_UINT:
+			return TextureFormat::D32_SFLOAT_S8_UINT;
 
 		// Single channel formats
 		case VK_FORMAT_R8_UNORM:
@@ -297,6 +301,10 @@ VkDescriptorType DescriptorTypeToVulkan(DescriptorType type)
 		case DescriptorType::COMBINED_IMAGE_SAMPLER:
 			return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
+		// Input attachments
+		case DescriptorType::INPUT_ATTACHMENT:
+			return VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+
 		default:
 			throw std::runtime_error("Unknown descriptor type");
 	}
@@ -342,6 +350,8 @@ VkImageLayout ImageLayoutToVulkan(ImageLayout layout)
 			return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 		case ImageLayout::PRESENT_SRC:
 			return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		case ImageLayout::RENDERING_LOCAL_READ:
+			return VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR;
 		default:
 			throw std::runtime_error("Unknown image layout");
 	}
@@ -601,6 +611,10 @@ VkPipelineStageFlags StageMaskToVulkan(StageMask mask)
 		flags |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 	if (static_cast<uint64_t>(mask & StageMask::DepthTests))
 		flags |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::EarlyFragmentTests))
+		flags |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::LateFragmentTests))
+		flags |= VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
 	if (static_cast<uint64_t>(mask & StageMask::RenderTarget))
 		flags |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	if (static_cast<uint64_t>(mask & StageMask::ComputeShader))
@@ -656,6 +670,8 @@ VkAccessFlags AccessMaskToVulkan(AccessMask mask)
 		flags |= VK_ACCESS_MEMORY_READ_BIT;
 	if (static_cast<uint64_t>(mask & AccessMask::MemoryWrite))
 		flags |= VK_ACCESS_MEMORY_WRITE_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::InputAttachmentRead))
+		flags |= VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
 
 	return flags;
 }
@@ -711,6 +727,11 @@ void GetVulkanStagesAndAccess(ResourceState state, PipelineScope scope,
 		case ResourceState::RenderTarget:
 			stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 			access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			break;
+
+		case ResourceState::RenderingLocalRead:
+			stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
 			break;
 
 		case ResourceState::DepthStencilRead:
@@ -796,6 +817,8 @@ VkImageLayout ResourceStateToImageLayout(ResourceState state)
 			return VK_IMAGE_LAYOUT_GENERAL;
 		case ResourceState::RenderTarget:
 			return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		case ResourceState::RenderingLocalRead:
+			return VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR;
 		case ResourceState::DepthStencilRead:
 			return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 		case ResourceState::DepthStencilWrite:
@@ -844,6 +867,10 @@ VkPipelineStageFlags2 StageMaskToVulkan2(StageMask mask)
 		flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
 	if (static_cast<uint64_t>(mask & StageMask::DepthTests))
 		flags |= VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::EarlyFragmentTests))
+		flags |= VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+	if (static_cast<uint64_t>(mask & StageMask::LateFragmentTests))
+		flags |= VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
 	if (static_cast<uint64_t>(mask & StageMask::RenderTarget))
 		flags |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 	if (static_cast<uint64_t>(mask & StageMask::ComputeShader))
@@ -899,6 +926,8 @@ VkAccessFlags2 AccessMaskToVulkan2(AccessMask mask)
 		flags |= VK_ACCESS_2_MEMORY_READ_BIT;
 	if (static_cast<uint64_t>(mask & AccessMask::MemoryWrite))
 		flags |= VK_ACCESS_2_MEMORY_WRITE_BIT;
+	if (static_cast<uint64_t>(mask & AccessMask::InputAttachmentRead))
+		flags |= VK_ACCESS_2_INPUT_ATTACHMENT_READ_BIT;
 
 	return flags;
 }
@@ -975,6 +1004,11 @@ void GetVulkanStagesAndAccess2(ResourceState state, PipelineScope scope,
 		case ResourceState::RenderTarget:
 			stages = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 			access = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+			break;
+
+		case ResourceState::RenderingLocalRead:
+			stages = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+			access = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_INPUT_ATTACHMENT_READ_BIT;
 			break;
 
 		case ResourceState::DepthStencilRead:

@@ -225,7 +225,8 @@ class IRHICommandList : public IRefCounted
 	    PipelineScope                      dst_scope,
 	    std::span<const BufferTransition>  buffer_transitions,
 	    std::span<const TextureTransition> texture_transitions,
-	    std::span<const MemoryBarrier>     memory_barriers = {}) = 0;
+	    std::span<const MemoryBarrier>     memory_barriers = {},
+	    DependencyFlags                    dependencyFlags = DependencyFlags::NONE) = 0;
 
 	// Query operations
 	virtual void ResetQueryPool(IRHIQueryPool *queryPool, uint32_t firstQuery, uint32_t queryCount)                 = 0;

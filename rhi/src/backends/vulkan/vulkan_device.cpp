@@ -50,9 +50,14 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 	PFN_vkCmdWriteTimestamp2   vkCmdWriteTimestamp2;
 	PFN_vkQueueSubmit2         vkQueueSubmit2;
 
+	// Dynamic rendering local read function pointers
+	PFN_vkCmdSetRenderingAttachmentLocationsKHR    vkCmdSetRenderingAttachmentLocationsKHR;
+	PFN_vkCmdSetRenderingInputAttachmentIndicesKHR vkCmdSetRenderingInputAttachmentIndicesKHR;
+
 	// Device feature flags
 	bool hasDynamicRendering;
-	bool hasPipelineStatisticsQuery = false;
+	bool hasDynamicRenderingLocalRead = false;
+	bool hasPipelineStatisticsQuery   = false;
 
 	// Timestamp period for GPU profiling (nanoseconds)
 	float timestampPeriod;
@@ -240,7 +245,9 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		VulkanCommandList *cmdList     = new VulkanCommandList(device, commandPool, queueType, queueFamily,
 		                                                       graphicsQueueFamily, computeQueueFamily, transferQueueFamily,
 		                                                       vkCmdBeginRenderingKHR, vkCmdEndRenderingKHR,
-		                                                       vkCmdPipelineBarrier2, vkCmdWriteTimestamp2);
+		                                                       vkCmdPipelineBarrier2, vkCmdWriteTimestamp2,
+		                                                       vkCmdSetRenderingAttachmentLocationsKHR,
+		                                                       vkCmdSetRenderingInputAttachmentIndicesKHR);
 		return RefCntPtr<IRHICommandList>::Create(cmdList);
 	}
 
@@ -1125,7 +1132,7 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		VkPhysicalDeviceFeatures deviceFeatures{};
 		VkPhysicalDeviceFeatures supportedFeatures{};
 		vkGetPhysicalDeviceFeatures(physicalDevice, &supportedFeatures);
-		hasPipelineStatisticsQuery                = supportedFeatures.pipelineStatisticsQuery == VK_TRUE;
+		hasPipelineStatisticsQuery = supportedFeatures.pipelineStatisticsQuery == VK_TRUE;
 
 #if defined(__APPLE__)
 		// MoltenVK does not support VK_QUERY_TYPE_PIPELINE_STATISTICS.
@@ -1147,6 +1154,11 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeatures{};
 		dynamicRenderingFeatures.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
 		dynamicRenderingFeatures.dynamicRendering = VK_TRUE;
+
+		// Enable dynamic rendering local read if available
+		VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR localReadFeatures{};
+		localReadFeatures.sType                     = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR;
+		localReadFeatures.dynamicRenderingLocalRead = VK_TRUE;
 
 		// Enable synchronization2
 		VkPhysicalDeviceSynchronization2Features sync2Features{};
@@ -1233,6 +1245,15 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 			fprintf(stderr, "Warning: Dynamic rendering not available, falling back to render passes\n");
 		}
 
+		// Check for dynamic rendering local read supportg
+		hasDynamicRenderingLocalRead = false;
+		if (hasDynamicRendering && isExtensionAvailable(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME))
+		{
+			deviceExtensions.push_back(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
+			hasDynamicRenderingLocalRead = true;
+			fprintf(stdout, "Dynamic rendering local read enabled via VK_KHR_dynamic_rendering_local_read\n");
+		}
+
 #ifdef __APPLE__
 		if (isExtensionAvailable("VK_KHR_portability_subset"))
 		{
@@ -1244,10 +1265,14 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
 		// Chain feature structures into pNext
-		// sync2Features -> dynamicRenderingFeatures (if enabled)
+		// sync2Features -> dynamicRenderingFeatures -> localReadFeatures (if enabled)
 		if (hasDynamicRendering)
 		{
 			sync2Features.pNext = &dynamicRenderingFeatures;
+			if (hasDynamicRenderingLocalRead)
+			{
+				dynamicRenderingFeatures.pNext = &localReadFeatures;
+			}
 		}
 		createInfo.pNext = &sync2Features;
 
@@ -1563,6 +1588,8 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 				return 4;
 			case TextureFormat::D24_UNORM_S8_UINT:
 				return 4;
+			case TextureFormat::D32_SFLOAT_S8_UINT:
+				return 8;
 			default:
 				return 4;
 		}
@@ -1577,7 +1604,8 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		                                                       {VK_DESCRIPTOR_TYPE_SAMPLER, 500},
 		                                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 200},
 		                                                       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 100},
-		                                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 100}};
+		                                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 100},
+		                                                       {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 100}};
 
 		std::vector<VkDescriptorPoolSize> computePoolSizes = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2000},
 		                                                      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 500},
@@ -1642,11 +1670,29 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 			{
 				vkCmdEndRenderingKHR = (PFN_vkCmdEndRenderingKHR) vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR");
 			}
+
+			// Load dynamic rendering local read functions
+			if (hasDynamicRenderingLocalRead)
+			{
+				vkCmdSetRenderingAttachmentLocationsKHR =
+				    (PFN_vkCmdSetRenderingAttachmentLocationsKHR) vkGetDeviceProcAddr(
+				        device, "vkCmdSetRenderingAttachmentLocationsKHR");
+				vkCmdSetRenderingInputAttachmentIndicesKHR =
+				    (PFN_vkCmdSetRenderingInputAttachmentIndicesKHR) vkGetDeviceProcAddr(
+				        device, "vkCmdSetRenderingInputAttachmentIndicesKHR");
+			}
+			else
+			{
+				vkCmdSetRenderingAttachmentLocationsKHR    = nullptr;
+				vkCmdSetRenderingInputAttachmentIndicesKHR = nullptr;
+			}
 		}
 		else
 		{
-			vkCmdBeginRenderingKHR = nullptr;
-			vkCmdEndRenderingKHR   = nullptr;
+			vkCmdBeginRenderingKHR                     = nullptr;
+			vkCmdEndRenderingKHR                       = nullptr;
+			vkCmdSetRenderingAttachmentLocationsKHR    = nullptr;
+			vkCmdSetRenderingInputAttachmentIndicesKHR = nullptr;
 		}
 
 		// Load synchronization2 functions

@@ -316,6 +316,9 @@ class BufferMemoryTracker
 			case rhi::TextureFormat::D24_UNORM_S8_UINT:
 				bytesPerPixel = 4;
 				break;
+			case rhi::TextureFormat::D32_SFLOAT_S8_UINT:
+				bytesPerPixel = 8;
+				break;
 			default:
 				bytesPerPixel = 4;
 				break;
@@ -339,6 +342,8 @@ class BufferMemoryTracker
 				return "D32F";
 			case rhi::TextureFormat::D24_UNORM_S8_UINT:
 				return "D24S8";
+			case rhi::TextureFormat::D32_SFLOAT_S8_UINT:
+				return "D32S8";
 			case rhi::TextureFormat::RGBA16_FLOAT:
 				return "RGBA16F";
 			case rhi::TextureFormat::RGBA32_FLOAT:
