@@ -381,6 +381,7 @@ class HybridSplatRendererApp : public app::IApplication
 	};
 	std::deque<GpuTimingResults> m_gpuTimingHistory;
 	GpuTimingResults             m_currentGpuTiming;
+	GpuTimingResults             m_averagedGpuTiming;
 
 	void InitGpuProfiling();
 	void ShutdownGpuProfiling();

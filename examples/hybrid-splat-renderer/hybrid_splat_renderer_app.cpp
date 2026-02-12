@@ -722,11 +722,59 @@ void HybridSplatRendererApp::OnRender()
 	// Log FPS periodically
 	if (m_frameCount % 60 == 0 && m_fpsCounter.shouldUpdate())
 	{
-		LOG_INFO("Frame FPS: {:.2f} | {} | Splats: {}",
-		         m_fpsCounter.getFPS(),
-		         useComputeRasterization ? "Compute Raster" :
-		                                   (m_sortingEnabled ? (m_backend ? m_backend->GetMethodName() : "N/A") : "Disabled"),
-		         m_scene->GetTotalSplatCount());
+		if (m_profilingEnabled && !m_gpuTimingHistory.empty())
+		{
+			GpuTimingResults avg{};
+			for (const auto &sample : m_gpuTimingHistory)
+			{
+				avg.sortTimeMs += sample.sortTimeMs;
+				avg.renderTimeMs += sample.renderTimeMs;
+				avg.preprocessTimeMs += sample.preprocessTimeMs;
+				avg.computeSortTimeMs += sample.computeSortTimeMs;
+				avg.rangesTimeMs += sample.rangesTimeMs;
+				avg.rasterTimeMs += sample.rasterTimeMs;
+			}
+			double count = static_cast<double>(m_gpuTimingHistory.size());
+			avg.sortTimeMs /= count;
+			avg.renderTimeMs /= count;
+			avg.preprocessTimeMs /= count;
+			avg.computeSortTimeMs /= count;
+			avg.rangesTimeMs /= count;
+			avg.rasterTimeMs /= count;
+			avg.valid           = true;
+			m_averagedGpuTiming = avg;
+			m_gpuTimingHistory.clear();
+
+			if (useComputeRasterization)
+			{
+				LOG_INFO("Frame FPS: {:.2f} | {} | Splats: {} | Preprocess: {:.3f}ms | Sort: {:.3f}ms | Ranges: {:.3f}ms | Raster: {:.3f}ms | Render: {:.3f}ms",
+				         m_fpsCounter.getFPS(),
+				         "Compute Raster",
+				         m_scene->GetTotalSplatCount(),
+				         avg.preprocessTimeMs,
+				         avg.computeSortTimeMs,
+				         avg.rangesTimeMs,
+				         avg.rasterTimeMs,
+				         avg.renderTimeMs);
+			}
+			else
+			{
+				LOG_INFO("Frame FPS: {:.2f} | {} | Splats: {} | Sort: {:.3f}ms | Render: {:.3f}ms",
+				         m_fpsCounter.getFPS(),
+				         m_sortingEnabled ? (m_backend ? m_backend->GetMethodName() : "N/A") : "Disabled",
+				         m_scene->GetTotalSplatCount(),
+				         avg.sortTimeMs,
+				         avg.renderTimeMs);
+			}
+		}
+		else
+		{
+			LOG_INFO("Frame FPS: {:.2f} | {} | Splats: {}",
+			         m_fpsCounter.getFPS(),
+			         useComputeRasterization ? "Compute Raster" :
+			                                   (m_sortingEnabled ? (m_backend ? m_backend->GetMethodName() : "N/A") : "Disabled"),
+			         m_scene->GetTotalSplatCount());
+		}
 		m_fpsCounter.reset();
 	}
 
@@ -1989,6 +2037,7 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 	if (results.valid)
 	{
 		m_currentGpuTiming = results;
+		m_gpuTimingHistory.push_back(results);
 	}
 }
 
