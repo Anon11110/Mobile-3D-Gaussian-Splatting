@@ -18,9 +18,9 @@ static const float SH_C3_6 = -0.5900435899266435;
 
 [[vk::binding(0, 0)]] ConstantBuffer<FrameUBO> ubo;
 [[vk::binding(1, 0)]] StructuredBuffer<float4> positions;
-[[vk::binding(2, 0)]] StructuredBuffer<float4> cov3DPacked;
-[[vk::binding(3, 0)]] StructuredBuffer<float4> colors;
-[[vk::binding(4, 0)]] StructuredBuffer<float> shRest;
+[[vk::binding(2, 0)]] StructuredBuffer<float4> cov3DPacked;   // 2 float4 per splat (float32, 32 bytes)
+[[vk::binding(3, 0)]] StructuredBuffer<uint2> colorsHalf;     // 1 uint2 per splat: {R|G, B|A} (8 bytes)
+[[vk::binding(4, 0)]] StructuredBuffer<uint4> shRestInterleaved; // 6 uint4 per splat, interleaved RGB (96 bytes)
 [[vk::binding(5, 0)]] StructuredBuffer<uint> meshIndices;
 [[vk::binding(6, 0)]] StructuredBuffer<float4x4> modelMatrices;
 [[vk::binding(7, 0)]] RWStructuredBuffer<Gaussian2D> geometryBuffer;
@@ -29,6 +29,18 @@ static const float SH_C3_6 = -0.5900435899266435;
 [[vk::binding(10, 0)]] globallycoherent RWByteAddressBuffer globalCounter;
 
 [[vk::push_constant]] PreprocessPC pc;
+
+float2 UnpackHalf2x16(uint packed)
+{
+    return float2(f16tof32(packed), f16tof32(packed >> 16));
+}
+
+#define HALF_LO(x) min16float(f16tof32(x))
+#define HALF_HI(x) min16float(f16tof32((x) >> 16))
+
+// Interleaved SH buffer: 6 uint4 per splat
+static const uint SH_UINT4_PER_SPLAT = 6;
+
 
 void KillSplat(uint splatIndex)
 {
@@ -52,38 +64,27 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupID : SV_Group
     }
 
     float3 localPos = positions[splatIndex].xyz;
-    float4 baseColor = colors[splatIndex];
-    float  opacity = baseColor.a;
+
+    // Unpack color from half-precision
+    uint2 colorPacked = colorsHalf[splatIndex];
+    min16float4 baseColor = min16float4(
+        min16float2(UnpackHalf2x16(colorPacked.x)),
+        min16float2(UnpackHalf2x16(colorPacked.y)));
+    min16float  opacity = baseColor.a;
 
     // Early alpha culling
-    if (opacity < ubo.alphaCullThreshold)
+    if (float(opacity) < ubo.alphaCullThreshold)
     {
 		KillSplat(splatIndex);
         return;
     }
 
-    float3 covUpper = cov3DPacked[splatIndex * 2].xyz;       // M11, M12, M13
-    float3 covLower = cov3DPacked[splatIndex * 2 + 1].xyz;   // M22, M23, M33
-
-    float3x3 cov3D = float3x3(
-        covUpper.x, covUpper.y, covUpper.z,  // Row 1: M11, M12, M13
-        covUpper.y, covLower.x, covLower.y,  // Row 2: M12, M22, M23
-        covUpper.z, covLower.y, covLower.z   // Row 3: M13, M23, M33
-    );
-
     uint meshIdx = meshIndices[splatIndex];
     float4x4 modelMat = modelMatrices[meshIdx];
 
-    // Transform to world space
+    // Transform position to world space
     float4 worldPos4 = mul(modelMat, float4(localPos, 1.0));
     float3 worldPos = worldPos4.xyz;
-
-    float3x3 modelRS = float3x3(
-        modelMat[0].xyz,
-        modelMat[1].xyz,
-        modelMat[2].xyz
-    );
-    cov3D = mul(mul(modelRS, cov3D), transpose(modelRS));
 
     // Transform to view space
     float4 viewPos4 = mul(ubo.view, float4(worldPos, 1.0));
@@ -107,6 +108,22 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupID : SV_Group
 		KillSplat(splatIndex);
         return;
     }
+
+    float3 covUpper = cov3DPacked[splatIndex * 2].xyz;       // M11, M12, M13
+    float3 covLower = cov3DPacked[splatIndex * 2 + 1].xyz;   // M22, M23, M33
+
+    float3x3 cov3D = float3x3(
+        covUpper.x, covUpper.y, covUpper.z,  // Row 1: M11, M12, M13
+        covUpper.y, covLower.x, covLower.y,  // Row 2: M12, M22, M23
+        covUpper.z, covLower.y, covLower.z   // Row 3: M13, M23, M33
+    );
+
+    float3x3 modelRS = float3x3(
+        modelMat[0].xyz,
+        modelMat[1].xyz,
+        modelMat[2].xyz
+    );
+    cov3D = mul(mul(modelRS, cov3D), transpose(modelRS));
 
     float2 screenPos = (ndcPos * 0.5 + 0.5) * ubo.viewport;
 
@@ -197,64 +214,48 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupID : SV_Group
 
     // Evaluate Spherical Harmonics for view-dependent color
     float3 viewDir = normalize(ubo.cameraPos.xyz - worldPos);
-    float x = viewDir.x, y = viewDir.y, z = viewDir.z;
+    min16float x = min16float(viewDir.x), y = min16float(viewDir.y), z = min16float(viewDir.z);
+    min16float3 shColor = baseColor.rgb;
 
-    // Base color (DC coefficient)
-    float3 shColor = baseColor.rgb;
+    uint shBase = splatIndex * SH_UINT4_PER_SPLAT;
 
-    // SH degree 1 (3 coefficients per channel)
-    uint offset = splatIndex * 45;
-    shColor.r += SH_C1 * (-y * shRest[offset + 0] + z * shRest[offset + 1] - x * shRest[offset + 2]);
-    shColor.g += SH_C1 * (-y * shRest[offset + 15] + z * shRest[offset + 16] - x * shRest[offset + 17]);
-    shColor.b += SH_C1 * (-y * shRest[offset + 30] + z * shRest[offset + 31] - x * shRest[offset + 32]);
+    // SH Degree 1: load d0,d1 → extract sh[0..2]
+    uint4 d0 = shRestInterleaved[shBase + 0];
+    uint4 d1 = shRestInterleaved[shBase + 1];
 
-    // SH degree 2 (5 coefficients per channel)
-    float xx = x * x, yy = y * y, zz = z * z, xy = x * y, yz = y * z, xz = x * z;
-    shColor.r += SH_C2_0 * xy * shRest[offset + 3] +
-                 SH_C2_1 * yz * shRest[offset + 4] +
-                 SH_C2_2 * (2.0 * zz - xx - yy) * shRest[offset + 5] +
-                 SH_C2_3 * xz * shRest[offset + 6] +
-                 SH_C2_4 * (xx - yy) * shRest[offset + 7];
-    shColor.g += SH_C2_0 * xy * shRest[offset + 18] +
-                 SH_C2_1 * yz * shRest[offset + 19] +
-                 SH_C2_2 * (2.0 * zz - xx - yy) * shRest[offset + 20] +
-                 SH_C2_3 * xz * shRest[offset + 21] +
-                 SH_C2_4 * (xx - yy) * shRest[offset + 22];
-    shColor.b += SH_C2_0 * xy * shRest[offset + 33] +
-                 SH_C2_1 * yz * shRest[offset + 34] +
-                 SH_C2_2 * (2.0 * zz - xx - yy) * shRest[offset + 35] +
-                 SH_C2_3 * xz * shRest[offset + 36] +
-                 SH_C2_4 * (xx - yy) * shRest[offset + 37];
+    shColor += SH_C1 * (-y * min16float3(HALF_LO(d0.x), HALF_HI(d0.x), HALF_LO(d0.y))
+                        + z * min16float3(HALF_HI(d0.y), HALF_LO(d0.z), HALF_HI(d0.z))
+                        - x * min16float3(HALF_LO(d0.w), HALF_HI(d0.w), HALF_LO(d1.x)));
 
-    // SH degree 3 (7 coefficients per channel)
-    shColor.r += SH_C3_0 * y * (3.0 * xx - yy) * shRest[offset + 8] +
-                 SH_C3_1 * xy * z * shRest[offset + 9] +
-                 SH_C3_2 * y * (4.0 * zz - xx - yy) * shRest[offset + 10] +
-                 SH_C3_3 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * shRest[offset + 11] +
-                 SH_C3_4 * x * (4.0 * zz - xx - yy) * shRest[offset + 12] +
-                 SH_C3_5 * z * (xx - yy) * shRest[offset + 13] +
-                 SH_C3_6 * x * (xx - 3.0 * yy) * shRest[offset + 14];
-    shColor.g += SH_C3_0 * y * (3.0 * xx - yy) * shRest[offset + 23] +
-                 SH_C3_1 * xy * z * shRest[offset + 24] +
-                 SH_C3_2 * y * (4.0 * zz - xx - yy) * shRest[offset + 25] +
-                 SH_C3_3 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * shRest[offset + 26] +
-                 SH_C3_4 * x * (4.0 * zz - xx - yy) * shRest[offset + 27] +
-                 SH_C3_5 * z * (xx - yy) * shRest[offset + 28] +
-                 SH_C3_6 * x * (xx - 3.0 * yy) * shRest[offset + 29];
-    shColor.b += SH_C3_0 * y * (3.0 * xx - yy) * shRest[offset + 38] +
-                 SH_C3_1 * xy * z * shRest[offset + 39] +
-                 SH_C3_2 * y * (4.0 * zz - xx - yy) * shRest[offset + 40] +
-                 SH_C3_3 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * shRest[offset + 41] +
-                 SH_C3_4 * x * (4.0 * zz - xx - yy) * shRest[offset + 42] +
-                 SH_C3_5 * z * (xx - yy) * shRest[offset + 43] +
-                 SH_C3_6 * x * (xx - 3.0 * yy) * shRest[offset + 44];
+    // SH Degree 2: reuse d1, load d2 → extract sh[3..7]
+    uint4 d2 = shRestInterleaved[shBase + 2];
+    min16float xx = x * x, yy = y * y, zz = z * z, xy = x * y, yz = y * z, xz = x * z;
 
-    shColor = max(shColor, float3(0.0, 0.0, 0.0));
+    shColor += SH_C2_0 * xy * min16float3(HALF_HI(d1.x), HALF_LO(d1.y), HALF_HI(d1.y)) +
+               SH_C2_1 * yz * min16float3(HALF_LO(d1.z), HALF_HI(d1.z), HALF_LO(d1.w)) +
+               SH_C2_2 * (2.0 * zz - xx - yy) * min16float3(HALF_HI(d1.w), HALF_LO(d2.x), HALF_HI(d2.x)) +
+               SH_C2_3 * xz * min16float3(HALF_LO(d2.y), HALF_HI(d2.y), HALF_LO(d2.z)) +
+               SH_C2_4 * (xx - yy) * min16float3(HALF_HI(d2.z), HALF_LO(d2.w), HALF_HI(d2.w));
+
+    // SH Degree 3: load d3,d4,d5 → extract sh[8..14]
+    uint4 d3 = shRestInterleaved[shBase + 3];
+    uint4 d4 = shRestInterleaved[shBase + 4];
+    uint4 d5 = shRestInterleaved[shBase + 5];
+
+    shColor += SH_C3_0 * y * (3.0 * xx - yy) * min16float3(HALF_LO(d3.x), HALF_HI(d3.x), HALF_LO(d3.y)) +
+               SH_C3_1 * xy * z * min16float3(HALF_HI(d3.y), HALF_LO(d3.z), HALF_HI(d3.z)) +
+               SH_C3_2 * y * (4.0 * zz - xx - yy) * min16float3(HALF_LO(d3.w), HALF_HI(d3.w), HALF_LO(d4.x)) +
+               SH_C3_3 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * min16float3(HALF_HI(d4.x), HALF_LO(d4.y), HALF_HI(d4.y)) +
+               SH_C3_4 * x * (4.0 * zz - xx - yy) * min16float3(HALF_LO(d4.z), HALF_HI(d4.z), HALF_LO(d4.w)) +
+               SH_C3_5 * z * (xx - yy) * min16float3(HALF_HI(d4.w), HALF_LO(d5.x), HALF_HI(d5.x)) +
+               SH_C3_6 * x * (xx - 3.0 * yy) * min16float3(HALF_LO(d5.y), HALF_HI(d5.y), HALF_LO(d5.z));
+
+    shColor = max(shColor, min16float3(0.0, 0.0, 0.0));
 
     // Write Gaussian2D to geometry buffer
     Gaussian2D g;
-    g.conicOpacity = float4(conic, opacity);
-    g.color = float4(shColor, 1.0);
+    g.conicOpacity = float4(conic, float(opacity));
+    g.color = float4(float3(shColor), 1.0);
     g.screenPos = screenPos;
     g.radius = boundingRadius;
     g.depth = linearDepth;

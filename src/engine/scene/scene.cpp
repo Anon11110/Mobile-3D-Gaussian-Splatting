@@ -4,6 +4,54 @@
 #include <msplat/engine/sorting/cpu_splat_sorter.h>
 #include <msplat/engine/splat/splat_math.h>
 
+#include <cstring>
+
+namespace
+{
+// IEEE 754 float32 to float16 conversion
+inline uint16_t FloatToHalf(float value)
+{
+	uint32_t f;
+	std::memcpy(&f, &value, sizeof(f));
+
+	uint32_t sign = (f >> 31) & 1;
+	int32_t  exp  = static_cast<int32_t>((f >> 23) & 0xFF) - 127;
+	uint32_t mant = f & 0x7FFFFF;
+
+	if (exp > 15)
+	{
+		return static_cast<uint16_t>((sign << 15) | 0x7BFF);        // Max finite half (±65504)
+	}
+	if (exp < -24)
+	{
+		return static_cast<uint16_t>(sign << 15);        // Signed zero
+	}
+	if (exp < -14)
+	{
+		// Denormalized half
+		mant |= 0x800000;
+		uint32_t shift = static_cast<uint32_t>(-1 - exp);
+		mant >>= shift;
+		return static_cast<uint16_t>((sign << 15) | (mant >> 13));
+	}
+
+	return static_cast<uint16_t>((sign << 15) | ((exp + 15) << 10) | (mant >> 13));
+}
+
+// Pack two float32 values into a single uint32 as two float16 values
+// Low 16 bits = half(a), high 16 bits = half(b)
+inline uint32_t PackHalf2x16(float a, float b)
+{
+	return static_cast<uint32_t>(FloatToHalf(a)) |
+	       (static_cast<uint32_t>(FloatToHalf(b)) << 16);
+}
+
+// Number of packed uint32s per splat for interleaved SH coefficients
+// 45 halfs + 3 padding = 48 halfs = 24 uints
+static constexpr uint32_t SH_PACKED_UINTS_PER_SPLAT = 24;
+static constexpr uint32_t SH_COEFFS_PER_CHANNEL     = 15;
+}        // namespace
+
 namespace msplat::engine
 {
 
@@ -187,15 +235,15 @@ rhi::FenceHandle Scene::UploadAttributeDataInternal()
 
 	container::vector<float>    positions;
 	container::vector<float>    covariances;
-	container::vector<float>    colors;
-	container::vector<float>    shRest;
+	container::vector<uint32_t> colorsPacked;        // Half-precision: 2 packed half2 per splat
+	container::vector<uint32_t> shRestPacked;        // Half-precision: 23 packed half2 per splat
 	container::vector<uint32_t> meshIndices;
 	container::vector<float>    modelMatrices;
 
 	positions.reserve(totalSplatCount * 4);
 	covariances.reserve(totalSplatCount * 8);        // 6 floats + 2 padding = 8 floats per splat
-	colors.reserve(totalSplatCount * 4);
-	shRest.reserve(totalShCoeffs);
+	colorsPacked.reserve(totalSplatCount * 2);
+	shRestPacked.reserve(totalSplatCount * SH_PACKED_UINTS_PER_SPLAT);
 	meshIndices.reserve(totalSplatCount);
 	modelMatrices.reserve(meshes.size() * 16);        // 16 floats per mat4
 
@@ -256,7 +304,7 @@ rhi::FenceHandle Scene::UploadAttributeDataInternal()
 			float cov[6];
 			ComputeCovariance3D(scale, rotation, cov);
 
-			// Pack as 2 vec3 (6 floats + 2 padding)
+			// Pack as 2 vec3 (6 floats + 2 padding
 			covariances.push_back(cov[0]);        // M11
 			covariances.push_back(cov[1]);        // M12
 			covariances.push_back(cov[2]);        // M13
@@ -266,20 +314,44 @@ rhi::FenceHandle Scene::UploadAttributeDataInternal()
 			covariances.push_back(cov[5]);        // M33
 			covariances.push_back(0.0f);          // padding
 
-			// Color: convert SH degree 0 and opacity
+			// Color: convert SH degree 0 and opacity, pack as 2 half2
 			math::vec3 rgb   = ComputeSHDegree0Color(splatData->fDc0[i], splatData->fDc1[i], splatData->fDc2[i]);
 			float      alpha = TransformOpacity(splatData->opacity[i]);
 
-			colors.push_back(rgb.x);
-			colors.push_back(rgb.y);
-			colors.push_back(rgb.z);
-			colors.push_back(alpha);
+			colorsPacked.push_back(PackHalf2x16(rgb.x, rgb.y));
+			colorsPacked.push_back(PackHalf2x16(rgb.z, alpha));
 		}
 
-		// SH coefficients
-		for (const auto &coeff : splatData->fRest)
+		// SH coefficients: reorder from channel-contiguous to interleaved
+		// and pack as half-precision into uint pairs
 		{
-			shRest.push_back(coeff);
+			const uint32_t meshShPerSplat   = splatData->shCoeffsPerSplat;
+			const uint32_t coeffsPerChannel = (meshShPerSplat > 0) ? meshShPerSplat / 3 : 0;
+
+			for (uint32_t si = 0; si < count; ++si)
+			{
+				const uint32_t splatBase = si * meshShPerSplat;
+
+				// Build 48 halfs in interleaved order (45 coefficients + 3 padding)
+				uint16_t halfs[48] = {};
+				for (uint32_t i = 0; i < SH_COEFFS_PER_CHANNEL; ++i)
+				{
+					float r          = (i < coeffsPerChannel) ? splatData->fRest[splatBase + i] : 0.0f;
+					float g          = (i < coeffsPerChannel) ? splatData->fRest[splatBase + coeffsPerChannel + i] : 0.0f;
+					float b          = (i < coeffsPerChannel) ? splatData->fRest[splatBase + 2 * coeffsPerChannel + i] : 0.0f;
+					halfs[i * 3 + 0] = FloatToHalf(r);
+					halfs[i * 3 + 1] = FloatToHalf(g);
+					halfs[i * 3 + 2] = FloatToHalf(b);
+				}
+
+				// Pack pairs of halfs into uint32s (24 uints = 6 uint4)
+				for (uint32_t u = 0; u < SH_PACKED_UINTS_PER_SPLAT; ++u)
+				{
+					shRestPacked.push_back(
+					    static_cast<uint32_t>(halfs[u * 2]) |
+					    (static_cast<uint32_t>(halfs[u * 2 + 1]) << 16));
+				}
+			}
 		}
 
 		currentSplatOffset += count;
@@ -309,19 +381,19 @@ rhi::FenceHandle Scene::UploadAttributeDataInternal()
 
 	rhi::FenceHandle colorsFence = device->UploadBufferAsync(
 	    gpuData.colors.Get(),
-	    colors.data(),
-	    colors.size() * sizeof(float));
+	    colorsPacked.data(),
+	    colorsPacked.size() * sizeof(uint32_t));
 	if (colorsFence)
 	{
 		uploadFences.push_back(colorsFence);
 	}
 
-	if (!shRest.empty())
+	if (!shRestPacked.empty())
 	{
 		rhi::FenceHandle shFence = device->UploadBufferAsync(
 		    gpuData.shRest.Get(),
-		    shRest.data(),
-		    shRest.size() * sizeof(float));
+		    shRestPacked.data(),
+		    shRestPacked.size() * sizeof(uint32_t));
 		if (shFence)
 		{
 			uploadFences.push_back(shFence);
@@ -486,7 +558,7 @@ void Scene::AllocateGpuBuffersInternal()
 	}
 
 	{
-		// Covariances3D buffer (6 floats per splat, packed as 2 vec3)
+		// Covariances3D buffer (6 floats per splat, packed as 2 float4 with padding)
 		BufferDesc desc{};
 		desc.usage            = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
 		desc.resourceUsage    = ResourceUsage::Static;
@@ -495,11 +567,11 @@ void Scene::AllocateGpuBuffersInternal()
 	}
 
 	{
-		// Colors buffer
+		// Colors buffer (RGBA as 4 float16 packed into 2 uint32)
 		BufferDesc desc{};
 		desc.usage         = BufferUsage::STORAGE | BufferUsage::TRANSFER_DST;
 		desc.resourceUsage = ResourceUsage::Static;
-		desc.size          = totalSplatCount * 4 * sizeof(float);
+		desc.size          = totalSplatCount * 2 * sizeof(uint32_t);        // 2 packed half2
 		gpuData.colors     = device->CreateBuffer(desc);
 	}
 
@@ -512,11 +584,10 @@ void Scene::AllocateGpuBuffersInternal()
 
 		if (maxShCoeffsPerSplat > 0)
 		{
-			const uint32_t shCoeffsPerSplat = 45;
-			desc.size                       = totalSplatCount * shCoeffsPerSplat * sizeof(float);
-			gpuData.shRest                  = device->CreateBuffer(desc);
-			LOG_INFO("Allocated SH buffer for {} splats with {} coeffs each ({} MB)",
-			         totalSplatCount, shCoeffsPerSplat,
+			desc.size      = totalSplatCount * SH_PACKED_UINTS_PER_SPLAT * sizeof(uint32_t);
+			gpuData.shRest = device->CreateBuffer(desc);
+			LOG_INFO("Allocated SH buffer for {} splats with {} packed uints each ({:.2f} MB, interleaved half precision)",
+			         totalSplatCount, SH_PACKED_UINTS_PER_SPLAT,
 			         (desc.size / 1024.0f / 1024.0f));
 		}
 		else

@@ -27,10 +27,10 @@ class Scene
 	struct GpuData
 	{
 		// Splat attribute buffers
-		rhi::BufferHandle positions;            // vec3 positions[]
-		rhi::BufferHandle covariances3D;        // vec3[2] covariances[] (6 floats packed as 2 vec3)
-		rhi::BufferHandle colors;               // vec4 colors[]
-		rhi::BufferHandle shRest;               // float shRest[]
+		rhi::BufferHandle positions;            // float4 positions[] (float32, 16 bytes/splat)
+		rhi::BufferHandle covariances3D;        // float4[2] per splat (float32, 32 bytes/splat: M11,M12,M13,pad | M22,M23,M33,pad)
+		rhi::BufferHandle colors;               // uint2 per splat: packed half2 {R|G, B|A} (8 bytes/splat)
+		rhi::BufferHandle shRest;               // uint4[6] interleaved RGB half (float16, 96 bytes/splat: 15 triplets + pad)
 
 		// Per-splat mesh index for model matrix lookup
 		rhi::BufferHandle meshIndices;        // uint32 meshIndex[]

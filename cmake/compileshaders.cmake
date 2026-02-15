@@ -169,19 +169,19 @@ function(compile_hlsl_shaders SHADER_SRC_DIR TARGET_NAME)
             continue()
         endif()
 
-        # Map normalized stage to DXC profile (single source of truth)
+        # Map normalized stage to DXC profile (use SM 6.2 for 16 bit type support)
         if(STAGE STREQUAL "vs")
-            set(SHADER_PROFILE "vs_6_0")
+            set(SHADER_PROFILE "vs_6_2")
         elseif(STAGE STREQUAL "fs")
-            set(SHADER_PROFILE "ps_6_0")
+            set(SHADER_PROFILE "ps_6_2")
         elseif(STAGE STREQUAL "cs")
-            set(SHADER_PROFILE "cs_6_0")
+            set(SHADER_PROFILE "cs_6_2")
         elseif(STAGE STREQUAL "gs")
-            set(SHADER_PROFILE "gs_6_0")
+            set(SHADER_PROFILE "gs_6_2")
         elseif(STAGE STREQUAL "ts")
-            set(SHADER_PROFILE "hs_6_0")
+            set(SHADER_PROFILE "hs_6_2")
         elseif(STAGE STREQUAL "es")
-            set(SHADER_PROFILE "ds_6_0")
+            set(SHADER_PROFILE "ds_6_2")
         else()
             message(WARNING "Unknown stage ${STAGE} for ${SHADER_NAME}, skipping")
             continue()
@@ -227,6 +227,7 @@ function(compile_hlsl_shaders SHADER_SRC_DIR TARGET_NAME)
                     -E ${SHADER_ENTRYPOINT}
                     -fspv-target-env=vulkan1.1
                     -fvk-use-dx-layout
+                    -enable-16bit-types
                     ${DXC_DEFINES}
                     -I ${SHADER_SRC_DIR}
                     -I ${CMAKE_SOURCE_DIR}/shaders

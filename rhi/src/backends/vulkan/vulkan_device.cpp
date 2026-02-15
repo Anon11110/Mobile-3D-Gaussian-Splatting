@@ -1165,6 +1165,11 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		sync2Features.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
 		sync2Features.synchronization2 = VK_TRUE;
 
+		// Enable native FP16 support
+		VkPhysicalDeviceVulkan12Features vulkan12Features{};
+		vulkan12Features.sType         = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+		vulkan12Features.shaderFloat16 = VK_TRUE;
+
 		VkDeviceCreateInfo createInfo{};
 		createInfo.sType                = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
@@ -1265,7 +1270,8 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
 		// Chain feature structures into pNext
-		// sync2Features -> dynamicRenderingFeatures -> localReadFeatures (if enabled)
+		// vulkan12Features -> sync2Features -> dynamicRenderingFeatures -> localReadFeatures (if enabled)
+		vulkan12Features.pNext = &sync2Features;
 		if (hasDynamicRendering)
 		{
 			sync2Features.pNext = &dynamicRenderingFeatures;
@@ -1274,7 +1280,7 @@ class VulkanDevice final : public RefCounter<IRHIDevice>
 				dynamicRenderingFeatures.pNext = &localReadFeatures;
 			}
 		}
-		createInfo.pNext = &sync2Features;
+		createInfo.pNext = &vulkan12Features;
 
 		if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
 		{
