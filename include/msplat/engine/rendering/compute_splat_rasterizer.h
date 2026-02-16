@@ -90,7 +90,7 @@ class ComputeSplatRasterizer
 		rhi::BufferHandle geometryBuffer;          // Gaussian2D per splat
 		rhi::BufferHandle tileKeys;                // Packed tile keys (unsorted, sorter's input)
 		rhi::BufferHandle tileValues;              // Splat indices (unsorted, sorter's input)
-		rhi::BufferHandle sortedTileKeys;          // Sorted tile keys (sorter's output)
+		rhi::BufferHandle sortedTileKeys;          // Sorted tile pairs (uint2: key + index, sorter's sortPairsB)
 		rhi::BufferHandle sortedTileValues;        // Sorted splat indices (sorter's output)
 		rhi::BufferHandle tileRanges;              // Per-tile start/end
 		rhi::BufferHandle globalCounter;           // Atomic counter

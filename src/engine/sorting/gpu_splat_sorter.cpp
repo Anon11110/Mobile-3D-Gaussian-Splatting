@@ -37,12 +37,15 @@ void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outp
 	bufferDesc.size      = totalSplatCount * sizeof(uint32_t);
 	splatIndicesOriginal = device->CreateBuffer(bufferDesc);
 
-	// Sort buffers (ping-pong)
+	// Sort pair buffers (ping-pong)
 	// With RadixPasses=4, the final pass writes to buffer B.
 	// Use the caller's output buffer as sortIndicesB so results are written directly.
-	sortKeysA        = device->CreateBuffer(bufferDesc);
-	sortKeysB        = device->CreateBuffer(bufferDesc);
-	sortIndicesA     = device->CreateBuffer(bufferDesc);
+	bufferDesc.size = totalSplatCount * sizeof(uint32_t) * 2;
+	sortPairsA      = device->CreateBuffer(bufferDesc);
+	sortPairsB      = device->CreateBuffer(bufferDesc);
+
+	// Output index buffers
+	bufferDesc.size  = totalSplatCount * sizeof(uint32_t);
 	sortIndicesB     = std::move(outputBuffer);
 	sortIndicesB_Alt = device->CreateBuffer(bufferDesc);
 
@@ -144,6 +147,14 @@ void GpuSplatSorter::CreateComputePipelines()
 	    "shaders/compiled/depth_calc_cs",
 	    rhi::ShaderStage::COMPUTE);
 
+	rhi::ShaderHandle packPairsShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/sort_pairs_pack_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle unpackIndicesShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/sort_pairs_unpack_cs",
+	    rhi::ShaderStage::COMPUTE);
+
 	// Portable shaders
 	rhi::ShaderHandle histogramShader = shaderFactory.getOrCreateShader(
 	    "shaders/compiled/radix_histogram_cs",
@@ -168,6 +179,14 @@ void GpuSplatSorter::CreateComputePipelines()
 
 	rhi::ShaderHandle scatterPairsPrescanShader = shaderFactory.getOrCreateShader(
 	    "shaders/compiled/radix_scatter_pairs_prescan_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle scatterUnpackShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_scatter_unpack_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle scatterUnpackPrescanShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_scatter_unpack_prescan_cs",
 	    rhi::ShaderStage::COMPUTE);
 
 	// Create descriptor set layouts
@@ -208,11 +227,37 @@ void GpuSplatSorter::CreateComputePipelines()
 		depthCalcSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 	}
 
+	// Pack pairs layout
+	{
+		rhi::DescriptorSetLayoutDesc layoutDesc = {};
+
+		// Binding 0: Input depth keys
+		layoutDesc.bindings.push_back({0, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 1: Input splat indices
+		layoutDesc.bindings.push_back({1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 2: Output pairs
+		layoutDesc.bindings.push_back({2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+
+		packPairsSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
+	}
+
+	// Unpack indices layout
+	{
+		rhi::DescriptorSetLayoutDesc layoutDesc = {};
+
+		// Binding 0: Input pairs
+		layoutDesc.bindings.push_back({0, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 1: Output indices
+		layoutDesc.bindings.push_back({1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+
+		unpackIndicesSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
+	}
+
 	// Histogram layout
 	{
 		rhi::DescriptorSetLayoutDesc layoutDesc = {};
 
-		// Binding 0: Input elements (depth keys)
+		// Binding 0: Input pairs
 		layoutDesc.bindings.push_back({0,
 		                               rhi::DescriptorType::STORAGE_BUFFER,
 		                               1,
@@ -250,72 +295,26 @@ void GpuSplatSorter::CreateComputePipelines()
 	{
 		rhi::DescriptorSetLayoutDesc layoutDesc = {};
 
-		// Binding 0: Input depth keys
-		layoutDesc.bindings.push_back({0,
-		                               rhi::DescriptorType::STORAGE_BUFFER,
-		                               1,
-		                               rhi::ShaderStageFlags::COMPUTE});
-
-		// Binding 1: Input splat indices
-		layoutDesc.bindings.push_back({1,
-		                               rhi::DescriptorType::STORAGE_BUFFER,
-		                               1,
-		                               rhi::ShaderStageFlags::COMPUTE});
-
-		// Binding 2: Output depth keys
-		layoutDesc.bindings.push_back({2,
-		                               rhi::DescriptorType::STORAGE_BUFFER,
-		                               1,
-		                               rhi::ShaderStageFlags::COMPUTE});
-
-		// Binding 3: Output splat indices
-		layoutDesc.bindings.push_back({3,
-		                               rhi::DescriptorType::STORAGE_BUFFER,
-		                               1,
-		                               rhi::ShaderStageFlags::COMPUTE});
-
-		// Binding 4: Scanned histograms
-		layoutDesc.bindings.push_back({4,
-		                               rhi::DescriptorType::STORAGE_BUFFER,
-		                               1,
-		                               rhi::ShaderStageFlags::COMPUTE});
+		// Binding 0: Input pairs
+		layoutDesc.bindings.push_back({0, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 1: Output pairs
+		layoutDesc.bindings.push_back({1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 2: Scanned histograms
+		layoutDesc.bindings.push_back({2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
 
 		scatterPairsSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 	}
 
-	// Scatter pairs layout for integrated scan method (raw histograms)
+	// Scatter pairs layout for integrated scan method
 	{
 		rhi::DescriptorSetLayoutDesc layoutDesc = {};
 
-		// Binding 0: Input depth keys
-		layoutDesc.bindings.push_back({0,
-		                               rhi::DescriptorType::STORAGE_BUFFER,
-		                               1,
-		                               rhi::ShaderStageFlags::COMPUTE});
-
-		// Binding 1: Input splat indices
-		layoutDesc.bindings.push_back({1,
-		                               rhi::DescriptorType::STORAGE_BUFFER,
-		                               1,
-		                               rhi::ShaderStageFlags::COMPUTE});
-
-		// Binding 2: Output depth keys
-		layoutDesc.bindings.push_back({2,
-		                               rhi::DescriptorType::STORAGE_BUFFER,
-		                               1,
-		                               rhi::ShaderStageFlags::COMPUTE});
-
-		// Binding 3: Output splat indices
-		layoutDesc.bindings.push_back({3,
-		                               rhi::DescriptorType::STORAGE_BUFFER,
-		                               1,
-		                               rhi::ShaderStageFlags::COMPUTE});
-
-		// Binding 4: Raw histograms (not scanned)
-		layoutDesc.bindings.push_back({4,
-		                               rhi::DescriptorType::STORAGE_BUFFER,
-		                               1,
-		                               rhi::ShaderStageFlags::COMPUTE});
+		// Binding 0: Input pairs
+		layoutDesc.bindings.push_back({0, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 1: Output pairs
+		layoutDesc.bindings.push_back({1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 2: Raw histograms (not scanned)
+		layoutDesc.bindings.push_back({2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
 
 		scatterPairsIntegratedSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 	}
@@ -335,6 +334,36 @@ void GpuSplatSorter::CreateComputePipelines()
 		pipelineDesc.pushConstantRanges          = {pushConstantRange};
 
 		depthCalcPipeline = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Pack pairs pipeline
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = packPairsShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {packPairsSetLayout.Get()};
+
+		rhi::PushConstantRange pushConstantRange = {};
+		pushConstantRange.stageFlags             = rhi::ShaderStageFlags::COMPUTE;
+		pushConstantRange.offset                 = 0;
+		pushConstantRange.size                   = sizeof(uint32_t);        // numElements only
+		pipelineDesc.pushConstantRanges          = {pushConstantRange};
+
+		packPairsPipeline = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Unpack indices pipeline
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = unpackIndicesShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {unpackIndicesSetLayout.Get()};
+
+		rhi::PushConstantRange pushConstantRange = {};
+		pushConstantRange.stageFlags             = rhi::ShaderStageFlags::COMPUTE;
+		pushConstantRange.offset                 = 0;
+		pushConstantRange.size                   = sizeof(uint32_t);        // numElements only
+		pipelineDesc.pushConstantRanges          = {pushConstantRange};
+
+		unpackIndicesPipeline = device->CreateComputePipeline(pipelineDesc);
 	}
 
 	// Portable histogram pipeline
@@ -428,6 +457,36 @@ void GpuSplatSorter::CreateComputePipelines()
 
 		scatterPairsPrescanPipeline = device->CreateComputePipeline(pipelineDesc);
 	}
+
+	// Scatter unpack pipeline with integrated prefix sum
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = scatterUnpackShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {scatterPairsIntegratedSetLayout.Get()};
+
+		rhi::PushConstantRange pushConstantRange = {};
+		pushConstantRange.stageFlags             = rhi::ShaderStageFlags::COMPUTE;
+		pushConstantRange.offset                 = 0;
+		pushConstantRange.size                   = sizeof(PushConstants);
+		pipelineDesc.pushConstantRanges          = {pushConstantRange};
+
+		scatterUnpackPipeline = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Scatter unpack pipeline with prescan
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = scatterUnpackPrescanShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {scatterPairsSetLayout.Get()};
+
+		rhi::PushConstantRange pushConstantRange = {};
+		pushConstantRange.stageFlags             = rhi::ShaderStageFlags::COMPUTE;
+		pushConstantRange.offset                 = 0;
+		pushConstantRange.size                   = sizeof(PushConstants);
+		pipelineDesc.pushConstantRanges          = {pushConstantRange};
+
+		scatterUnpackPrescanPipeline = device->CreateComputePipeline(pipelineDesc);
+	}
 }
 
 void GpuSplatSorter::CreateDescriptorSets()
@@ -439,13 +498,13 @@ void GpuSplatSorter::CreateDescriptorSets()
 		// We'll update the positions buffer binding dynamically in Sort()
 		// Set up the other bindings here
 
-		// Binding 1: Output depth keys
-		rhi::BufferBinding depthBinding = {};
-		depthBinding.buffer             = splatDepths.Get();
-		depthBinding.offset             = 0;
-		depthBinding.range              = 0;        // 0 means whole buffer
-		depthBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-		depthCalcDescriptorSet->BindBuffer(1, depthBinding);
+		// Binding 1: Output pairs
+		rhi::BufferBinding pairsBinding = {};
+		pairsBinding.buffer             = sortPairsB.Get();
+		pairsBinding.offset             = 0;
+		pairsBinding.range              = 0;        // Whole buffer
+		pairsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		depthCalcDescriptorSet->BindBuffer(1, pairsBinding);
 
 		// Binding 2: Camera UBO
 		rhi::BufferBinding cameraBinding = {};
@@ -454,6 +513,50 @@ void GpuSplatSorter::CreateDescriptorSets()
 		cameraBinding.range              = sizeof(math::mat4);
 		cameraBinding.type               = rhi::DescriptorType::UNIFORM_BUFFER;
 		depthCalcDescriptorSet->BindBuffer(2, cameraBinding);
+	}
+
+	// Create descriptor set for pack pairs
+	{
+		packPairsDescriptorSet = device->CreateDescriptorSet(packPairsSetLayout.Get(), rhi::QueueType::COMPUTE);
+
+		rhi::BufferBinding keysBinding = {};
+		keysBinding.buffer             = splatDepths.Get();
+		keysBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		packPairsDescriptorSet->BindBuffer(0, keysBinding);
+
+		rhi::BufferBinding indicesBinding = {};
+		indicesBinding.buffer             = splatIndicesOriginal.Get();
+		indicesBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		packPairsDescriptorSet->BindBuffer(1, indicesBinding);
+
+		// Pack always writes to sortPairsA (pass 0 scatter reads from A when useA=true...
+		// but actually pass 0 outputs to A, so pack must write to the INPUT of pass 0).
+		// Pass 0 (useA=true): reads from opposite = B input would be wrong.
+		// Actually with packed pairs: pack → sortPairsB, pass 0 reads B writes A,
+		// pass 1 reads A writes B, pass 2 reads B writes A, pass 3 reads A writes B.
+		// Final result in B. Unpack reads B.
+		rhi::BufferBinding pairsBinding = {};
+		pairsBinding.buffer             = sortPairsB.Get();        // Pack into B, pass 0 reads from B
+		pairsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		packPairsDescriptorSet->BindBuffer(2, pairsBinding);
+	}
+
+	// Create descriptor sets for unpack indices (one per output buffer)
+	for (uint32_t bufferIdx = 0; bufferIdx < 2; ++bufferIdx)
+	{
+		unpackIndicesDescriptorSets[bufferIdx] = device->CreateDescriptorSet(unpackIndicesSetLayout.Get(), rhi::QueueType::COMPUTE);
+
+		// Binding 0: Final sorted pairs (always in sortPairsB after 4 passes)
+		rhi::BufferBinding pairsBinding = {};
+		pairsBinding.buffer             = sortPairsB.Get();
+		pairsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		unpackIndicesDescriptorSets[bufferIdx]->BindBuffer(0, pairsBinding);
+
+		// Binding 1: Output indices
+		rhi::BufferBinding indicesBinding = {};
+		indicesBinding.buffer             = (bufferIdx == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+		indicesBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		unpackIndicesDescriptorSets[bufferIdx]->BindBuffer(1, indicesBinding);
 	}
 
 	// Create descriptor sets for histogram (one per pass)
@@ -465,21 +568,19 @@ void GpuSplatSorter::CreateDescriptorSets()
 		{
 			histogramDescriptorSets[pass] = device->CreateDescriptorSet(histogramSetLayout.Get(), rhi::QueueType::COMPUTE);
 
-			// Binding 0: Input elements
+			// Binding 0: Input pairs
+			// Ping-pong: pack→B, pass 0 writes A, pass 1 writes B, etc.
+			// Histogram reads from previous scatter output:
+			// Pass 0: reads B (packed initial data)
+			// Pass 1: reads A (scatter pass 0 output)
+			// Pass 2: reads B (scatter pass 1 output)
+			// Pass 3: reads A (scatter pass 2 output)
 			rhi::BufferBinding inputBinding = {};
-			if (pass == 0)
-			{
-				inputBinding.buffer = splatDepths.Get();        // First pass uses original depth keys
-			}
-			else
-			{
-				// Subsequent passes read from the output of the previous pass
-				bool prevPassUsedA  = ((pass - 1) % 2 == 0);
-				inputBinding.buffer = prevPassUsedA ? sortKeysA.Get() : sortKeysB.Get();
-			}
-			inputBinding.offset = 0;
-			inputBinding.range  = 0;
-			inputBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			bool               readFromA    = (pass % 2 != 0);        // odd passes read A, even passes read B
+			inputBinding.buffer             = readFromA ? sortPairsA.Get() : sortPairsB.Get();
+			inputBinding.offset             = 0;
+			inputBinding.range              = 0;
+			inputBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
 			histogramDescriptorSets[pass]->BindBuffer(0, inputBinding);
 
 			// Binding 1: Output histograms
@@ -489,24 +590,6 @@ void GpuSplatSorter::CreateDescriptorSets()
 			histogramBinding.range              = histogramSizePerPass;
 			histogramBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
 			histogramDescriptorSets[pass]->BindBuffer(1, histogramBinding);
-
-			//-----------------------------------------------------------------------
-
-			// // Binding 0: Input elements (depth keys)
-			// rhi::BufferBinding inputBinding = {};
-			// inputBinding.buffer             = splatDepths.Get();
-			// inputBinding.offset             = 0;
-			// inputBinding.range              = 0;
-			// inputBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-			// histogramDescriptorSets[pass]->BindBuffer(0, inputBinding);
-
-			// // Binding 1: Output histograms (with offset for this pass)
-			// rhi::BufferBinding histogramBinding = {};
-			// histogramBinding.buffer             = histograms.Get();
-			// histogramBinding.offset             = pass * histogramSizePerPass;
-			// histogramBinding.range              = histogramSizePerPass;
-			// histogramBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-			// histogramDescriptorSets[pass]->BindBuffer(1, histogramBinding);
 		}
 	}
 
@@ -551,156 +634,107 @@ void GpuSplatSorter::CreateDescriptorSets()
 		scanBlockSumsDescriptorSet->BindBuffer(1, blockSumDataBinding);
 	}
 
-	// Create descriptor sets for prescan scatter operations (one per pass, double-buffered for async compute)
+	// Create descriptor sets for prescan scatter operations (one per pass)
 	{
 		uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 
-		// bufferIdx 0 uses sortIndicesB, bufferIdx 1 uses sortIndicesB_Alt
-		for (uint32_t bufferIdx = 0; bufferIdx < 2; ++bufferIdx)
+		for (uint32_t pass = 0; pass < RadixPasses; ++pass)
 		{
-			rhi::IRHIBuffer *outputIndicesB = (bufferIdx == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+			// Ping-pong: pack→B, pass 0 reads B writes A, pass 1 reads A writes B, etc.
+			bool writeToA = (pass % 2 == 0);
 
-			for (uint32_t pass = 0; pass < RadixPasses; ++pass)
-			{
-				bool useA = (pass % 2 == 0);
+			scatterPairsPrescanDescriptorSets[pass] = device->CreateDescriptorSet(scatterPairsSetLayout.Get(), rhi::QueueType::COMPUTE);
 
-				scatterPairsPrescanDescriptorSets[bufferIdx][pass] = device->CreateDescriptorSet(scatterPairsSetLayout.Get(), rhi::QueueType::COMPUTE);
+			// Binding 0: Input pairs
+			rhi::BufferBinding pairsInBinding = {};
+			pairsInBinding.buffer             = writeToA ? sortPairsB.Get() : sortPairsA.Get();
+			pairsInBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			scatterPairsPrescanDescriptorSets[pass]->BindBuffer(0, pairsInBinding);
 
-				// Binding 0: Input depth keys
-				rhi::BufferBinding keysInBinding = {};
-				if (pass == 0)
-				{
-					keysInBinding.buffer = splatDepths.Get();
-				}
-				else
-				{
-					keysInBinding.buffer = useA ? sortKeysB.Get() : sortKeysA.Get();
-				}
-				keysInBinding.offset = 0;
-				keysInBinding.range  = 0;
-				keysInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-				scatterPairsPrescanDescriptorSets[bufferIdx][pass]->BindBuffer(0, keysInBinding);
+			// Binding 1: Output pairs
+			rhi::BufferBinding pairsOutBinding = {};
+			pairsOutBinding.buffer             = writeToA ? sortPairsA.Get() : sortPairsB.Get();
+			pairsOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			scatterPairsPrescanDescriptorSets[pass]->BindBuffer(1, pairsOutBinding);
 
-				// Binding 1: Input splat indices
-				rhi::BufferBinding valuesInBinding = {};
-				if (pass == 0)
-				{
-					valuesInBinding.buffer = splatIndicesOriginal.Get();
-				}
-				else
-				{
-					// Read from the buffer the previous pass wrote to
-					// For pass 2+, we read from the output of the previous pass
-					valuesInBinding.buffer = useA ? outputIndicesB : sortIndicesA.Get();
-				}
-				valuesInBinding.offset = 0;
-				valuesInBinding.range  = 0;
-				valuesInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-				scatterPairsPrescanDescriptorSets[bufferIdx][pass]->BindBuffer(1, valuesInBinding);
-
-				// Binding 2: Output depth keys
-				rhi::BufferBinding keysOutBinding = {};
-				keysOutBinding.buffer             = useA ? sortKeysA.Get() : sortKeysB.Get();
-				keysOutBinding.offset             = 0;
-				keysOutBinding.range              = 0;
-				keysOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-				scatterPairsPrescanDescriptorSets[bufferIdx][pass]->BindBuffer(2, keysOutBinding);
-
-				// Binding 3: Output splat indices
-				rhi::BufferBinding valuesOutBinding = {};
-				valuesOutBinding.buffer             = useA ? sortIndicesA.Get() : outputIndicesB;
-				valuesOutBinding.offset             = 0;
-				valuesOutBinding.range              = 0;
-				valuesOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-				scatterPairsPrescanDescriptorSets[bufferIdx][pass]->BindBuffer(3, valuesOutBinding);
-
-				// Binding 4: Scanned histograms
-				rhi::BufferBinding histPairsBinding = {};
-				histPairsBinding.buffer             = histograms.Get();
-				histPairsBinding.offset             = pass * histogramSizePerPass;
-				histPairsBinding.range              = histogramSizePerPass;
-				histPairsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-				scatterPairsPrescanDescriptorSets[bufferIdx][pass]->BindBuffer(4, histPairsBinding);
-			}
+			// Binding 2: Scanned histograms
+			rhi::BufferBinding histBinding = {};
+			histBinding.buffer             = histograms.Get();
+			histBinding.offset             = pass * histogramSizePerPass;
+			histBinding.range              = histogramSizePerPass;
+			histBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			scatterPairsPrescanDescriptorSets[pass]->BindBuffer(2, histBinding);
 		}
 	}
 
-	// Create descriptor sets for integrated scan scatter operations (one per pass, double-buffered for async compute)
-	// bufferIdx 0 uses sortIndicesB, bufferIdx 1 uses sortIndicesB_Alt
+	// Create descriptor sets for integrated scan scatter operations (one per pass)
 	{
 		uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
 		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 
+		for (uint32_t pass = 0; pass < RadixPasses; ++pass)
+		{
+			bool writeToA = (pass % 2 == 0);
+
+			scatterPairsIntegratedDescriptorSets[pass] = device->CreateDescriptorSet(scatterPairsIntegratedSetLayout.Get(), rhi::QueueType::COMPUTE);
+
+			// Binding 0: Input pairs
+			rhi::BufferBinding pairsInBinding = {};
+			pairsInBinding.buffer             = writeToA ? sortPairsB.Get() : sortPairsA.Get();
+			pairsInBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			scatterPairsIntegratedDescriptorSets[pass]->BindBuffer(0, pairsInBinding);
+
+			// Binding 1: Output pairs
+			rhi::BufferBinding pairsOutBinding = {};
+			pairsOutBinding.buffer             = writeToA ? sortPairsA.Get() : sortPairsB.Get();
+			pairsOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			scatterPairsIntegratedDescriptorSets[pass]->BindBuffer(1, pairsOutBinding);
+
+			// Binding 2: Raw histograms (not scanned)
+			rhi::BufferBinding histBinding = {};
+			histBinding.buffer             = histograms.Get();
+			histBinding.offset             = pass * histogramSizePerPass;
+			histBinding.range              = histogramSizePerPass;
+			histBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			scatterPairsIntegratedDescriptorSets[pass]->BindBuffer(2, histBinding);
+		}
+	}
+
+	// Create descriptor sets for scatter unpack (only for final pass writes indices directly)
+	{
+		uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
+		uint32_t finalPass            = RadixPasses - 1;
+		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
+
 		for (uint32_t bufferIdx = 0; bufferIdx < 2; ++bufferIdx)
 		{
-			// Use primary or alternate output buffer based on index
-			rhi::IRHIBuffer *outputIndicesB = (bufferIdx == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+			scatterUnpackPrescanDescriptorSets[bufferIdx] = device->CreateDescriptorSet(scatterPairsSetLayout.Get(), rhi::QueueType::COMPUTE);
 
-			for (uint32_t pass = 0; pass < RadixPasses; ++pass)
-			{
-				bool useA = (pass % 2 == 0);
+			// Binding 0: Input pairs (pass 3 reads from A, since pass 3 writeToA = false)
+			rhi::BufferBinding pairsInBinding = {};
+			pairsInBinding.buffer             = sortPairsA.Get();
+			pairsInBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			scatterUnpackPrescanDescriptorSets[bufferIdx]->BindBuffer(0, pairsInBinding);
 
-				scatterPairsIntegratedDescriptorSets[bufferIdx][pass] = device->CreateDescriptorSet(scatterPairsIntegratedSetLayout.Get(), rhi::QueueType::COMPUTE);
+			// Binding 1: Output indices
+			rhi::BufferBinding indicesOutBinding = {};
+			indicesOutBinding.buffer             = (bufferIdx == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+			indicesOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			scatterUnpackPrescanDescriptorSets[bufferIdx]->BindBuffer(1, indicesOutBinding);
 
-				// Binding 0: Input depth keys
-				rhi::BufferBinding keysInBinding = {};
-				if (pass == 0)
-				{
-					keysInBinding.buffer = splatDepths.Get();
-				}
-				else
-				{
-					// Read from the buffer the previous pass wrote to
-					keysInBinding.buffer = useA ? sortKeysB.Get() : sortKeysA.Get();
-				}
-				keysInBinding.offset = 0;
-				keysInBinding.range  = 0;
-				keysInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-				scatterPairsIntegratedDescriptorSets[bufferIdx][pass]->BindBuffer(0, keysInBinding);
+			// Binding 2: Scanned histograms for pass 3
+			rhi::BufferBinding histBinding = {};
+			histBinding.buffer             = histograms.Get();
+			histBinding.offset             = finalPass * histogramSizePerPass;
+			histBinding.range              = histogramSizePerPass;
+			histBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+			scatterUnpackPrescanDescriptorSets[bufferIdx]->BindBuffer(2, histBinding);
 
-				// Binding 1: Input splat indices
-				rhi::BufferBinding valuesInBinding = {};
-				if (pass == 0)
-				{
-					valuesInBinding.buffer = splatIndicesOriginal.Get();
-				}
-				else
-				{
-					// Read from the buffer the previous pass wrote to
-					// For pass 2+, we read from the output of the previous pass
-					// If previous pass wrote to sortIndicesB/Alt (useA was false), we read from it
-					valuesInBinding.buffer = useA ? outputIndicesB : sortIndicesA.Get();
-				}
-				valuesInBinding.offset = 0;
-				valuesInBinding.range  = 0;
-				valuesInBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-				scatterPairsIntegratedDescriptorSets[bufferIdx][pass]->BindBuffer(1, valuesInBinding);
-
-				// Binding 2: Output depth keys
-				rhi::BufferBinding keysOutBinding = {};
-				keysOutBinding.buffer             = useA ? sortKeysA.Get() : sortKeysB.Get();
-				keysOutBinding.offset             = 0;
-				keysOutBinding.range              = 0;
-				keysOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-				scatterPairsIntegratedDescriptorSets[bufferIdx][pass]->BindBuffer(2, keysOutBinding);
-
-				// Binding 3: Output splat indices
-				rhi::BufferBinding valuesOutBinding = {};
-				valuesOutBinding.buffer             = useA ? sortIndicesA.Get() : outputIndicesB;
-				valuesOutBinding.offset             = 0;
-				valuesOutBinding.range              = 0;
-				valuesOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-				scatterPairsIntegratedDescriptorSets[bufferIdx][pass]->BindBuffer(3, valuesOutBinding);
-
-				// Binding 4: Raw histograms (not scanned)
-				rhi::BufferBinding histPairsBinding = {};
-				histPairsBinding.buffer             = histograms.Get();
-				histPairsBinding.offset             = pass * histogramSizePerPass;
-				histPairsBinding.range              = histogramSizePerPass;
-				histPairsBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
-				scatterPairsIntegratedDescriptorSets[bufferIdx][pass]->BindBuffer(4, histPairsBinding);
-			}
+			scatterUnpackIntegratedDescriptorSets[bufferIdx] = device->CreateDescriptorSet(scatterPairsIntegratedSetLayout.Get(), rhi::QueueType::COMPUTE);
+			scatterUnpackIntegratedDescriptorSets[bufferIdx]->BindBuffer(0, pairsInBinding);
+			scatterUnpackIntegratedDescriptorSets[bufferIdx]->BindBuffer(1, indicesOutBinding);
+			scatterUnpackIntegratedDescriptorSets[bufferIdx]->BindBuffer(2, histBinding);
 		}
 	}
 }
@@ -723,8 +757,12 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 	}
 
 	// Upload camera data
-	lastViewMatrix = camera.GetViewMatrix();
-	device->UpdateBuffer(cameraUBO.Get(), &lastViewMatrix, sizeof(math::mat4), 0);
+	math::mat4 viewMatrix = camera.GetViewMatrix();
+	device->UpdateBuffer(cameraUBO.Get(), &viewMatrix, sizeof(math::mat4), 0);
+
+#ifdef ENABLE_SORT_VERIFICATION
+	lastViewMatrix = viewMatrix;
+#endif
 
 	// Update depth calc descriptor set - only bind if buffer changed to avoid in-use validation errors
 	const Scene::GpuData &gpuData         = scene.GetGpuData();
@@ -760,16 +798,17 @@ void GpuSplatSorter::Sort(rhi::IRHICommandList *cmdList, const Scene &scene, con
 
 	RecordDepthCalculation(cmdList, scene, camera);
 
-	// Select sorting method:
-	// - IntegratedScan (default): Computes prefix sums inline during scatter
-	// - Prescan: Avoid redundant prefix sum calculations in each workgroup,
+	// Sort with inline unpack: final pass writes indices directly to output buffer
+#ifdef ENABLE_SORT_VERIFICATION
+	lastSortUsedInlineUnpack = true;
+#endif
 	if (sortMethod == SortMethod::IntegratedScan)
 	{
-		RecordRadixSortIntegrated(cmdList);
+		RecordRadixSortIntegrated(cmdList, true);
 	}
 	else
 	{
-		RecordRadixSortPrescan(cmdList);
+		RecordRadixSortPrescan(cmdList, true);
 	}
 
 	// Record end timestamp for GPU timing
@@ -802,6 +841,12 @@ void GpuSplatSorter::SortOnly(rhi::IRHICommandList *cmdList)
 		cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {preBarriers, 2}, {}, {});
 	}
 
+	RecordPackPairs(cmdList);
+
+	// SortOnly uses separate pack/unpack, no inline unpack
+#ifdef ENABLE_SORT_VERIFICATION
+	lastSortUsedInlineUnpack = false;
+#endif
 	if (sortMethod == SortMethod::IntegratedScan)
 	{
 		RecordRadixSortIntegrated(cmdList);
@@ -810,6 +855,8 @@ void GpuSplatSorter::SortOnly(rhi::IRHICommandList *cmdList)
 	{
 		RecordRadixSortPrescan(cmdList);
 	}
+
+	RecordUnpackIndices(cmdList);
 }
 
 void GpuSplatSorter::RecordDepthCalculation(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera)
@@ -830,9 +877,9 @@ void GpuSplatSorter::RecordDepthCalculation(rhi::IRHICommandList *cmdList, const
 	uint32_t numWorkgroups = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
 	cmdList->Dispatch(numWorkgroups);
 
-	// Barrier to ensure depth calculation completes before sorting
+	// Barrier: depth_calc writes uint2 pairs directly to sortPairsB
 	rhi::BufferTransition transition = {};
-	transition.buffer                = splatDepths.Get();
+	transition.buffer                = sortPairsB.Get();
 	transition.before                = rhi::ResourceState::ShaderWrite;
 	transition.after                 = rhi::ResourceState::GeneralRead;
 
@@ -844,7 +891,58 @@ void GpuSplatSorter::RecordDepthCalculation(rhi::IRHICommandList *cmdList, const
 	    {});
 }
 
-void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
+void GpuSplatSorter::RecordPackPairs(rhi::IRHICommandList *cmdList)
+{
+	cmdList->SetPipeline(packPairsPipeline.Get());
+	cmdList->BindDescriptorSet(0, packPairsDescriptorSet.Get());
+
+	uint32_t numElements = totalSplatCount;
+	cmdList->PushConstants(rhi::ShaderStageFlags::COMPUTE, 0, {reinterpret_cast<const std::byte *>(&numElements), sizeof(uint32_t)});
+
+	uint32_t numWorkgroups = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
+	cmdList->Dispatch(numWorkgroups);
+
+	// Barrier: sortPairsB written by pack, needs to be readable for pass 0 histogram + scatter
+	rhi::BufferTransition transition = {};
+	transition.buffer                = sortPairsB.Get();
+	transition.before                = rhi::ResourceState::ShaderWrite;
+	transition.after                 = rhi::ResourceState::GeneralRead;
+
+	cmdList->Barrier(
+	    rhi::PipelineScope::Compute,
+	    rhi::PipelineScope::Compute,
+	    {&transition, 1},
+	    {},
+	    {});
+}
+
+void GpuSplatSorter::RecordUnpackIndices(rhi::IRHICommandList *cmdList)
+{
+	cmdList->SetPipeline(unpackIndicesPipeline.Get());
+	cmdList->BindDescriptorSet(0, unpackIndicesDescriptorSets[activeOutputBufferIndex].Get());
+
+	uint32_t numElements = totalSplatCount;
+	cmdList->PushConstants(rhi::ShaderStageFlags::COMPUTE, 0, {reinterpret_cast<const std::byte *>(&numElements), sizeof(uint32_t)});
+
+	uint32_t numWorkgroups = (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize;
+	cmdList->Dispatch(numWorkgroups);
+
+	// Barrier: output indices buffer written, needs to be readable for rendering
+	rhi::IRHIBuffer      *outputBuffer = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+	rhi::BufferTransition transition   = {};
+	transition.buffer                  = outputBuffer;
+	transition.before                  = rhi::ResourceState::ShaderWrite;
+	transition.after                   = rhi::ResourceState::GeneralRead;
+
+	cmdList->Barrier(
+	    rhi::PipelineScope::Compute,
+	    rhi::PipelineScope::Compute,
+	    {&transition, 1},
+	    {},
+	    {});
+}
+
+void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList, bool inlineUnpack)
 {
 	if (!histogramPipeline || !radixPrefixScanPipeline || !scatterPairsPrescanPipeline)
 	{
@@ -1009,8 +1107,19 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 		}
 
 		// --- Pass 5: SCATTER ---
-		cmdList->SetPipeline(scatterPairsPrescanPipeline.Get());
-		cmdList->BindDescriptorSet(0, scatterPairsPrescanDescriptorSets[activeOutputBufferIndex][pass].Get());
+		bool isFinalPass = (pass == RadixPasses - 1);
+
+		if (isFinalPass && inlineUnpack)
+		{
+			// Final pass with inline unpack, writing indices directly to output buffer
+			cmdList->SetPipeline(scatterUnpackPrescanPipeline.Get());
+			cmdList->BindDescriptorSet(0, scatterUnpackPrescanDescriptorSets[activeOutputBufferIndex].Get());
+		}
+		else
+		{
+			cmdList->SetPipeline(scatterPairsPrescanPipeline.Get());
+			cmdList->BindDescriptorSet(0, scatterPairsPrescanDescriptorSets[pass].Get());
+		}
 
 		cmdList->PushConstants(
 		    rhi::ShaderStageFlags::COMPUTE,
@@ -1020,35 +1129,50 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList)
 
 		// Barrier after scatter to ensure write completion
 		{
-			bool                  useA = (pass % 2 == 0);
-			rhi::BufferTransition scatterTransitions[3];
+			bool writeToA = (pass % 2 == 0);
 
-			scatterTransitions[0].buffer = useA ? sortKeysA.Get() : sortKeysB.Get();
-			scatterTransitions[0].before = rhi::ResourceState::ShaderWrite;
-			scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
+			if (isFinalPass && inlineUnpack)
+			{
+				// Final pass wrote to the output indices buffer
+				rhi::IRHIBuffer      *outputBuffer = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+				rhi::BufferTransition transition   = {};
+				transition.buffer                  = outputBuffer;
+				transition.before                  = rhi::ResourceState::ShaderWrite;
+				transition.after                   = rhi::ResourceState::GeneralRead;
 
-			// For indices, when useA is false we use the active output buffer (sortIndicesB or sortIndicesB_Alt)
-			rhi::IRHIBuffer *activeOutputIndices = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
-			scatterTransitions[1].buffer         = useA ? sortIndicesA.Get() : activeOutputIndices;
-			scatterTransitions[1].before         = rhi::ResourceState::ShaderWrite;
-			scatterTransitions[1].after          = rhi::ResourceState::GeneralRead;
+				cmdList->Barrier(
+				    rhi::PipelineScope::Compute,
+				    rhi::PipelineScope::Compute,
+				    {&transition, 1},
+				    {},
+				    {});
+			}
+			else
+			{
+				rhi::BufferTransition scatterTransitions[2];
 
-			// Transition histogram back to write-enabled for next pass
-			scatterTransitions[2].buffer = histograms.Get();
-			scatterTransitions[2].before = rhi::ResourceState::GeneralRead;
-			scatterTransitions[2].after  = rhi::ResourceState::ShaderWrite;
+				// Transition the pair buffer that was written to
+				scatterTransitions[0].buffer = writeToA ? sortPairsA.Get() : sortPairsB.Get();
+				scatterTransitions[0].before = rhi::ResourceState::ShaderWrite;
+				scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
 
-			cmdList->Barrier(
-			    rhi::PipelineScope::Compute,
-			    rhi::PipelineScope::Compute,
-			    {scatterTransitions, 3},
-			    {},
-			    {});
+				// Transition histogram back to write-enabled for next pass
+				scatterTransitions[1].buffer = histograms.Get();
+				scatterTransitions[1].before = rhi::ResourceState::GeneralRead;
+				scatterTransitions[1].after  = rhi::ResourceState::ShaderWrite;
+
+				cmdList->Barrier(
+				    rhi::PipelineScope::Compute,
+				    rhi::PipelineScope::Compute,
+				    {scatterTransitions, 2},
+				    {},
+				    {});
+			}
 		}
 	}
 }
 
-void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList)
+void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList, bool inlineUnpack)
 {
 	if (!histogramPipeline || !scatterPairsPipeline)
 	{
@@ -1104,8 +1228,19 @@ void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList)
 		    {});
 
 		// --- Pass 2: SCATTER with integrated prefix sum ---
-		cmdList->SetPipeline(scatterPairsPipeline.Get());
-		cmdList->BindDescriptorSet(0, scatterPairsIntegratedDescriptorSets[activeOutputBufferIndex][pass].Get());
+		bool isFinalPass = (pass == RadixPasses - 1);
+
+		if (isFinalPass && inlineUnpack)
+		{
+			// Final pass with inline unpack, writing indices directly to output buffer
+			cmdList->SetPipeline(scatterUnpackPipeline.Get());
+			cmdList->BindDescriptorSet(0, scatterUnpackIntegratedDescriptorSets[activeOutputBufferIndex].Get());
+		}
+		else
+		{
+			cmdList->SetPipeline(scatterPairsPipeline.Get());
+			cmdList->BindDescriptorSet(0, scatterPairsIntegratedDescriptorSets[pass].Get());
+		}
 
 		cmdList->PushConstants(
 		    rhi::ShaderStageFlags::COMPUTE,
@@ -1115,39 +1250,53 @@ void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList)
 
 		// Barrier after scatter to ensure write completion
 		{
-			bool                  useA = (pass % 2 == 0);
-			rhi::BufferTransition scatterTransitions[3];
+			bool writeToA = (pass % 2 == 0);
 
-			scatterTransitions[0].buffer = useA ? sortKeysA.Get() : sortKeysB.Get();
-			scatterTransitions[0].before = rhi::ResourceState::ShaderWrite;
-			scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
+			if (isFinalPass && inlineUnpack)
+			{
+				// Final pass wrote to the output indices buffer
+				rhi::IRHIBuffer      *outputBuffer = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+				rhi::BufferTransition transition   = {};
+				transition.buffer                  = outputBuffer;
+				transition.before                  = rhi::ResourceState::ShaderWrite;
+				transition.after                   = rhi::ResourceState::GeneralRead;
 
-			// For indices, when useA is false we use the active output buffer (sortIndicesB or sortIndicesB_Alt)
-			rhi::IRHIBuffer *activeOutputIndices = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
-			scatterTransitions[1].buffer         = useA ? sortIndicesA.Get() : activeOutputIndices;
-			scatterTransitions[1].before         = rhi::ResourceState::ShaderWrite;
-			scatterTransitions[1].after          = rhi::ResourceState::GeneralRead;
+				cmdList->Barrier(
+				    rhi::PipelineScope::Compute,
+				    rhi::PipelineScope::Compute,
+				    {&transition, 1},
+				    {},
+				    {});
+			}
+			else
+			{
+				rhi::BufferTransition scatterTransitions[2];
 
-			// Transition histogram back to write-enabled for next pass
-			scatterTransitions[2].buffer = histograms.Get();
-			scatterTransitions[2].before = rhi::ResourceState::GeneralRead;
-			scatterTransitions[2].after  = rhi::ResourceState::ShaderWrite;
+				// Transition the pair buffer that was written to
+				scatterTransitions[0].buffer = writeToA ? sortPairsA.Get() : sortPairsB.Get();
+				scatterTransitions[0].before = rhi::ResourceState::ShaderWrite;
+				scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
 
-			cmdList->Barrier(
-			    rhi::PipelineScope::Compute,
-			    rhi::PipelineScope::Compute,
-			    {scatterTransitions, 3},
-			    {},
-			    {});
+				// Transition histogram back to write-enabled for next pass
+				scatterTransitions[1].buffer = histograms.Get();
+				scatterTransitions[1].before = rhi::ResourceState::GeneralRead;
+				scatterTransitions[1].after  = rhi::ResourceState::ShaderWrite;
+
+				cmdList->Barrier(
+				    rhi::PipelineScope::Compute,
+				    rhi::PipelineScope::Compute,
+				    {scatterTransitions, 2},
+				    {},
+				    {});
+			}
 		}
 	}
 }
 
 rhi::BufferHandle GpuSplatSorter::GetSortedIndices() const
 {
-	// Since we use ping-pong buffers, the final result depends on the number of passes
-	bool lastPassUsedA = ((RadixPasses - 1) % 2 == 0);
-	return lastPassUsedA ? sortIndicesA : sortIndicesB;
+	// With pack/unpack, the final sorted indices are always unpacked to the active output buffer
+	return (activeOutputBufferIndex == 0) ? sortIndicesB : sortIndicesB_Alt;
 }
 
 rhi::BufferHandle GpuSplatSorter::GetPrimaryOutputBuffer() const
@@ -1162,15 +1311,15 @@ rhi::BufferHandle GpuSplatSorter::GetAlternateOutputBuffer() const
 
 GpuSplatSorter::BufferInfo GpuSplatSorter::GetBufferInfo() const
 {
-	return {splatDepths, splatIndicesOriginal, sortKeysA, sortKeysB,
-	        sortIndicesA, sortIndicesB, sortIndicesB_Alt, histograms,
+	return {splatDepths, splatIndicesOriginal, sortPairsA, sortPairsB,
+	        sortIndicesB, sortIndicesB_Alt, histograms,
 	        blockSums, cameraUBO};
 }
 
 void GpuSplatSorter::SetOutputBuffer(rhi::BufferHandle outputBuffer)
 {
-	// With double-buffered descriptor sets, we just switch activeOutputBufferIndex
-	// based on which buffer is being used (sortIndicesB at index 0, sortIndicesB_Alt at index 1)
+	// Switch activeOutputBufferIndex to select which unpack descriptor set to use
+	// (sortIndicesB at index 0, sortIndicesB_Alt at index 1)
 	// No descriptor set updates needed - they were pre-created for both buffers.
 
 	rhi::IRHIBuffer *targetBuffer = outputBuffer.Get();
@@ -1228,15 +1377,23 @@ void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
 	copyRegion.size            = totalSplatCount * sizeof(uint32_t);
 	cmdList->CopyBuffer(splatDepths.Get(), verificationDepths.Get(), {&copyRegion, 1});
 
-	// Copy sorted keys and indices from final buffers
-	// Pass 0 (even) writes to A, Pass 1 (odd) writes to B, Pass 2 (even) writes to A, Pass 3 (odd) writes to B
-	// So with 4 passes, the last pass (pass 3, which is odd) writes to B
-	bool              lastPassUsedA = ((RadixPasses - 1) % 2 == 0);
-	rhi::BufferHandle finalKeys     = lastPassUsedA ? sortKeysA : sortKeysB;
-	rhi::BufferHandle finalIndices  = lastPassUsedA ? sortIndicesA : sortIndicesB;
+	// Copy sorted pairs from final pair buffer
+	// - With inline unpack (Sort path): final pairs are in sortPairsA
+	// - Without inline unpack (SortOnly path): final pairs are in sortPairsB
+	readbackDesc.size                    = totalSplatCount * sizeof(uint32_t) * 2;        // uint2 pairs
+	auto            verificationPairsBuf = device->CreateBuffer(readbackDesc);
+	rhi::BufferCopy pairCopy             = {};
+	pairCopy.size                        = totalSplatCount * sizeof(uint32_t) * 2;
 
-	cmdList->CopyBuffer(finalKeys.Get(), verificationSortedKeys.Get(), {&copyRegion, 1});
-	cmdList->CopyBuffer(finalIndices.Get(), verificationSortedIndices.Get(), {&copyRegion, 1});
+	rhi::IRHIBuffer *finalSortedPairsBuffer = lastSortUsedInlineUnpack ? sortPairsA.Get() : sortPairsB.Get();
+	cmdList->CopyBuffer(finalSortedPairsBuffer, verificationPairsBuf.Get(), {&pairCopy, 1});
+
+	rhi::IRHIBuffer *activeOutput = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+	cmdList->CopyBuffer(activeOutput, verificationSortedIndices.Get(), {&copyRegion, 1});
+
+	// Extract keys from pairs during CheckVerificationResults
+	// Store the pairs readback buffer temporarily in verificationSortedKeys (reused)
+	verificationSortedKeys = std::move(verificationPairsBuf);
 
 	// Copy histogram data for verification
 	uint32_t numWorkgroups        = std::min(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
@@ -1829,10 +1986,20 @@ bool GpuSplatSorter::CheckVerificationResults(const container::vector<math::vec3
 		LOG_INFO("");
 		LOG_INFO("=== Scatter Verification (Final Sorted Results) ===");
 
-		uint32_t *sortedKeys    = static_cast<uint32_t *>(verificationSortedKeys->Map());
-		uint32_t *sortedIndices = static_cast<uint32_t *>(verificationSortedIndices->Map());
+		uint32_t *sortedPairsRaw = static_cast<uint32_t *>(verificationSortedKeys->Map());
+		uint32_t *sortedIndices  = static_cast<uint32_t *>(verificationSortedIndices->Map());
 
-		if (sortedKeys && sortedIndices)
+		// Extract keys from interleaved uint2 pairs (key, index, key, index, ...)
+		container::vector<uint32_t> sortedKeysVec;
+		if (sortedPairsRaw)
+		{
+			sortedKeysVec.resize(totalSplatCount);
+			for (uint32_t i = 0; i < totalSplatCount; ++i)
+				sortedKeysVec[i] = sortedPairsRaw[i * 2];
+		}
+		uint32_t *sortedKeys = sortedKeysVec.data();
+
+		if (sortedPairsRaw && sortedIndices)
 		{
 			// Calculate workgroup distribution
 			uint32_t numWorkgroups         = std::min<uint32_t>(MaxWorkgroups, (totalSplatCount + WorkgroupSize - 1) / WorkgroupSize);
@@ -2072,12 +2239,53 @@ bool GpuSplatSorter::VerifySortOrder()
 		return false;
 	}
 
-	uint32_t *sortedKeys = static_cast<uint32_t *>(verificationSortedKeys->Map());
-	if (!sortedKeys)
+	uint32_t *sortedPairsRaw = static_cast<uint32_t *>(verificationSortedKeys->Map());
+	if (!sortedPairsRaw)
 	{
 		LOG_ERROR("Failed to map verification buffer for sort order check");
 		return false;
 	}
+
+	// Extract keys in the final sorted order
+	container::vector<uint32_t> sortedKeysVec;
+	sortedKeysVec.resize(totalSplatCount);
+
+	if (lastSortUsedInlineUnpack)
+	{
+		// With inline unpack: sortPairsA has pairs sorted by bits 0-23, sortIndicesB has final sorted order
+		// Build a lookup map: splatID → key, read sorted indices and look up keys
+		container::vector<uint32_t> splatIDToKey;
+		splatIDToKey.resize(totalSplatCount);
+		for (uint32_t i = 0; i < totalSplatCount; ++i)
+		{
+			uint32_t key          = sortedPairsRaw[i * 2];            // .x component
+			uint32_t splatID      = sortedPairsRaw[i * 2 + 1];        // .y component
+			splatIDToKey[splatID] = key;
+		}
+
+		uint32_t *sortedIndices = static_cast<uint32_t *>(verificationSortedIndices->Map());
+		if (!sortedIndices)
+		{
+			LOG_ERROR("Failed to map sorted indices buffer");
+			verificationSortedKeys->Unmap();
+			return false;
+		}
+
+		for (uint32_t i = 0; i < totalSplatCount; ++i)
+		{
+			uint32_t splatID = sortedIndices[i];
+			sortedKeysVec[i] = splatIDToKey[splatID];
+		}
+
+		verificationSortedIndices->Unmap();
+	}
+	else
+	{
+		// Without inline unpack: sortPairsB has fully sorted pairs
+		for (uint32_t i = 0; i < totalSplatCount; ++i)
+			sortedKeysVec[i] = sortedPairsRaw[i * 2];
+	}
+	uint32_t *sortedKeys = sortedKeysVec.data();
 
 	LOG_INFO("=== Simple Sort Order Verification ===");
 	LOG_INFO("Checking if {} keys are sorted in ascending order...", totalSplatCount);
@@ -2141,13 +2349,13 @@ void GpuSplatSorter::ReadTimingResults()
 
 	uint64_t timestamps[2];
 	bool     valid = device->GetQueryPoolResults(
-	        timestampQueryPool.Get(),
-	        timestampOffset,
-	        2,
-	        timestamps,
-	        sizeof(timestamps),
-	        sizeof(uint64_t),
-	        rhi::QueryResultFlags::WAIT);
+        timestampQueryPool.Get(),
+        timestampOffset,
+        2,
+        timestamps,
+        sizeof(timestamps),
+        sizeof(uint64_t),
+        rhi::QueryResultFlags::WAIT);
 
 	if (valid)
 	{
@@ -2169,13 +2377,13 @@ bool GpuSplatSorter::ReadTimingResultsNonBlocking()
 
 	uint64_t timestamps[2];
 	bool     valid = device->GetQueryPoolResults(
-	        timestampQueryPool.Get(),
-	        timestampOffset,
-	        2,
-	        timestamps,
-	        sizeof(timestamps),
-	        sizeof(uint64_t),
-	        rhi::QueryResultFlags::NONE);
+        timestampQueryPool.Get(),
+        timestampOffset,
+        2,
+        timestamps,
+        sizeof(timestamps),
+        sizeof(uint64_t),
+        rhi::QueryResultFlags::NONE);
 
 	if (valid)
 	{

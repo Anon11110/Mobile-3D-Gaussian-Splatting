@@ -11,9 +11,11 @@ struct PushConstants
 };
 [[vk::push_constant]] PushConstants pc;
 
-// Input/output as interleaved uint2 pairs: .x = depth key, .y = splat index
+// Input: interleaved uint2 pairs (.x = depth key, .y = splat index)
 [[vk::binding(0, 0)]] StructuredBuffer<uint2> inputPairs;
-[[vk::binding(1, 0)]] RWStructuredBuffer<uint2> outputPairs;
+
+// Output: unpacked splat indices only (final pass writes indices directly)
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> outputIndices;
 
 // Exclusively scanned global offsets from scan passes
 [[vk::binding(2, 0)]] StructuredBuffer<uint> scannedGlobalOffsets;
@@ -42,7 +44,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID,
     }
     GroupMemoryBarrierWithGroupSync();
 
-    // Scatter keys and values according to global offsets
+    // Scatter indices according to global offsets
     const uint flagsBin = lID / 32;
     const uint flagsBit = 1u << (lID % 32);
 
@@ -88,7 +90,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID,
             }
 
             uint outputIdx = binOffset + prefix;
-            outputPairs[outputIdx] = pair;
+            // Write only the splat index
+            outputIndices[outputIdx] = pair.y;
         }
         GroupMemoryBarrierWithGroupSync();
 

@@ -127,15 +127,15 @@ void ComputeSplatRasterizer::CreateBuffers(uint32_t maxSplatCount)
 
 	// Create tile key sorter. Reuse current radix sort
 	// The sorter internally creates: splatDepths (our tileKeys), splatIndicesOriginal (our tileValues),
-	// sortKeysA/B (ping-pong), sortIndicesA (ping-pong), histograms, blockSums
+	// sortPairsA/B (ping-pong uint2 key+index), histograms, blockSums
 	// We pass m_sortedTileValues as the output buffer (sortIndicesB)
 	m_tileSorter = container::make_unique<GpuSplatSorter>(m_device, m_vfs);
 	m_tileSorter->Initialize(m_maxTileInstances, m_sortedTileValues);
 
 #ifdef ENABLE_SORT_VERIFICATION
-	// Verification readback buffer for sorted keys
+	// Verification readback buffer for sorted pairs
 	rhi::BufferDesc verifyDesc           = {};
-	verifyDesc.size                      = m_maxTileInstances * sizeof(uint32_t);
+	verifyDesc.size                      = m_maxTileInstances * sizeof(uint32_t) * 2;
 	verifyDesc.usage                     = rhi::BufferUsage::TRANSFER_DST;
 	verifyDesc.resourceUsage             = rhi::ResourceUsage::Readback;
 	verifyDesc.hints.persistently_mapped = true;
@@ -376,10 +376,10 @@ void ComputeSplatRasterizer::CreateDescriptorSets()
 	// --- Identify Ranges descriptor set ---
 	m_rangesDescriptorSet = m_device->CreateDescriptorSet(m_rangesLayout.Get(), rhi::QueueType::COMPUTE);
 
-	// Binding 0: sorted tile keys (sortKeysB after 4 radix passes)
+	// Binding 0: sorted tile pairs (sortPairsB after 4 radix passes)
 	{
 		rhi::BufferBinding binding = {};
-		binding.buffer             = sorterBuffers.sortKeysB.Get();
+		binding.buffer             = sorterBuffers.sortPairsB.Get();
 		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
 		m_rangesDescriptorSet->BindBuffer(0, binding);
 	}
@@ -636,7 +636,7 @@ void ComputeSplatRasterizer::RecordIdentifyRanges(rhi::IRHICommandList *cmdList)
 
 	// Wait for sort output to be readable
 	rhi::BufferTransition sortOutputTransition = {};
-	sortOutputTransition.buffer                = sorterBuffers.sortKeysB.Get();
+	sortOutputTransition.buffer                = sorterBuffers.sortPairsB.Get();
 	sortOutputTransition.before                = rhi::ResourceState::ShaderReadWrite;
 	sortOutputTransition.after                 = rhi::ResourceState::GeneralRead;
 	cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {&sortOutputTransition, 1}, {}, {});
@@ -769,10 +769,10 @@ void ComputeSplatRasterizer::ResizeTileBuffers(uint32_t newMaxTileInstances)
 		m_preprocessDescriptorSet->BindBuffer(9, binding);
 	}
 
-	// Ranges: binding 0 (sortedTileKeys → sorter's sortKeysB)
+	// Ranges: binding 0 (sortedTilePairs → sorter's sortPairsB)
 	{
 		rhi::BufferBinding binding = {};
-		binding.buffer             = sorterBuffers.sortKeysB.Get();
+		binding.buffer             = sorterBuffers.sortPairsB.Get();
 		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
 		m_rangesDescriptorSet->BindBuffer(0, binding);
 	}
@@ -862,6 +862,7 @@ void ComputeSplatRasterizer::PerformCPUSort()
 {
 	auto     sorterBuffers = m_tileSorter->GetBufferInfo();
 	uint32_t bufSize       = m_maxTileInstances * sizeof(uint32_t);
+	uint32_t pairBufSize   = m_maxTileInstances * sizeof(uint32_t) * 2;
 
 	if (!m_dbgKeysReadback)
 	{
@@ -874,12 +875,14 @@ void ComputeSplatRasterizer::PerformCPUSort()
 		m_dbgValsReadback                = m_device->CreateBuffer(rbDesc);
 
 		rhi::BufferDesc stageDesc           = {};
-		stageDesc.size                      = bufSize;
+		stageDesc.size                      = pairBufSize;
 		stageDesc.usage                     = rhi::BufferUsage::TRANSFER_SRC;
 		stageDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
 		stageDesc.hints.persistently_mapped = true;
 		m_dbgKeysStaging                    = m_device->CreateBuffer(stageDesc);
-		m_dbgValsStaging                    = m_device->CreateBuffer(stageDesc);
+
+		stageDesc.size   = bufSize;
+		m_dbgValsStaging = m_device->CreateBuffer(stageDesc);
 
 		LOG_INFO("ComputeSplatRasterizer: CPU sort debug buffers allocated ({:.1f} MB)",
 		         (bufSize * 4) / (1024.0 * 1024.0));
@@ -927,15 +930,15 @@ void ComputeSplatRasterizer::PerformCPUSort()
 	std::sort(indices.begin(), indices.end(), [keys](uint32_t a, uint32_t b) { return keys[a] < keys[b]; });
 
 	// Write sorted results to staging buffers
-	auto *sortedKeys = static_cast<uint32_t *>(m_dbgKeysStaging->Map());
-	auto *sortedVals = static_cast<uint32_t *>(m_dbgValsStaging->Map());
+	auto *sortedPairs = static_cast<uint32_t *>(m_dbgKeysStaging->Map());
+	auto *sortedVals  = static_cast<uint32_t *>(m_dbgValsStaging->Map());
 
-	if (!sortedKeys || !sortedVals)
+	if (!sortedPairs || !sortedVals)
 	{
 		LOG_ERROR("ComputeSplatRasterizer: Failed to map debug staging buffers");
 		m_dbgKeysReadback->Unmap();
 		m_dbgValsReadback->Unmap();
-		if (sortedKeys)
+		if (sortedPairs)
 			m_dbgKeysStaging->Unmap();
 		if (sortedVals)
 			m_dbgValsStaging->Unmap();
@@ -944,23 +947,27 @@ void ComputeSplatRasterizer::PerformCPUSort()
 
 	for (uint32_t i = 0; i < m_maxTileInstances; i++)
 	{
-		sortedKeys[i] = keys[indices[i]];
-		sortedVals[i] = vals[indices[i]];
+		sortedPairs[i * 2]     = keys[indices[i]];
+		sortedPairs[i * 2 + 1] = vals[indices[i]];
+		sortedVals[i]          = vals[indices[i]];
 	}
 
 	m_dbgKeysReadback->Unmap();
 	m_dbgValsReadback->Unmap();
 
-	// Upload sorted results to GPU: sortKeysB (for identify_ranges) and m_sortedTileValues (for rasterize)
+	// Upload sorted results to GPU: sortPairsB (for identify_ranges) and m_sortedTileValues (for rasterize)
 	{
 		auto  cmdHandle = m_device->CreateCommandList();
 		auto *cmd       = cmdHandle.Get();
 		cmd->Begin();
 
 		rhi::BufferCopy copy = {};
-		copy.size            = bufSize;
-		cmd->CopyBuffer(m_dbgKeysStaging.Get(), sorterBuffers.sortKeysB.Get(), {&copy, 1});
-		cmd->CopyBuffer(m_dbgValsStaging.Get(), m_sortedTileValues.Get(), {&copy, 1});
+		copy.size            = pairBufSize;
+		cmd->CopyBuffer(m_dbgKeysStaging.Get(), sorterBuffers.sortPairsB.Get(), {&copy, 1});
+
+		rhi::BufferCopy valsCopy = {};
+		valsCopy.size            = bufSize;
+		cmd->CopyBuffer(m_dbgValsStaging.Get(), m_sortedTileValues.Get(), {&valsCopy, 1});
 
 		cmd->End();
 		rhi::IRHICommandList *ptr = cmd;
@@ -1014,8 +1021,8 @@ bool ComputeSplatRasterizer::VerifySortOrder()
 	rhi::BufferCopy copy = {};
 	copy.srcOffset       = 0;
 	copy.dstOffset       = 0;
-	copy.size            = m_maxTileInstances * sizeof(uint32_t);
-	cmdList->CopyBuffer(sorterBuffers.sortKeysB.Get(), m_sortVerifyReadback.Get(), {&copy, 1});
+	copy.size            = m_maxTileInstances * sizeof(uint32_t) * 2;
+	cmdList->CopyBuffer(sorterBuffers.sortPairsB.Get(), m_sortVerifyReadback.Get(), {&copy, 1});
 
 	cmdList->End();
 
@@ -1031,7 +1038,7 @@ bool ComputeSplatRasterizer::VerifySortOrder()
 		return false;
 	}
 
-	const uint32_t *sortedKeys        = static_cast<const uint32_t *>(ptr);
+	const uint32_t *pairsRaw          = static_cast<const uint32_t *>(ptr);
 	uint32_t        tileInstanceCount = m_stats.totalTileInstances;
 
 	if (tileInstanceCount == 0)
@@ -1055,7 +1062,7 @@ bool ComputeSplatRasterizer::VerifySortOrder()
 	uint32_t firstBadIdx = 0;
 	for (uint32_t i = 1; i < tileInstanceCount && i < m_maxTileInstances; ++i)
 	{
-		if (sortedKeys[i] < sortedKeys[i - 1])
+		if (pairsRaw[i * 2] < pairsRaw[(i - 1) * 2])
 		{
 			if (outOfOrder == 0)
 			{
@@ -1070,14 +1077,14 @@ bool ComputeSplatRasterizer::VerifySortOrder()
 		LOG_ERROR("ComputeSplatRasterizer: Sort verification FAILED - {} out-of-order pairs (first at index {}): "
 		          "key[{}]=0x{:08X} > key[{}]=0x{:08X}",
 		          outOfOrder, firstBadIdx,
-		          firstBadIdx - 1, sortedKeys[firstBadIdx - 1],
-		          firstBadIdx, sortedKeys[firstBadIdx]);
+		          firstBadIdx - 1, pairsRaw[(firstBadIdx - 1) * 2],
+		          firstBadIdx, pairsRaw[firstBadIdx * 2]);
 		return false;
 	}
 
 	// Log some stats about the sorted data
-	uint32_t firstKey = sortedKeys[0];
-	uint32_t lastKey  = sortedKeys[tileInstanceCount - 1];
+	uint32_t firstKey = pairsRaw[0];
+	uint32_t lastKey  = pairsRaw[(tileInstanceCount - 1) * 2];
 	LOG_INFO("ComputeSplatRasterizer: Sort verification PASSED - {} tile instances, "
 	         "keys: [0x{:08X} .. 0x{:08X}], tile range: [{} .. {}]",
 	         tileInstanceCount, firstKey, lastKey,
@@ -1100,7 +1107,7 @@ ComputeSplatRasterizer::BufferInfo ComputeSplatRasterizer::GetBufferInfo() const
 		auto sorterBuffers    = m_tileSorter->GetBufferInfo();
 		info.tileKeys         = sorterBuffers.splatDepths;
 		info.tileValues       = sorterBuffers.splatIndicesOriginal;
-		info.sortedTileKeys   = sorterBuffers.sortKeysB;
+		info.sortedTileKeys   = sorterBuffers.sortPairsB;
 		info.sortedTileValues = m_sortedTileValues;
 	}
 

@@ -13,7 +13,7 @@ struct PushConstants
 };
 [[vk::push_constant]] PushConstants pc;
 
-[[vk::binding(0, 0)]] StructuredBuffer<uint> depthKeys;
+[[vk::binding(0, 0)]] StructuredBuffer<uint2> sortPairs;  // .x = depth key, .y = splat index
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> histograms;
 
 static const uint waveSize = 32;
@@ -54,7 +54,7 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
         const uint elemId = baseElem + block * WORKGROUP_SIZE;
         if (elemId < pc.numElements)
         {
-            const uint key = depthKeys[elemId];
+            const uint key = sortPairs[elemId].x;
             const uint bin = (key >> pc.shift) & mask;
             uint original;
             InterlockedAdd(ldsWaveHist[bin * maxWaves + waveId], 1u, original);

@@ -4,7 +4,8 @@
 
 #include "compute_raster_types.h"
 
-[[vk::binding(0, 0)]] StructuredBuffer<uint> sortedTileKeys;
+// Sorted pairs from radix sort: .x = tile key, .y = tile value index
+[[vk::binding(0, 0)]] StructuredBuffer<uint2> sortedTilePairs;
 [[vk::binding(1, 0)]] RWStructuredBuffer<int2> tileRanges;
 
 [[vk::push_constant]] RangesPC pc;
@@ -19,7 +20,7 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
-    uint currKey    = sortedTileKeys[idx];
+    uint currKey    = sortedTilePairs[idx].x;
     uint currTileID = UnpackTileID(currKey);
 
     // Skip invalid entries (0xFFFFFFFF padding from unused buffer space)
@@ -36,7 +37,7 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
     }
     else
     {
-        uint prevKey    = sortedTileKeys[idx - 1];
+        uint prevKey    = sortedTilePairs[idx - 1].x;
         uint prevTileID = UnpackTileID(prevKey);
 
         if (currTileID != prevTileID)

@@ -1674,8 +1674,8 @@ void HybridSplatRendererApp::RecreateSwapchain()
 #else
 	// On Android, swapchain is already resized by the platform
 	rhi::IRHITextureView *resizeBackbufferView = swapchain->GetBackBufferView(0);
-	uint32_t width = resizeBackbufferView->GetWidth();
-	uint32_t height = resizeBackbufferView->GetHeight();
+	uint32_t              width                = resizeBackbufferView->GetWidth();
+	uint32_t              height               = resizeBackbufferView->GetHeight();
 #endif
 
 	// Update camera aspect ratio
@@ -2070,9 +2070,8 @@ void HybridSplatRendererApp::CollectAndLogBufferMemory()
 			auto buffers = gpuBackend->GetSorterBufferInfo();
 			m_memoryTracker.AddBuffer("splatDepths", buffers.splatDepths, "Sorter", MemoryType::DeviceLocal);
 			m_memoryTracker.AddBuffer("splatIndicesOriginal", buffers.splatIndicesOriginal, "Sorter", MemoryType::DeviceLocal);
-			m_memoryTracker.AddBuffer("sortKeysA", buffers.sortKeysA, "Sorter", MemoryType::DeviceLocal);
-			m_memoryTracker.AddBuffer("sortKeysB", buffers.sortKeysB, "Sorter", MemoryType::DeviceLocal);
-			m_memoryTracker.AddBuffer("sortIndicesA", buffers.sortIndicesA, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("sortPairsA", buffers.sortPairsA, "Sorter", MemoryType::DeviceLocal);
+			m_memoryTracker.AddBuffer("sortPairsB", buffers.sortPairsB, "Sorter", MemoryType::DeviceLocal);
 			m_memoryTracker.AddBuffer("sortIndicesB", buffers.sortIndicesB, "Sorter", MemoryType::DeviceLocal);
 			m_memoryTracker.AddBuffer("sortIndicesB_Alt", buffers.sortIndicesB_Alt, "Sorter", MemoryType::DeviceLocal);
 			m_memoryTracker.AddBuffer("histograms", buffers.histograms, "Sorter", MemoryType::DeviceLocal);

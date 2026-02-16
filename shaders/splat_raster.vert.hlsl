@@ -1,19 +1,19 @@
 #include "shaderio.h"
 
 // SH Constants for degrees 1-3
-static const float SH_C1   = 0.4886025119029199;
-static const float SH_C2_0 = 1.0925484305920792;
-static const float SH_C2_1 = -1.0925484305920792;
-static const float SH_C2_2 = 0.31539156525252005;
-static const float SH_C2_3 = -1.0925484305920792;
-static const float SH_C2_4 = 0.5462742152960396;
-static const float SH_C3_0 = -0.5900435899266435;
-static const float SH_C3_1 = 2.890611442640554;
-static const float SH_C3_2 = -0.4570457994644658;
-static const float SH_C3_3 = 0.3731763325901154;
-static const float SH_C3_4 = -0.4570457994644658;
-static const float SH_C3_5 = 1.445305721320277;
-static const float SH_C3_6 = -0.5900435899266435;
+static const half SH_C1   = half(0.4886025119029199);
+static const half SH_C2_0 = half(1.0925484305920792);
+static const half SH_C2_1 = half(-1.0925484305920792);
+static const half SH_C2_2 = half(0.31539156525252005);
+static const half SH_C2_3 = half(-1.0925484305920792);
+static const half SH_C2_4 = half(0.5462742152960396);
+static const half SH_C3_0 = half(-0.5900435899266435);
+static const half SH_C3_1 = half(2.890611442640554);
+static const half SH_C3_2 = half(-0.4570457994644658);
+static const half SH_C3_3 = half(0.3731763325901154);
+static const half SH_C3_4 = half(-0.4570457994644658);
+static const half SH_C3_5 = half(1.445305721320277);
+static const half SH_C3_6 = half(-0.5900435899266435);
 
 [[vk::binding(0, 0)]] ConstantBuffer<FrameUBO> ubo;
 [[vk::binding(1, 0)]] StructuredBuffer<float4> positions;
@@ -29,8 +29,8 @@ float2 UnpackHalf2x16(uint packed)
     return float2(f16tof32(packed), f16tof32(packed >> 16));
 }
 
-#define HALF_LO(x) min16float(f16tof32(x))
-#define HALF_HI(x) min16float(f16tof32((x) >> 16))
+#define HALF_LO(x) half(f16tof32(x))
+#define HALF_HI(x) half(f16tof32((x) >> 16))
 
 // Interleaved SH buffer: 6 uint4 per splat
 static const uint SH_UINT4_PER_SPLAT = 6;
@@ -70,10 +70,10 @@ VSOutput KillSplat()
 }
 
 // SH evaluation function for degrees 0-3
-float3 ComputeSH(uint splatIndex, float3 dir, min16float3 baseColor)
+float3 ComputeSH(uint splatIndex, float3 dir, half3 baseColor)
 {
-    min16float x = min16float(dir.x), y = min16float(dir.y), z = min16float(dir.z);
-    min16float3 result = baseColor;
+    half x = half(dir.x), y = half(dir.y), z = half(dir.z);
+    half3 result = baseColor;
 
     uint base = splatIndex * SH_UINT4_PER_SPLAT;
 
@@ -81,34 +81,34 @@ float3 ComputeSH(uint splatIndex, float3 dir, min16float3 baseColor)
     uint4 d0 = shRestInterleaved[base + 0];
     uint4 d1 = shRestInterleaved[base + 1];
 
-    result += SH_C1 * (-y * min16float3(HALF_LO(d0.x), HALF_HI(d0.x), HALF_LO(d0.y))
-                       + z * min16float3(HALF_HI(d0.y), HALF_LO(d0.z), HALF_HI(d0.z))
-                       - x * min16float3(HALF_LO(d0.w), HALF_HI(d0.w), HALF_LO(d1.x)));
+    result += SH_C1 * (-y * half3(HALF_LO(d0.x), HALF_HI(d0.x), HALF_LO(d0.y))
+                       + z * half3(HALF_HI(d0.y), HALF_LO(d0.z), HALF_HI(d0.z))
+                       - x * half3(HALF_LO(d0.w), HALF_HI(d0.w), HALF_LO(d1.x)));
 
     // SH Degree 2: reuse d1, load d2 → extract sh[3..7]
     uint4 d2 = shRestInterleaved[base + 2];
-    min16float xx = x * x, yy = y * y, zz = z * z, xy = x * y, yz = y * z, xz = x * z;
+    half xx = x * x, yy = y * y, zz = z * z, xy = x * y, yz = y * z, xz = x * z;
 
-    result += SH_C2_0 * xy * min16float3(HALF_HI(d1.x), HALF_LO(d1.y), HALF_HI(d1.y)) +
-              SH_C2_1 * yz * min16float3(HALF_LO(d1.z), HALF_HI(d1.z), HALF_LO(d1.w)) +
-              SH_C2_2 * (2.0 * zz - xx - yy) * min16float3(HALF_HI(d1.w), HALF_LO(d2.x), HALF_HI(d2.x)) +
-              SH_C2_3 * xz * min16float3(HALF_LO(d2.y), HALF_HI(d2.y), HALF_LO(d2.z)) +
-              SH_C2_4 * (xx - yy) * min16float3(HALF_HI(d2.z), HALF_LO(d2.w), HALF_HI(d2.w));
+    result += SH_C2_0 * xy * half3(HALF_HI(d1.x), HALF_LO(d1.y), HALF_HI(d1.y)) +
+              SH_C2_1 * yz * half3(HALF_LO(d1.z), HALF_HI(d1.z), HALF_LO(d1.w)) +
+              SH_C2_2 * (half(2.0) * zz - xx - yy) * half3(HALF_HI(d1.w), HALF_LO(d2.x), HALF_HI(d2.x)) +
+              SH_C2_3 * xz * half3(HALF_LO(d2.y), HALF_HI(d2.y), HALF_LO(d2.z)) +
+              SH_C2_4 * (xx - yy) * half3(HALF_HI(d2.z), HALF_LO(d2.w), HALF_HI(d2.w));
 
     // SH Degree 3: load d3,d4,d5 → extract sh[8..14]
     uint4 d3 = shRestInterleaved[base + 3];
     uint4 d4 = shRestInterleaved[base + 4];
     uint4 d5 = shRestInterleaved[base + 5];
 
-    result += SH_C3_0 * y * (3.0 * xx - yy) * min16float3(HALF_LO(d3.x), HALF_HI(d3.x), HALF_LO(d3.y)) +
-              SH_C3_1 * xy * z * min16float3(HALF_HI(d3.y), HALF_LO(d3.z), HALF_HI(d3.z)) +
-              SH_C3_2 * y * (4.0 * zz - xx - yy) * min16float3(HALF_LO(d3.w), HALF_HI(d3.w), HALF_LO(d4.x)) +
-              SH_C3_3 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * min16float3(HALF_HI(d4.x), HALF_LO(d4.y), HALF_HI(d4.y)) +
-              SH_C3_4 * x * (4.0 * zz - xx - yy) * min16float3(HALF_LO(d4.z), HALF_HI(d4.z), HALF_LO(d4.w)) +
-              SH_C3_5 * z * (xx - yy) * min16float3(HALF_HI(d4.w), HALF_LO(d5.x), HALF_HI(d5.x)) +
-              SH_C3_6 * x * (xx - 3.0 * yy) * min16float3(HALF_LO(d5.y), HALF_HI(d5.y), HALF_LO(d5.z));
+    result += SH_C3_0 * y * (half(3.0) * xx - yy) * half3(HALF_LO(d3.x), HALF_HI(d3.x), HALF_LO(d3.y)) +
+              SH_C3_1 * xy * z * half3(HALF_HI(d3.y), HALF_LO(d3.z), HALF_HI(d3.z)) +
+              SH_C3_2 * y * (half(4.0) * zz - xx - yy) * half3(HALF_LO(d3.w), HALF_HI(d3.w), HALF_LO(d4.x)) +
+              SH_C3_3 * z * (half(2.0) * zz - half(3.0) * xx - half(3.0) * yy) * half3(HALF_HI(d4.x), HALF_LO(d4.y), HALF_HI(d4.y)) +
+              SH_C3_4 * x * (half(4.0) * zz - xx - yy) * half3(HALF_LO(d4.z), HALF_HI(d4.z), HALF_LO(d4.w)) +
+              SH_C3_5 * z * (xx - yy) * half3(HALF_HI(d4.w), HALF_LO(d5.x), HALF_HI(d5.x)) +
+              SH_C3_6 * x * (xx - half(3.0) * yy) * half3(HALF_LO(d5.y), HALF_HI(d5.y), HALF_LO(d5.z));
 
-    return float3(max(result, min16float3(0.0, 0.0, 0.0)));
+    return float3(max(result, half3(0.0, 0.0, 0.0)));
 }
 
 // Helper to fetch pre-computed 3D covariance matrix from buffer
@@ -274,9 +274,9 @@ VSOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
 
     // Unpack color from half-precision
     uint2 colorPacked = colorsHalf[splatIndex];
-    min16float4 baseColor = min16float4(
-        min16float2(UnpackHalf2x16(colorPacked.x)),
-        min16float2(UnpackHalf2x16(colorPacked.y)));
+    half4 baseColor = half4(
+        half2(UnpackHalf2x16(colorPacked.x)),
+        half2(UnpackHalf2x16(colorPacked.y)));
 
     float3x3 cov3D     = GetCovariance3D(splatIndex);
     uint meshIdx       = meshIndices[splatIndex];

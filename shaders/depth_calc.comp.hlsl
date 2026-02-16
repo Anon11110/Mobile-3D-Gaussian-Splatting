@@ -1,8 +1,8 @@
 // Binding 0: Positions buffer
 [[vk::binding(0, 0)]] StructuredBuffer<float4> positions;
 
-// Binding 1: Output buffer for sortable depth keys
-[[vk::binding(1, 0)]] RWStructuredBuffer<uint> splatKeys;
+// Binding 1: Output buffer for sorted pairs (key + splat index)
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint2> outputPairs;
 
 // Binding 2: Camera data
 [[vk::binding(2, 0)]] cbuffer CameraUBO
@@ -59,5 +59,5 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     // RH camera with -Z forward: farther -> larger depth value
     float depth = -viewPos.z;
 
-    splatKeys[splatID] = FloatToSortableUint(depth);
+    outputPairs[splatID] = uint2(FloatToSortableUint(depth), splatID);
 }
