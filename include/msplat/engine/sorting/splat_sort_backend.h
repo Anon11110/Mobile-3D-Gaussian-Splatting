@@ -6,6 +6,7 @@
 #include <msplat/core/math/math.h>
 #include <msplat/core/timer.h>
 #include <msplat/core/vfs.h>
+#include <msplat/engine/engine_config.h>
 #include <msplat/engine/sorting/gpu_splat_sorter.h>
 #include <rhi/rhi.h>
 
@@ -231,7 +232,7 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	{
 		if (m_sorter)
 			return m_sorter->GetBufferInfo();
-		return {};
+		return GpuSplatSorter::BufferInfo();
 	}
 
 	rhi::IRHISemaphore *GetComputeSemaphore() const override
@@ -242,20 +243,17 @@ class GpuSplatSortBackend : public ISplatSortBackend
 			return nullptr;
 		}
 
-		// In pipelined mode, graphics waits on the semaphore from the PREVIOUS pipelined frame.
-		// Warmup frames 0-1 don't signal semaphores.
-		// Frame 2 is the first pipelined frame (signals sem[0]), m_pipelineFrameIndex becomes 3 after Update.
-		// Frame 3 is the second pipelined frame (signals sem[1]), m_pipelineFrameIndex becomes 4 after Update.
-		// We can only wait on a valid previous semaphore starting from frame 3.
-		if (m_pipelineFrameIndex < 4)
+		// Pipeline needs 2*K frames before first valid semaphore wait:
+		// Frames 0..K-1: warmup (WaitIdle, no semaphores)
+		// Frames K..2K-1: QFOT release but graphics hasn't acquired yet
+		// Frame 2K+: fully pipelined with valid semaphore pairs
+		if (m_pipelineFrameIndex < 2 * k_asyncPipelineDepth)
 		{
 			return nullptr;
 		}
 
-		// readIndex matches the writeIndex from the previous frame
-		// Frame 3 (after Update, idx=4): readIndex=0, wait on sem[0] signaled on frame 2
-		// Frame 4 (after Update, idx=5): readIndex=1, wait on sem[1] signaled on frame 3
-		uint32_t readIndex = m_pipelineFrameIndex % 2;
+		// readIndex matches the written (K-1) frames ago
+		uint32_t readIndex = m_pipelineFrameIndex % k_asyncPipelineDepth;
 		return m_pipelineSemaphores[readIndex].Get();
 	}
 
@@ -269,14 +267,14 @@ class GpuSplatSortBackend : public ISplatSortBackend
 
 		if (m_warmupComplete)
 		{
-			// Pipelined mode: return the READ buffer (previous frame's result)
-			uint32_t readIndex = m_pipelineFrameIndex % 2;
+			// Pipelined mode: return the READ buffer ((K-1) frames behind)
+			uint32_t readIndex = m_pipelineFrameIndex % k_asyncPipelineDepth;
 			return m_pipelineBuffers[readIndex].Get();
 		}
 		else
 		{
-			// Frame 0 warmup: return current frame's buffer (serial rendering)
-			uint32_t currentIndex = (m_pipelineFrameIndex - 1) % 2;
+			// Warmup: return current frame's buffer (serial rendering)
+			uint32_t currentIndex = (m_pipelineFrameIndex - 1) % k_asyncPipelineDepth;
 			return m_pipelineBuffers[currentIndex].Get();
 		}
 	}
@@ -284,8 +282,7 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	/// Check if pipelined async compute is warmed up, which means it has valid previous frame result with semaphore
 	bool IsPipelineWarmedUp() const
 	{
-		// Need m_pipelineFrameIndex >= 4 for QFOT acquire
-		return m_asyncComputeEnabled && m_pipelineFrameIndex >= 4;
+		return m_asyncComputeEnabled && m_pipelineFrameIndex >= 2 * k_asyncPipelineDepth;
 	}
 
 	void SetAsyncCompute(bool enabled) override;
@@ -312,6 +309,9 @@ class GpuSplatSortBackend : public ISplatSortBackend
 		return m_sortAscending;
 	}
 
+	// Pipeline depth matches frames-in-flight, each overlapping frame gets its own compute slot.
+	static constexpr uint32_t k_asyncPipelineDepth = k_maxFramesInFlight;
+
   private:
 	rhi::IRHIDevice  *m_device = nullptr;
 	Scene            *m_scene  = nullptr;
@@ -319,17 +319,18 @@ class GpuSplatSortBackend : public ISplatSortBackend
 	uint32_t          m_splatCount = 0;
 
 	container::unique_ptr<GpuSplatSorter> m_sorter;
-	int                                   m_currentMethod = 1;        // Default: IntegratedScan
+	int                                   m_currentMethod = 0;        // Default: Prescan
 
-	rhi::CommandListHandle m_computeCmdLists[2];        // Double-buffered for async compute
+	rhi::CommandListHandle m_computeCmdLists[k_asyncPipelineDepth];
+	rhi::FenceHandle       m_computeFences[k_asyncPipelineDepth];
 	rhi::CommandListHandle m_graphicsCmdList;
 
-	// Pipelined async compute: double-buffered output for true N+1 parallelism
-	// Frame N: Sort into buffer[N%2], render using buffer[(N-1)%2]
-	rhi::BufferHandle    m_pipelineBuffers[2];                        // Double-buffered sorted indices
-	rhi::SemaphoreHandle m_pipelineSemaphores[2];                     // Semaphore per buffer
+	// Pipelined async compute: K-buffered output for true N+(K-1) parallelism
+	// Frame N: Sort into buffer[N%K], render using buffer[(N-K+1)%K]
+	rhi::BufferHandle    m_pipelineBuffers[k_asyncPipelineDepth];
+	rhi::SemaphoreHandle m_pipelineSemaphores[k_asyncPipelineDepth];
 	uint32_t             m_pipelineFrameIndex         = 0;            // Current write buffer index
-	bool                 m_warmupComplete             = false;        // First frame has no previous result
+	bool                 m_warmupComplete             = false;        // First K frames have no previous result
 	bool                 m_asyncComputeEnabled        = false;
 	mutable bool         m_semaphoreSignaledThisFrame = false;        // Track if semaphore was signaled in Update
 

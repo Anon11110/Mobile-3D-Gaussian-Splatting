@@ -8,6 +8,7 @@
 #include "core/containers/vector.h"
 #include "core/math/math.h"
 #include "core/timer.h"
+#include "engine/engine_config.h"
 #include "engine/splat/splat_mesh.h"
 #include "shaders/shaderio.h"
 #include <array>
@@ -208,10 +209,12 @@ class HybridSplatRendererApp : public app::IApplication
 
 	container::unique_ptr<engine::ShaderFactory> m_shaderFactory;
 
-	rhi::BufferHandle m_quadIndexBuffer;
-	rhi::BufferHandle m_frameUboBuffer;
-	void             *m_frameUboDataPtr = nullptr;
-	rhi::BufferHandle m_sortedIndices;
+	static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = engine::k_maxFramesInFlight;
+
+	rhi::BufferHandle                                   m_quadIndexBuffer;
+	std::array<rhi::BufferHandle, MAX_FRAMES_IN_FLIGHT> m_frameUboBuffers;
+	std::array<void *, MAX_FRAMES_IN_FLIGHT>            m_frameUboDataPtrs = {};
+	rhi::BufferHandle                                   m_sortedIndices;
 
 	rhi::ShaderHandle   m_vertexShader;
 	rhi::ShaderHandle   m_fragmentShader;
@@ -226,30 +229,29 @@ class HybridSplatRendererApp : public app::IApplication
 	rhi::PipelineHandle m_stencilUpdatePipeline;
 	rhi::PipelineHandle m_splatTransmCullingPipeline;
 
-	// Transmittance culling render targets
-	rhi::TextureHandle             m_accumTexture;
-	rhi::TextureViewHandle         m_accumTextureView;
-	rhi::TextureHandle             m_depthStencilTexture;
-	rhi::TextureViewHandle         m_depthStencilView;
-	rhi::DescriptorSetLayoutHandle m_stencilUpdateDescriptorLayout;
-	rhi::DescriptorSetHandle       m_stencilUpdateDescriptorSet;
+	// Transmittance culling render targets: per-frame for multi-frame-in-flight
+	std::array<rhi::TextureHandle, MAX_FRAMES_IN_FLIGHT>       m_accumTextures;
+	std::array<rhi::TextureViewHandle, MAX_FRAMES_IN_FLIGHT>   m_accumTextureViews;
+	std::array<rhi::TextureHandle, MAX_FRAMES_IN_FLIGHT>       m_depthStencilTextures;
+	std::array<rhi::TextureViewHandle, MAX_FRAMES_IN_FLIGHT>   m_depthStencilViews;
+	rhi::DescriptorSetLayoutHandle                             m_stencilUpdateDescriptorLayout;
+	std::array<rhi::DescriptorSetHandle, MAX_FRAMES_IN_FLIGHT> m_stencilUpdateDescriptorSets;
 
 	// Composite pass resources
-	rhi::ShaderHandle              m_fullscreenVertexShader;
-	rhi::ShaderHandle              m_compositeFragmentShader;
-	rhi::PipelineHandle            m_compositePipeline;
-	rhi::DescriptorSetLayoutHandle m_compositeDescriptorSetLayout;
-	rhi::DescriptorSetHandle       m_compositeDescriptorSet;
-	rhi::SamplerHandle             m_compositeSampler;
+	rhi::ShaderHandle                                          m_fullscreenVertexShader;
+	rhi::ShaderHandle                                          m_compositeFragmentShader;
+	rhi::PipelineHandle                                        m_compositePipeline;
+	rhi::DescriptorSetLayoutHandle                             m_compositeDescriptorSetLayout;
+	std::array<rhi::DescriptorSetHandle, MAX_FRAMES_IN_FLIGHT> m_compositeDescriptorSets;
+	rhi::SamplerHandle                                         m_compositeSampler;
 
-	rhi::DescriptorSetLayoutHandle m_descriptorSetLayout;
-	rhi::DescriptorSetHandle       m_descriptorSet;
+	rhi::DescriptorSetLayoutHandle                             m_descriptorSetLayout;
+	std::array<rhi::DescriptorSetHandle, MAX_FRAMES_IN_FLIGHT> m_descriptorSets;
 
-	container::vector<rhi::SemaphoreHandle> m_imageAvailableSemaphores;
-	container::vector<rhi::SemaphoreHandle> m_renderFinishedSemaphores;
-	rhi::FenceHandle                        m_inFlightFence;
-
-	container::vector<rhi::CommandListHandle> m_commandLists;
+	std::array<rhi::SemaphoreHandle, MAX_FRAMES_IN_FLIGHT>   m_imageAvailableSemaphores;
+	container::vector<rhi::SemaphoreHandle>                  m_renderFinishedSemaphores;
+	std::array<rhi::FenceHandle, MAX_FRAMES_IN_FLIGHT>       m_inFlightFences;
+	std::array<rhi::CommandListHandle, MAX_FRAMES_IN_FLIGHT> m_commandLists;
 
 	timer::Timer      m_applicationTimer;
 	timer::FPSCounter m_fpsCounter;
@@ -264,7 +266,8 @@ class HybridSplatRendererApp : public app::IApplication
 	bool              m_crossBackendVerifyRequested = false;        // Run verification on next frame
 	container::string m_crossBackendVerifyResult;                   // Last verification result
 	PendingOperations m_pendingOps;                                 // Deferred frame-boundary operations
-	uint32_t          m_frameCount = 0;
+	uint32_t          m_frameCount   = 0;
+	uint32_t          m_currentFrame = 0;        // Index into per-frame-in-flight arrays
 
 	container::vector<math::vec3> m_testSplatPositions;
 
@@ -426,5 +429,6 @@ class HybridSplatRendererApp : public app::IApplication
 	void CreateTransmCullingResources();
 	void ResizeTransmCullingResources(uint32_t width, uint32_t height);
 	void RenderTransmittanceCulling(rhi::IRHICommandList *cmdList, uint32_t splatCount,
-	                                uint32_t width, uint32_t height, uint32_t imageIndex);
+	                                uint32_t width, uint32_t height, uint32_t imageIndex,
+	                                uint32_t frameIndex);
 };

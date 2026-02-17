@@ -21,26 +21,27 @@ bool GpuSplatSortBackend::Initialize(
 	m_targetBuffer = sortedIndicesBuffer;
 	m_splatCount   = totalSplatCount;
 
-	m_computeCmdLists[0] = device->CreateCommandList(rhi::QueueType::COMPUTE);
-	m_computeCmdLists[1] = device->CreateCommandList(rhi::QueueType::COMPUTE);
-	m_graphicsCmdList    = device->CreateCommandList(rhi::QueueType::GRAPHICS);
-
-	// Create semaphores for pipelined async compute
-	m_pipelineSemaphores[0] = device->CreateSemaphore();
-	m_pipelineSemaphores[1] = device->CreateSemaphore();
+	for (uint32_t i = 0; i < k_asyncPipelineDepth; ++i)
+	{
+		m_computeCmdLists[i]    = device->CreateCommandList(rhi::QueueType::COMPUTE);
+		m_computeFences[i]      = device->CreateFence(true);
+		m_pipelineSemaphores[i] = device->CreateSemaphore();
+	}
+	m_graphicsCmdList = device->CreateCommandList(rhi::QueueType::GRAPHICS);
 
 	m_sorter = container::make_unique<GpuSplatSorter>(device, vfs);
-	m_sorter->Initialize(totalSplatCount, sortedIndicesBuffer);
+	m_sorter->Initialize(totalSplatCount, sortedIndicesBuffer, k_asyncPipelineDepth);
 
 	// Get the sorter's internal buffers for pipelined async compute
-	// to avoids creating duplicate buffers and ensures descriptor sets match
-	m_pipelineBuffers[0] = m_sorter->GetPrimaryOutputBuffer();
-	m_pipelineBuffers[1] = m_sorter->GetAlternateOutputBuffer();
+	for (uint32_t i = 0; i < k_asyncPipelineDepth; ++i)
+	{
+		m_pipelineBuffers[i] = m_sorter->GetOutputBuffer(i);
+	}
 
 	m_sorter->SetSortMethod(
 	    static_cast<GpuSplatSorter::SortMethod>(m_currentMethod));
 
-	LOG_INFO("GpuSplatSortBackend initialized for {} splats (pipelined async compute ready)", totalSplatCount);
+	LOG_INFO("GpuSplatSortBackend initialized for {} splats (pipeline depth {})", totalSplatCount, k_asyncPipelineDepth);
 	return true;
 }
 
@@ -55,9 +56,13 @@ void GpuSplatSortBackend::Update(const app::Camera &camera)
 
 	if (m_asyncComputeEnabled)
 	{
-		// Pipelined async compute: Sort frame N+1 while graphics renders frame N
-		// writeIndex alternates: 0, 1, 0, 1, ...
-		uint32_t writeIndex = m_pipelineFrameIndex % 2;
+		// Pipelined async compute: Sort frame N+(K-1) while graphics renders frame N
+		// writeIndex cycles: 0, 1, ..., K-1, 0, 1, ...
+		uint32_t writeIndex = m_pipelineFrameIndex % k_asyncPipelineDepth;
+
+		// Wait for this pipeline slot's previous compute submission to complete
+		m_computeFences[writeIndex]->Wait(UINT64_MAX);
+		m_computeFences[writeIndex]->Reset();
 
 		// Set output buffer for this frame's sort
 		m_sorter->SetOutputBuffer(m_pipelineBuffers[writeIndex]);
@@ -73,28 +78,20 @@ void GpuSplatSortBackend::Update(const app::Camera &camera)
 		transition.before = rhi::ResourceState::ShaderReadWrite;
 		transition.after  = rhi::ResourceState::GeneralRead;
 
-		// Graphics acquires when m_pipelineFrameIndex >= 4 (after Update).
-		// That means graphics first acquires on frame 3 (idx=3 at start, idx=4 after Update).
-		// On frame 3, graphics reads buffer[0] (readIndex = 4 % 2 = 0).
-		// Buffer[0] was written on frame 2 (idx=2, writeIndex = 0).
-		// So we need to QFOT release starting frame 2 (idx >= 2).
+		// QFOT release starts at frame K (after K warmup frames).
 		// Timeline:
-		// - Frame 0-1: regular barriers (no QFOT)
-		// - Frame 2: QFOT release buffer[0]
-		// - Frame 3: QFOT release buffer[1], QFOT acquire buffer[0]
-		// - Frame 4+: full QFOT pairs
-		if (m_pipelineFrameIndex >= 2)
+		// - Frame 0..K-1: regular barriers (warmup, no QFOT)
+		// - Frame K+: QFOT release the buffer we just wrote
+		if (m_pipelineFrameIndex >= k_asyncPipelineDepth)
 		{
-			// Frame 2+: QFOT release the buffer we just wrote
 			cmdList->ReleaseToQueue(rhi::QueueType::GRAPHICS, {&transition, 1}, {});
 		}
 		else
 		{
-			// Frame 0-1: memory barrier only, no QFOT
 			cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {&transition, 1}, {}, {});
 		}
 
-		if (m_pipelineFrameIndex >= 2)
+		if (m_pipelineFrameIndex >= k_asyncPipelineDepth)
 		{
 			m_warmupComplete = true;
 		}
@@ -103,16 +100,15 @@ void GpuSplatSortBackend::Update(const app::Camera &camera)
 
 		std::array<rhi::IRHICommandList *, 1> cmdLists = {cmdList};
 
-		// During warmup phase (frames 0-1), use WaitIdle for synchronization
-		// Don't signal semaphores during warmup
-		// - Frame 0-1: warmup, no semaphore (use WaitIdle for sync)
-		// - Frame 2+: pipelined, semaphore signal/wait pairs
-		bool isWarmupPhase = !m_warmupComplete && (m_pipelineFrameIndex < 2);
+		// During warmup phase (frames 0..K-1), use WaitIdle for synchronization
+		bool isWarmupPhase = !m_warmupComplete && (m_pipelineFrameIndex < k_asyncPipelineDepth);
 
 		if (isWarmupPhase)
 		{
-			// Warmup: submit without semaphore signal, use WaitIdle for sync
-			m_device->SubmitCommandLists(cmdLists, rhi::QueueType::COMPUTE);
+			// Warmup: submit with fence, then WaitIdle for full sync
+			rhi::SubmitInfo submitInfo{};
+			submitInfo.signalFence = m_computeFences[writeIndex].Get();
+			m_device->SubmitCommandLists(cmdLists, rhi::QueueType::COMPUTE, submitInfo);
 			m_device->WaitIdle();
 			m_semaphoreSignaledThisFrame = false;
 
@@ -120,16 +116,14 @@ void GpuSplatSortBackend::Update(const app::Camera &camera)
 		}
 		else
 		{
-			// Pipelined mode: signal semaphore for graphics queue to wait on
-			rhi::SubmitInfo     submitInfo{};
+			// Pipelined mode: signal fence + semaphore for graphics queue to wait on
+			rhi::SubmitInfo submitInfo{};
+			submitInfo.signalFence        = m_computeFences[writeIndex].Get();
 			rhi::IRHISemaphore *signalSem = m_pipelineSemaphores[writeIndex].Get();
 			submitInfo.signalSemaphores   = std::span<rhi::IRHISemaphore *const>(&signalSem, 1);
 			m_device->SubmitCommandLists(cmdLists, rhi::QueueType::COMPUTE, submitInfo);
 			m_semaphoreSignaledThisFrame = true;
 
-			// In pipelined mode, use non-blocking read here.
-			// The compute work from 3 frames ago may not have completed yet since
-			// we only sync via semaphore which graphics hasn't waited on yet.
 			m_sorter->ReadTimingResultsNonBlocking();
 		}
 
@@ -146,8 +140,8 @@ void GpuSplatSortBackend::Update(const app::Camera &camera, rhi::IRHICommandList
 
 	m_semaphoreSignaledThisFrame = false;
 
-	// Ensure sorter outputs to the primary buffer (m_targetBuffer = sortIndicesB)
-	// This is needed after switching from async compute where activeOutputBufferIndex may be 1
+	// Ensure sorter outputs to the primary buffer (m_targetBuffer)
+	// This is needed after switching from async compute where activeOutputBufferIndex may be >0
 	m_sorter->SetOutputBuffer(m_targetBuffer);
 
 	m_sorter->Sort(cmdList, *m_scene, camera);
@@ -311,11 +305,9 @@ void GpuSplatSortBackend::SetAsyncCompute(bool enabled)
 
 	m_device->WaitIdle();
 
-	// Track QFOT state before resetting. QFOT release starts on frame 2:
-	// - Frame 0-1: regular barriers (no QFOT)
-	// - Frame 2: QFOT release buffer[0]
-	// - Frame 3: QFOT release buffer[1], graphics acquires buffer[0]
-	// - Frame 4+: full QFOT pairs
+	// Track QFOT state before resetting. QFOT release starts on frame K:
+	// - Frame 0..K-1: regular barriers (warmup, no QFOT)
+	// - Frame K+: QFOT release
 	uint32_t savedFrameIndex = m_pipelineFrameIndex;
 
 	// Reset pipeline state when toggling async compute
@@ -323,27 +315,30 @@ void GpuSplatSortBackend::SetAsyncCompute(bool enabled)
 	m_warmupComplete             = false;
 	m_semaphoreSignaledThisFrame = false;
 
-	// Recreate semaphores to ensure they start in unsignaled state
-	m_pipelineSemaphores[0] = m_device->CreateSemaphore();
-	m_pipelineSemaphores[1] = m_device->CreateSemaphore();
-
-	if (!enabled && savedFrameIndex >= 3)
+	// Recreate fences (signaled) and semaphores (unsignaled) for clean pipeline start
+	for (uint32_t i = 0; i < k_asyncPipelineDepth; ++i)
 	{
-		// Switching from async compute to single-queue mode
-		// QFOT release starts on frame 2 (idx >= 2), so savedFrameIndex >= 3 means at least one QFOT release happened.
-		// In pipelined mode:
-		// - Compute last wrote to buffer[(savedFrameIndex-1) % 2], which was QFOT released
-		// - Graphics last read buffer[savedFrameIndex % 2], which was already QFOT acquired
+		m_computeFences[i]      = m_device->CreateFence(true);
+		m_pipelineSemaphores[i] = m_device->CreateSemaphore();
+	}
 
+	if (!enabled && savedFrameIndex >= k_asyncPipelineDepth + 1)
+	{
+		// Switching from async compute to single-queue mode.
+		// Acquire the last (K-1) QFOT-released buffers that graphics hasn't consumed yet.
 		rhi::IRHICommandList *cmdList = m_graphicsCmdList.Get();
 		cmdList->Begin();
 
-		uint32_t              lastWriteIndex = (savedFrameIndex - 1) % 2;
-		rhi::BufferTransition t{};
-		t.buffer = m_pipelineBuffers[lastWriteIndex].Get();
-		t.before = rhi::ResourceState::ShaderReadWrite;
-		t.after  = rhi::ResourceState::GeneralRead;
-		cmdList->AcquireFromQueue(rhi::QueueType::COMPUTE, {&t, 1}, {});
+		uint32_t buffersToAcquire = std::min(savedFrameIndex - k_asyncPipelineDepth, k_asyncPipelineDepth - 1);
+		for (uint32_t i = 1; i <= buffersToAcquire; ++i)
+		{
+			uint32_t              bufIdx = (savedFrameIndex - i) % k_asyncPipelineDepth;
+			rhi::BufferTransition t{};
+			t.buffer = m_pipelineBuffers[bufIdx].Get();
+			t.before = rhi::ResourceState::ShaderReadWrite;
+			t.after  = rhi::ResourceState::GeneralRead;
+			cmdList->AcquireFromQueue(rhi::QueueType::COMPUTE, {&t, 1}, {});
+		}
 
 		cmdList->End();
 

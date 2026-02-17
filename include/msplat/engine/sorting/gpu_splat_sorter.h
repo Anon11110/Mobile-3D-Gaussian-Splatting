@@ -33,7 +33,7 @@ class GpuSplatSorter
 	GpuSplatSorter(GpuSplatSorter &&) noexcept            = default;
 	GpuSplatSorter &operator=(GpuSplatSorter &&) noexcept = default;
 
-	void Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer);
+	void Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer, uint32_t pipelineDepth = 2);
 
 	void Sort(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera);
 
@@ -42,14 +42,13 @@ class GpuSplatSorter
 
 	rhi::BufferHandle GetSortedIndices() const;
 
-	// Get the primary output buffer (sortIndicesB)
-	rhi::BufferHandle GetPrimaryOutputBuffer() const;
+	// Get an output buffer by index (0 = primary, 1..K-1 = alternates for pipelined async compute)
+	rhi::BufferHandle GetOutputBuffer(uint32_t index) const;
 
-	// Get the alternate output buffer for pipelined rendering (sortIndicesB_Alt)
-	rhi::BufferHandle GetAlternateOutputBuffer() const;
+	// Get total number of output buffers (pipeline depth)
+	uint32_t GetOutputBufferCount() const;
 
 	// Change the output buffer for pipelined rendering
-	/// @param outputBuffer New buffer to write sorted indices to (must be primary or alternate buffer)
 	void SetOutputBuffer(rhi::BufferHandle outputBuffer);
 
 	// Sort direction
@@ -103,15 +102,14 @@ class GpuSplatSorter
 	// Buffer information for memory tracking
 	struct BufferInfo
 	{
-		rhi::BufferHandle splatDepths;
-		rhi::BufferHandle splatIndicesOriginal;
-		rhi::BufferHandle sortPairsA;
-		rhi::BufferHandle sortPairsB;
-		rhi::BufferHandle sortIndicesB;
-		rhi::BufferHandle sortIndicesB_Alt;
-		rhi::BufferHandle histograms;
-		rhi::BufferHandle blockSums;
-		rhi::BufferHandle cameraUBO;
+		rhi::BufferHandle                    splatDepths;
+		rhi::BufferHandle                    splatIndicesOriginal;
+		rhi::BufferHandle                    sortPairsA;
+		rhi::BufferHandle                    sortPairsB;
+		container::vector<rhi::BufferHandle> outputBuffers;        // [0]=primary, [1..K-1]=alternates
+		rhi::BufferHandle                    histograms;
+		rhi::BufferHandle                    blockSums;
+		rhi::BufferHandle                    cameraUBO;
 	};
 
 	BufferInfo GetBufferInfo() const;
@@ -200,13 +198,12 @@ class GpuSplatSorter
 	rhi::BufferHandle verificationHistogram;
 #endif
 
-	rhi::BufferHandle sortPairsA;              // Ping-pong uint2 pair buffer A (key, index)
-	rhi::BufferHandle sortPairsB;              // Ping-pong uint2 pair buffer B (key, index)
-	rhi::BufferHandle sortIndicesB;            // Primary output buffer (index 0)
-	rhi::BufferHandle sortIndicesB_Alt;        // Secondary output buffer (index 1) for pipelined async compute
-	rhi::BufferHandle histograms;
-	rhi::BufferHandle blockSums;
-	rhi::BufferHandle cameraUBO;
+	rhi::BufferHandle                    sortPairsA;           // Ping-pong uint2 pair buffer A (key, index)
+	rhi::BufferHandle                    sortPairsB;           // Ping-pong uint2 pair buffer B (key, index)
+	container::vector<rhi::BufferHandle> outputBuffers;        // [0]=primary, [1..K-1]=alternates for pipelined async compute
+	rhi::BufferHandle                    histograms;
+	rhi::BufferHandle                    blockSums;
+	rhi::BufferHandle                    cameraUBO;
 
 	rhi::PipelineHandle depthCalcPipeline;
 	rhi::PipelineHandle packPairsPipeline;
@@ -233,17 +230,18 @@ class GpuSplatSorter
 	rhi::DescriptorSetLayoutHandle scatterPairsSetLayout;                  // For prescan method
 	rhi::DescriptorSetLayoutHandle scatterPairsIntegratedSetLayout;        // For integrated scan method
 
-	rhi::DescriptorSetHandle depthCalcDescriptorSet;
-	rhi::DescriptorSetHandle packPairsDescriptorSet;
-	rhi::DescriptorSetHandle unpackIndicesDescriptorSets[2];        // [bufferIdx] for primary/alternate output
-	rhi::DescriptorSetHandle histogramDescriptorSets[4];
-	rhi::DescriptorSetHandle scanDescriptorSets[4];
-	rhi::DescriptorSetHandle scanBlockSumsDescriptorSet;
-	rhi::DescriptorSetHandle scatterPairsPrescanDescriptorSets[4];            // [pass]
-	rhi::DescriptorSetHandle scatterPairsIntegratedDescriptorSets[4];         // [pass]
-	rhi::DescriptorSetHandle scatterUnpackPrescanDescriptorSets[2];           // [bufferIdx] final pass writes indices
-	rhi::DescriptorSetHandle scatterUnpackIntegratedDescriptorSets[2];        // [bufferIdx] final pass writes indices
-	uint32_t                 activeOutputBufferIndex = 0;
+	rhi::DescriptorSetHandle                    depthCalcDescriptorSet;
+	rhi::DescriptorSetHandle                    packPairsDescriptorSet;
+	container::vector<rhi::DescriptorSetHandle> unpackIndicesDescriptorSets;        // [bufferIdx] for output buffers
+	rhi::DescriptorSetHandle                    histogramDescriptorSets[4];
+	rhi::DescriptorSetHandle                    scanDescriptorSets[4];
+	rhi::DescriptorSetHandle                    scanBlockSumsDescriptorSet;
+	rhi::DescriptorSetHandle                    scatterPairsPrescanDescriptorSets[4];           // [pass]
+	rhi::DescriptorSetHandle                    scatterPairsIntegratedDescriptorSets[4];        // [pass]
+	container::vector<rhi::DescriptorSetHandle> scatterUnpackPrescanDescriptorSets;             // [bufferIdx] final pass writes indices
+	container::vector<rhi::DescriptorSetHandle> scatterUnpackIntegratedDescriptorSets;          // [bufferIdx] final pass writes indices
+	uint32_t                                    activeOutputBufferIndex = 0;
+	uint32_t                                    outputBufferCount       = 2;
 
 	SortMethod    sortMethod    = SortMethod::IntegratedScan;
 	ShaderVariant shaderVariant = ShaderVariant::Portable;

@@ -153,14 +153,17 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	m_fragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster_fs", rhi::ShaderStage::FRAGMENT);
 	LOG_INFO("Render shaders loaded: vertex={}, fragment={}", m_vertexShader != nullptr, m_fragmentShader != nullptr);
 
-	// Create UBO
-	rhi::BufferDesc uboDesc{};
-	uboDesc.size                      = sizeof(FrameUBO);
-	uboDesc.usage                     = rhi::BufferUsage::UNIFORM;
-	uboDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
-	uboDesc.hints.persistently_mapped = true;
-	m_frameUboBuffer                  = device->CreateBuffer(uboDesc);
-	m_frameUboDataPtr                 = m_frameUboBuffer->Map();
+	// Create per-frame UBO buffers
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+	{
+		rhi::BufferDesc uboDesc{};
+		uboDesc.size                      = sizeof(FrameUBO);
+		uboDesc.usage                     = rhi::BufferUsage::UNIFORM;
+		uboDesc.resourceUsage             = rhi::ResourceUsage::DynamicUpload;
+		uboDesc.hints.persistently_mapped = true;
+		m_frameUboBuffers[i]              = device->CreateBuffer(uboDesc);
+		m_frameUboDataPtrs[i]             = m_frameUboBuffers[i]->Map();
+	}
 
 	// Create descriptor set layout
 	rhi::DescriptorSetLayoutDesc layoutDesc{};
@@ -176,77 +179,80 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	};
 	m_descriptorSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
 
-	// Create descriptor set
-	m_descriptorSet = device->CreateDescriptorSet(m_descriptorSetLayout.Get());
-
-	// Binding 0: UBO
-	rhi::BufferBinding uboBinding{};
-	uboBinding.buffer = m_frameUboBuffer.Get();
-	uboBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
-	m_descriptorSet->BindBuffer(0, uboBinding);
-
-	// Binding 1: Positions
+	// Create per-frame descriptor sets
 	const auto &gpuData = m_scene->GetGpuData();
-	if (gpuData.positions)
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
 	{
-		rhi::BufferBinding positionsBinding{};
-		positionsBinding.buffer = gpuData.positions.Get();
-		positionsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(1, positionsBinding);
-	}
+		m_descriptorSets[i] = device->CreateDescriptorSet(m_descriptorSetLayout.Get());
 
-	// Binding 2: Covariances3D
-	if (gpuData.covariances3D)
-	{
-		rhi::BufferBinding cov3DBinding{};
-		cov3DBinding.buffer = gpuData.covariances3D.Get();
-		cov3DBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(2, cov3DBinding);
-	}
+		// Binding 0: UBO (per-frame)
+		rhi::BufferBinding uboBinding{};
+		uboBinding.buffer = m_frameUboBuffers[i].Get();
+		uboBinding.type   = rhi::DescriptorType::UNIFORM_BUFFER;
+		m_descriptorSets[i]->BindBuffer(0, uboBinding);
 
-	// Binding 3: Colors
-	if (gpuData.colors)
-	{
-		rhi::BufferBinding colorsBinding{};
-		colorsBinding.buffer = gpuData.colors.Get();
-		colorsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(3, colorsBinding);
-	}
+		// Binding 1: Positions (shared)
+		if (gpuData.positions)
+		{
+			rhi::BufferBinding positionsBinding{};
+			positionsBinding.buffer = gpuData.positions.Get();
+			positionsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(1, positionsBinding);
+		}
 
-	// Binding 4: SH Rest
-	if (gpuData.shRest)
-	{
-		rhi::BufferBinding shBinding{};
-		shBinding.buffer = gpuData.shRest.Get();
-		shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(4, shBinding);
-	}
+		// Binding 2: Covariances3D (shared)
+		if (gpuData.covariances3D)
+		{
+			rhi::BufferBinding cov3DBinding{};
+			cov3DBinding.buffer = gpuData.covariances3D.Get();
+			cov3DBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(2, cov3DBinding);
+		}
 
-	// Binding 5: Sorted indices (app-owned buffer, written to by backend)
-	if (m_sortedIndices)
-	{
-		rhi::BufferBinding indicesBinding{};
-		indicesBinding.buffer = m_sortedIndices.Get();
-		indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(5, indicesBinding);
-	}
+		// Binding 3: Colors (shared)
+		if (gpuData.colors)
+		{
+			rhi::BufferBinding colorsBinding{};
+			colorsBinding.buffer = gpuData.colors.Get();
+			colorsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(3, colorsBinding);
+		}
 
-	// Binding 6: Per-splat Mesh Indices for model matrix lookup
-	if (gpuData.meshIndices)
-	{
-		rhi::BufferBinding meshIndicesBinding{};
-		meshIndicesBinding.buffer = gpuData.meshIndices.Get();
-		meshIndicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(6, meshIndicesBinding);
-	}
+		// Binding 4: SH Rest (shared)
+		if (gpuData.shRest)
+		{
+			rhi::BufferBinding shBinding{};
+			shBinding.buffer = gpuData.shRest.Get();
+			shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(4, shBinding);
+		}
 
-	// Binding 7: Per-mesh Model Matrices
-	if (gpuData.modelMatrices)
-	{
-		rhi::BufferBinding modelMatricesBinding{};
-		modelMatricesBinding.buffer = gpuData.modelMatrices.Get();
-		modelMatricesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(7, modelMatricesBinding);
+		// Binding 5: Sorted indices (app-owned buffer, written to by backend)
+		if (m_sortedIndices)
+		{
+			rhi::BufferBinding indicesBinding{};
+			indicesBinding.buffer = m_sortedIndices.Get();
+			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(5, indicesBinding);
+		}
+
+		// Binding 6: Per-splat Mesh Indices for model matrix lookup (shared)
+		if (gpuData.meshIndices)
+		{
+			rhi::BufferBinding meshIndicesBinding{};
+			meshIndicesBinding.buffer = gpuData.meshIndices.Get();
+			meshIndicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(6, meshIndicesBinding);
+		}
+
+		// Binding 7: Per-mesh Model Matrices (shared)
+		if (gpuData.modelMatrices)
+		{
+			rhi::BufferBinding modelMatricesBinding{};
+			modelMatricesBinding.buffer = gpuData.modelMatrices.Get();
+			modelMatricesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(7, modelMatricesBinding);
+		}
 	}
 
 	// Create graphics pipeline
@@ -271,20 +277,24 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	uint32_t imageCount = deviceManager->GetSwapchain()->GetImageCount();
 	LOG_INFO("Swapchain image count: {}", imageCount);
 
-	m_imageAvailableSemaphores.resize(imageCount);
+	// Image-available semaphores: per frame-in-flight
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+	{
+		m_imageAvailableSemaphores[i] = device->CreateSemaphore();
+	}
+
+	// Render-finished semaphores: per swapchain image
 	m_renderFinishedSemaphores.resize(imageCount);
 	for (uint32_t i = 0; i < imageCount; ++i)
 	{
-		m_imageAvailableSemaphores[i] = device->CreateSemaphore();
 		m_renderFinishedSemaphores[i] = device->CreateSemaphore();
 	}
 
-	m_inFlightFence = device->CreateFence(true);
-
-	m_commandLists.resize(imageCount);
-	for (uint32_t i = 0; i < imageCount; ++i)
+	// Per-frame-in-flight resources: fences and command lists
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
 	{
-		m_commandLists[i] = device->CreateCommandList(rhi::QueueType::GRAPHICS);
+		m_inFlightFences[i] = device->CreateFence(true);
+		m_commandLists[i]   = device->CreateCommandList(rhi::QueueType::GRAPHICS);
 	}
 
 	m_applicationTimer.start();
@@ -507,8 +517,8 @@ void HybridSplatRendererApp::OnRender()
 		return;
 	}
 
-	// Wait for previous frame
-	m_inFlightFence->Wait(UINT64_MAX);
+	// Wait for this frame slot to be free
+	m_inFlightFences[m_currentFrame]->Wait(UINT64_MAX);
 
 	m_fpsCounter.frame();
 
@@ -524,7 +534,7 @@ void HybridSplatRendererApp::OnRender()
 	ProcessPendingOperations();
 
 	// Acquire next image (skip in vsync bypass mode)
-	uint32_t acquireSemIndex = m_frameCount % m_imageAvailableSemaphores.size();
+	uint32_t acquireSemIndex = m_currentFrame;
 	uint32_t imageIndex      = 0;
 
 	if (!m_vsyncBypassMode)
@@ -547,7 +557,7 @@ void HybridSplatRendererApp::OnRender()
 
 	// Reset fence AFTER all early returns to prevents blocking forever
 	// if we return early above without submitting any commands
-	m_inFlightFence->Reset();
+	m_inFlightFences[m_currentFrame]->Reset();
 
 	// Query pre-transform from swapchain and build pre-rotation matrix for mobile rotation handling
 	rhi::SurfaceTransform preTransform = swapchain->GetPreTransform();
@@ -611,9 +621,9 @@ void HybridSplatRendererApp::OnRender()
 			ubo.screenRotation = {1.0f, 0.0f, 0.0f, 1.0f};        // Identity matrix
 			break;
 	}
-	memcpy(m_frameUboDataPtr, &ubo, sizeof(FrameUBO));
+	memcpy(m_frameUboDataPtrs[m_currentFrame], &ubo, sizeof(FrameUBO));
 
-	rhi::IRHICommandList *cmdList = m_commandLists[imageIndex].Get();
+	rhi::IRHICommandList *cmdList = m_commandLists[m_currentFrame].Get();
 	cmdList->Begin();
 
 	// Reset GPU profiling queries for this frame
@@ -872,14 +882,14 @@ void HybridSplatRendererApp::OnRender()
 			rhi::BufferBinding indicesBinding{};
 			indicesBinding.buffer = sortedIndicesForRendering;
 			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-			m_descriptorSet->BindBuffer(5, indicesBinding);
+			m_descriptorSets[m_currentFrame]->BindBuffer(5, indicesBinding);
 		}
 		else if (m_backend && m_sortingEnabled)
 		{
 			rhi::BufferBinding indicesBinding{};
 			indicesBinding.buffer = m_sortedIndices.Get();
 			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-			m_descriptorSet->BindBuffer(5, indicesBinding);
+			m_descriptorSets[m_currentFrame]->BindBuffer(5, indicesBinding);
 		}
 
 		uint32_t splatCount = m_scene->GetTotalSplatCount();
@@ -891,11 +901,11 @@ void HybridSplatRendererApp::OnRender()
 		BeginPipelineStatsQuery(cmdList);
 
 		if (m_transmittanceCullingEnabled &&
-		    m_stencilUpdatePipeline && m_splatTransmCullingPipeline && m_depthStencilTexture)
+		    m_stencilUpdatePipeline && m_splatTransmCullingPipeline && m_depthStencilTextures[m_currentFrame])
 		{
 			// === Transmittance culling mode ===
 			// Renders splats front-to-back, using interleaved stencil updates to cull saturated pixels early
-			RenderTransmittanceCulling(cmdList, splatCount, width, height, imageIndex);
+			RenderTransmittanceCulling(cmdList, splatCount, width, height, imageIndex, m_currentFrame);
 		}
 		else
 		{
@@ -931,10 +941,10 @@ void HybridSplatRendererApp::OnRender()
 			cmdList->SetScissor(0, 0, width, height);
 
 			// Draw the splats using indexed procedural vertex generation if scene is not empty
-			if (splatCount > 0 && m_renderPipeline && m_descriptorSet && m_quadIndexBuffer)
+			if (splatCount > 0 && m_renderPipeline && m_descriptorSets[m_currentFrame] && m_quadIndexBuffer)
 			{
 				cmdList->SetPipeline(m_renderPipeline.Get());
-				cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
+				cmdList->BindDescriptorSet(0, m_descriptorSets[m_currentFrame].Get());
 				cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
 
 				// Draw using instanced rendering: 4 indices per strip, one instance per splat
@@ -976,7 +986,7 @@ void HybridSplatRendererApp::OnRender()
 
 	// Submit command list
 	rhi::SubmitInfo submitInfo = {};
-	submitInfo.signalFence     = m_inFlightFence.Get();
+	submitInfo.signalFence     = m_inFlightFences[m_currentFrame].Get();
 
 	// Use explicit arrays to avoid std::span brace-initialization issues on Android release builds
 	rhi::SemaphoreWaitInfo waitInfoArray[2];
@@ -1026,6 +1036,7 @@ void HybridSplatRendererApp::OnRender()
 	m_profilingFrameIndex++;
 
 	m_frameCount++;
+	m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 void HybridSplatRendererApp::OnShutdown()
@@ -1045,40 +1056,51 @@ void HybridSplatRendererApp::OnShutdown()
 
 		ShutdownGpuProfiling();
 
-		if (m_frameUboDataPtr)
+		for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
 		{
-			m_frameUboBuffer->Unmap();
-			m_frameUboDataPtr = nullptr;
+			if (m_frameUboDataPtrs[i])
+			{
+				m_frameUboBuffers[i]->Unmap();
+				m_frameUboDataPtrs[i] = nullptr;
+			}
 		}
 	}
 
-	m_renderPipeline      = nullptr;
-	m_descriptorSet       = nullptr;
+	m_renderPipeline = nullptr;
+	for (auto &ds : m_descriptorSets)
+		ds = nullptr;
 	m_descriptorSetLayout = nullptr;
 
 	m_vertexShader   = nullptr;
 	m_fragmentShader = nullptr;
 
 	// Transmittance culling resources
-	m_transmCullingFragmentShader   = nullptr;
-	m_stencilUpdateFragmentShader   = nullptr;
-	m_stencilUpdatePipeline         = nullptr;
-	m_splatTransmCullingPipeline    = nullptr;
-	m_stencilUpdateDescriptorSet    = nullptr;
+	m_transmCullingFragmentShader = nullptr;
+	m_stencilUpdateFragmentShader = nullptr;
+	m_stencilUpdatePipeline       = nullptr;
+	m_splatTransmCullingPipeline  = nullptr;
+	for (auto &ds : m_stencilUpdateDescriptorSets)
+		ds = nullptr;
 	m_stencilUpdateDescriptorLayout = nullptr;
-	m_accumTextureView              = nullptr;
-	m_accumTexture                  = nullptr;
-	m_depthStencilView              = nullptr;
-	m_depthStencilTexture           = nullptr;
+	for (auto &v : m_accumTextureViews)
+		v = nullptr;
+	for (auto &t : m_accumTextures)
+		t = nullptr;
+	for (auto &v : m_depthStencilViews)
+		v = nullptr;
+	for (auto &t : m_depthStencilTextures)
+		t = nullptr;
 
-	m_compositePipeline            = nullptr;
-	m_compositeDescriptorSet       = nullptr;
+	m_compositePipeline = nullptr;
+	for (auto &ds : m_compositeDescriptorSets)
+		ds = nullptr;
 	m_compositeDescriptorSetLayout = nullptr;
 	m_compositeSampler             = nullptr;
 	m_compositeFragmentShader      = nullptr;
 	m_fullscreenVertexShader       = nullptr;
 
-	m_frameUboBuffer  = nullptr;
+	for (auto &buf : m_frameUboBuffers)
+		buf = nullptr;
 	m_quadIndexBuffer = nullptr;
 	m_sortedIndices   = nullptr;
 
@@ -1087,10 +1109,13 @@ void HybridSplatRendererApp::OnShutdown()
 	m_scene.reset();
 	m_shaderFactory.reset();
 
-	m_imageAvailableSemaphores.clear();
+	for (auto &sem : m_imageAvailableSemaphores)
+		sem = nullptr;
 	m_renderFinishedSemaphores.clear();
-	m_inFlightFence = nullptr;
-	m_commandLists.clear();
+	for (auto &fence : m_inFlightFences)
+		fence = nullptr;
+	for (auto &cmd : m_commandLists)
+		cmd = nullptr;
 
 	LOG_INFO("=== Shutdown Complete ===");
 }
@@ -1338,7 +1363,7 @@ void HybridSplatRendererApp::LoadSplatFile(const char *filepath)
 				uploadFence->Wait(UINT64_MAX);
 			}
 
-			if (m_descriptorSet)
+			if (m_descriptorSets[0])
 			{
 				uint32_t newSplatCount = m_scene->GetTotalSplatCount();
 				RebindSceneDescriptors(newSplatCount);
@@ -1521,62 +1546,65 @@ void HybridSplatRendererApp::RebindSceneDescriptors(uint32_t newSplatCount)
 		m_sortedIndices = nullptr;
 	}
 
-	// Rebind scene buffers to descriptor set
+	// Rebind scene buffers to all per-frame descriptor sets
 	const auto &gpuData = m_scene->GetGpuData();
-	if (gpuData.positions)
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
 	{
-		rhi::BufferBinding positionsBinding{};
-		positionsBinding.buffer = gpuData.positions.Get();
-		positionsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(1, positionsBinding);
-	}
+		if (gpuData.positions)
+		{
+			rhi::BufferBinding positionsBinding{};
+			positionsBinding.buffer = gpuData.positions.Get();
+			positionsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(1, positionsBinding);
+		}
 
-	if (gpuData.covariances3D)
-	{
-		rhi::BufferBinding cov3DBinding{};
-		cov3DBinding.buffer = gpuData.covariances3D.Get();
-		cov3DBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(2, cov3DBinding);
-	}
+		if (gpuData.covariances3D)
+		{
+			rhi::BufferBinding cov3DBinding{};
+			cov3DBinding.buffer = gpuData.covariances3D.Get();
+			cov3DBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(2, cov3DBinding);
+		}
 
-	if (gpuData.colors)
-	{
-		rhi::BufferBinding colorsBinding{};
-		colorsBinding.buffer = gpuData.colors.Get();
-		colorsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(3, colorsBinding);
-	}
+		if (gpuData.colors)
+		{
+			rhi::BufferBinding colorsBinding{};
+			colorsBinding.buffer = gpuData.colors.Get();
+			colorsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(3, colorsBinding);
+		}
 
-	if (gpuData.shRest)
-	{
-		rhi::BufferBinding shBinding{};
-		shBinding.buffer = gpuData.shRest.Get();
-		shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(4, shBinding);
-	}
+		if (gpuData.shRest)
+		{
+			rhi::BufferBinding shBinding{};
+			shBinding.buffer = gpuData.shRest.Get();
+			shBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(4, shBinding);
+		}
 
-	if (m_sortedIndices)
-	{
-		rhi::BufferBinding indicesBinding{};
-		indicesBinding.buffer = m_sortedIndices.Get();
-		indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(5, indicesBinding);
-	}
+		if (m_sortedIndices)
+		{
+			rhi::BufferBinding indicesBinding{};
+			indicesBinding.buffer = m_sortedIndices.Get();
+			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(5, indicesBinding);
+		}
 
-	if (gpuData.meshIndices)
-	{
-		rhi::BufferBinding meshIndicesBinding{};
-		meshIndicesBinding.buffer = gpuData.meshIndices.Get();
-		meshIndicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(6, meshIndicesBinding);
-	}
+		if (gpuData.meshIndices)
+		{
+			rhi::BufferBinding meshIndicesBinding{};
+			meshIndicesBinding.buffer = gpuData.meshIndices.Get();
+			meshIndicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(6, meshIndicesBinding);
+		}
 
-	if (gpuData.modelMatrices)
-	{
-		rhi::BufferBinding modelMatricesBinding{};
-		modelMatricesBinding.buffer = gpuData.modelMatrices.Get();
-		modelMatricesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
-		m_descriptorSet->BindBuffer(7, modelMatricesBinding);
+		if (gpuData.modelMatrices)
+		{
+			rhi::BufferBinding modelMatricesBinding{};
+			modelMatricesBinding.buffer = gpuData.modelMatrices.Get();
+			modelMatricesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+			m_descriptorSets[i]->BindBuffer(7, modelMatricesBinding);
+		}
 	}
 
 	LOG_INFO("Rebound scene descriptors to new buffers");
@@ -2059,7 +2087,11 @@ void HybridSplatRendererApp::CollectAndLogBufferMemory()
 	// App buffers
 	m_memoryTracker.AddBuffer("m_sortedIndices", m_sortedIndices, "App", MemoryType::DeviceLocal);
 	m_memoryTracker.AddBuffer("m_quadIndexBuffer", m_quadIndexBuffer, "App", MemoryType::DeviceLocal);
-	m_memoryTracker.AddBuffer("m_frameUboBuffer", m_frameUboBuffer, "App", MemoryType::HostVisible);
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+	{
+		const auto name = "m_frameUboBuffers[" + std::to_string(i) + "]";
+		m_memoryTracker.AddBuffer(name.c_str(), m_frameUboBuffers[i], "App", MemoryType::HostVisible);
+	}
 
 	// GPU Sorter buffers (if GPU backend is active)
 	if (m_currentBackendType == BackendType::GPU && m_backend)
@@ -2072,8 +2104,12 @@ void HybridSplatRendererApp::CollectAndLogBufferMemory()
 			m_memoryTracker.AddBuffer("splatIndicesOriginal", buffers.splatIndicesOriginal, "Sorter", MemoryType::DeviceLocal);
 			m_memoryTracker.AddBuffer("sortPairsA", buffers.sortPairsA, "Sorter", MemoryType::DeviceLocal);
 			m_memoryTracker.AddBuffer("sortPairsB", buffers.sortPairsB, "Sorter", MemoryType::DeviceLocal);
-			m_memoryTracker.AddBuffer("sortIndicesB", buffers.sortIndicesB, "Sorter", MemoryType::DeviceLocal);
-			m_memoryTracker.AddBuffer("sortIndicesB_Alt", buffers.sortIndicesB_Alt, "Sorter", MemoryType::DeviceLocal);
+			for (uint32_t i = 0; i < buffers.outputBuffers.size(); ++i)
+			{
+				char name[32];
+				snprintf(name, sizeof(name), "outputBuffer[%u]", i);
+				m_memoryTracker.AddBuffer(name, buffers.outputBuffers[i], "Sorter", MemoryType::DeviceLocal);
+			}
 			m_memoryTracker.AddBuffer("histograms", buffers.histograms, "Sorter", MemoryType::DeviceLocal);
 			m_memoryTracker.AddBuffer("blockSums", buffers.blockSums, "Sorter", MemoryType::DeviceLocal);
 			m_memoryTracker.AddBuffer("cameraUBO", buffers.cameraUBO, "Sorter", MemoryType::HostVisible);
@@ -2341,8 +2377,9 @@ void HybridSplatRendererApp::InitImGui()
 	init_info.QueueFamily               = device->GetGraphicsQueueFamily();
 	init_info.Queue                     = static_cast<VkQueue>(device->GetNativeGraphicsQueue());
 	init_info.DescriptorPool            = imguiPool;
+	uint32_t swapchainImageCount        = m_deviceManager->GetSwapchain()->GetImageCount();
 	init_info.MinImageCount             = 2;
-	init_info.ImageCount                = m_deviceManager->GetSwapchain()->GetImageCount();
+	init_info.ImageCount                = std::max(swapchainImageCount, MAX_FRAMES_IN_FLIGHT);
 	init_info.UseDynamicRendering       = true;
 
 	// Set up color attachment format for dynamic rendering (new ImGui API: fields in PipelineInfoMain)
@@ -2690,6 +2727,11 @@ void HybridSplatRendererApp::RenderImGui()
 						m_pendingOps.asyncComputeToggle = PendingOperations::AsyncComputeToggle{asyncEnabled};
 						LOG_INFO("Async compute toggle scheduled: {}", asyncEnabled ? "enable" : "disable");
 					}
+					if (m_asyncComputeEnabled)
+					{
+						ImGui::SameLine();
+						ImGui::Text("(Frames in flight: %u)", MAX_FRAMES_IN_FLIGHT);
+					}
 				}
 			}
 		}
@@ -3022,24 +3064,11 @@ void HybridSplatRendererApp::CreateTransmCullingResources()
 	m_compositeFragmentShader     = m_shaderFactory->getOrCreateShader("shaders/compiled/composite.frag.spv", rhi::ShaderStage::FRAGMENT);
 	m_stencilUpdateFragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/transm_stencil_update.frag.spv", rhi::ShaderStage::FRAGMENT);
 
-	// Create accumulation texture
+	// Create per-frame accumulation and depth/stencil textures for multi-frame-in-flight
 	int fbWidth, fbHeight;
 	m_deviceManager->GetPlatformAdapter()->GetFramebufferSize(&fbWidth, &fbHeight);
 
-	rhi::TextureDesc accumDesc{};
-	accumDesc.width             = static_cast<uint32_t>(fbWidth);
-	accumDesc.height            = static_cast<uint32_t>(fbHeight);
-	accumDesc.format            = swapchain->GetBackBuffer(0)->GetFormat();
-	accumDesc.isRenderTarget    = true;
-	accumDesc.isInputAttachment = true;
-	m_accumTexture              = device->CreateTexture(accumDesc);
-
-	rhi::TextureViewDesc accumViewDesc{};
-	accumViewDesc.texture    = m_accumTexture.Get();
-	accumViewDesc.aspectMask = rhi::TextureAspect::COLOR;
-	m_accumTextureView       = device->CreateTextureView(accumViewDesc);
-
-	// Create sampler for composite pass
+	// Create sampler for composite pass (shared)
 	rhi::SamplerDesc samplerDesc{};
 	samplerDesc.minFilter    = rhi::FilterMode::LINEAR;
 	samplerDesc.magFilter    = rhi::FilterMode::LINEAR;
@@ -3048,22 +3077,69 @@ void HybridSplatRendererApp::CreateTransmCullingResources()
 	samplerDesc.addressModeW = rhi::SamplerAddressMode::CLAMP_TO_EDGE;
 	m_compositeSampler       = device->CreateSampler(samplerDesc);
 
-	// Create composite descriptor set layout
+	// Create composite descriptor set layout (shared)
 	rhi::DescriptorSetLayoutDesc compositeLayoutDesc{};
 	compositeLayoutDesc.bindings = {
 	    {0, rhi::DescriptorType::COMBINED_IMAGE_SAMPLER, 1, rhi::ShaderStageFlags::FRAGMENT},
 	};
 	m_compositeDescriptorSetLayout = device->CreateDescriptorSetLayout(compositeLayoutDesc);
-	m_compositeDescriptorSet       = device->CreateDescriptorSet(m_compositeDescriptorSetLayout.Get());
 
-	// Bind accumulation texture with combined sampler
-	rhi::TextureBinding accumBinding{};
-	accumBinding.texture = m_accumTexture.Get();
-	accumBinding.sampler = m_compositeSampler.Get();
-	accumBinding.type    = rhi::DescriptorType::COMBINED_IMAGE_SAMPLER;
-	m_compositeDescriptorSet->BindTexture(0, accumBinding);
+	// Create descriptor layout for input attachment (shared)
+	rhi::DescriptorSetLayoutDesc stencilLayoutDesc{};
+	stencilLayoutDesc.bindings.push_back({0,
+	                                      rhi::DescriptorType::INPUT_ATTACHMENT,
+	                                      1,
+	                                      rhi::ShaderStageFlags::FRAGMENT});
+	m_stencilUpdateDescriptorLayout = device->CreateDescriptorSetLayout(stencilLayoutDesc);
 
-	// Create composite pipeline
+	// Create per-frame textures, views, and descriptor sets
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+	{
+		// Accumulation texture
+		rhi::TextureDesc accumDesc{};
+		accumDesc.width             = static_cast<uint32_t>(fbWidth);
+		accumDesc.height            = static_cast<uint32_t>(fbHeight);
+		accumDesc.format            = swapchain->GetBackBuffer(0)->GetFormat();
+		accumDesc.isRenderTarget    = true;
+		accumDesc.isInputAttachment = true;
+		m_accumTextures[i]          = device->CreateTexture(accumDesc);
+
+		rhi::TextureViewDesc accumViewDesc{};
+		accumViewDesc.texture    = m_accumTextures[i].Get();
+		accumViewDesc.aspectMask = rhi::TextureAspect::COLOR;
+		m_accumTextureViews[i]   = device->CreateTextureView(accumViewDesc);
+
+		// Composite descriptor set (per-frame, references this frame's accumTexture)
+		m_compositeDescriptorSets[i] = device->CreateDescriptorSet(m_compositeDescriptorSetLayout.Get());
+		rhi::TextureBinding accumBinding{};
+		accumBinding.texture = m_accumTextures[i].Get();
+		accumBinding.sampler = m_compositeSampler.Get();
+		accumBinding.type    = rhi::DescriptorType::COMBINED_IMAGE_SAMPLER;
+		m_compositeDescriptorSets[i]->BindTexture(0, accumBinding);
+
+		// Depth/stencil texture
+		rhi::TextureDesc dsDesc{};
+		dsDesc.width              = static_cast<uint32_t>(fbWidth);
+		dsDesc.height             = static_cast<uint32_t>(fbHeight);
+		dsDesc.format             = rhi::TextureFormat::D32_SFLOAT_S8_UINT;
+		dsDesc.isDepthStencil     = true;
+		m_depthStencilTextures[i] = device->CreateTexture(dsDesc);
+
+		rhi::TextureViewDesc dsViewDesc{};
+		dsViewDesc.texture     = m_depthStencilTextures[i].Get();
+		dsViewDesc.aspectMask  = rhi::TextureAspect::DEPTH | rhi::TextureAspect::STENCIL;
+		m_depthStencilViews[i] = device->CreateTextureView(dsViewDesc);
+
+		// Stencil update descriptor set (per-frame, references this frame's accumTexture as input attachment)
+		m_stencilUpdateDescriptorSets[i] = device->CreateDescriptorSet(m_stencilUpdateDescriptorLayout.Get());
+		rhi::TextureBinding inputBinding{};
+		inputBinding.texture = m_accumTextures[i].Get();
+		inputBinding.type    = rhi::DescriptorType::INPUT_ATTACHMENT;
+		inputBinding.layout  = rhi::ImageLayout::RENDERING_LOCAL_READ;
+		m_stencilUpdateDescriptorSets[i]->BindTexture(0, inputBinding);
+	}
+
+	// Create composite pipeline (shared)
 	rhi::GraphicsPipelineDesc compositePipelineDesc{};
 	compositePipelineDesc.vertexShader                = m_fullscreenVertexShader.Get();
 	compositePipelineDesc.fragmentShader              = m_compositeFragmentShader.Get();
@@ -3075,35 +3151,6 @@ void HybridSplatRendererApp::CreateTransmCullingResources()
 	compositePipelineDesc.descriptorSetLayouts                 = {m_compositeDescriptorSetLayout.Get()};
 	compositePipelineDesc.pushConstantRanges                   = {{rhi::ShaderStageFlags::FRAGMENT, 0, sizeof(float) * 4}};
 	m_compositePipeline                                        = device->CreateGraphicsPipeline(compositePipelineDesc);
-
-	// Create depth/stencil texture for chunked culling
-	rhi::TextureDesc dsDesc{};
-	dsDesc.width          = static_cast<uint32_t>(fbWidth);
-	dsDesc.height         = static_cast<uint32_t>(fbHeight);
-	dsDesc.format         = rhi::TextureFormat::D32_SFLOAT_S8_UINT;
-	dsDesc.isDepthStencil = true;
-	m_depthStencilTexture = device->CreateTexture(dsDesc);
-
-	rhi::TextureViewDesc dsViewDesc{};
-	dsViewDesc.texture    = m_depthStencilTexture.Get();
-	dsViewDesc.aspectMask = rhi::TextureAspect::DEPTH | rhi::TextureAspect::STENCIL;
-	m_depthStencilView    = device->CreateTextureView(dsViewDesc);
-
-	// Create descriptor layout for input attachment
-	rhi::DescriptorSetLayoutDesc stencilLayoutDesc{};
-	stencilLayoutDesc.bindings.push_back({0,
-	                                      rhi::DescriptorType::INPUT_ATTACHMENT,
-	                                      1,
-	                                      rhi::ShaderStageFlags::FRAGMENT});
-	m_stencilUpdateDescriptorLayout = device->CreateDescriptorSetLayout(stencilLayoutDesc);
-	m_stencilUpdateDescriptorSet    = device->CreateDescriptorSet(m_stencilUpdateDescriptorLayout.Get());
-
-	// Bind the accumulation texture as input attachment
-	rhi::TextureBinding inputBinding{};
-	inputBinding.texture = m_accumTexture.Get();
-	inputBinding.type    = rhi::DescriptorType::INPUT_ATTACHMENT;
-	inputBinding.layout  = rhi::ImageLayout::RENDERING_LOCAL_READ;
-	m_stencilUpdateDescriptorSet->BindTexture(0, inputBinding);
 
 	// Create stencil update pipeline
 	rhi::GraphicsPipelineDesc stencilPipelineDesc{};
@@ -3169,7 +3216,7 @@ void HybridSplatRendererApp::CreateTransmCullingResources()
 
 void HybridSplatRendererApp::ResizeTransmCullingResources(uint32_t width, uint32_t height)
 {
-	if (!m_accumTexture)
+	if (!m_accumTextures[0])
 	{
 		return;
 	}
@@ -3177,48 +3224,51 @@ void HybridSplatRendererApp::ResizeTransmCullingResources(uint32_t width, uint32
 	auto *device    = m_deviceManager->GetDevice();
 	auto *swapchain = m_deviceManager->GetSwapchain();
 
-	// Recreate accumulation texture at new size
-	rhi::TextureDesc accumDesc{};
-	accumDesc.width             = width;
-	accumDesc.height            = height;
-	accumDesc.format            = swapchain->GetBackBuffer(0)->GetFormat();
-	accumDesc.isRenderTarget    = true;
-	accumDesc.isInputAttachment = true;
-	m_accumTexture              = device->CreateTexture(accumDesc);
-
-	rhi::TextureViewDesc accumViewDesc{};
-	accumViewDesc.texture    = m_accumTexture.Get();
-	accumViewDesc.aspectMask = rhi::TextureAspect::COLOR;
-	m_accumTextureView       = device->CreateTextureView(accumViewDesc);
-
-	// Rebind to composite descriptor set
-	rhi::TextureBinding accumBinding{};
-	accumBinding.texture = m_accumTexture.Get();
-	accumBinding.sampler = m_compositeSampler.Get();
-	accumBinding.type    = rhi::DescriptorType::COMBINED_IMAGE_SAMPLER;
-	m_compositeDescriptorSet->BindTexture(0, accumBinding);
-
-	// Recreate depth/stencil texture at new size
-	rhi::TextureDesc dsDesc{};
-	dsDesc.width          = width;
-	dsDesc.height         = height;
-	dsDesc.format         = rhi::TextureFormat::D32_SFLOAT_S8_UINT;
-	dsDesc.isDepthStencil = true;
-	m_depthStencilTexture = device->CreateTexture(dsDesc);
-
-	rhi::TextureViewDesc dsViewDesc{};
-	dsViewDesc.texture    = m_depthStencilTexture.Get();
-	dsViewDesc.aspectMask = rhi::TextureAspect::DEPTH | rhi::TextureAspect::STENCIL;
-	m_depthStencilView    = device->CreateTextureView(dsViewDesc);
-
-	// Rebind input attachment
-	if (m_stencilUpdateDescriptorSet)
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
 	{
-		rhi::TextureBinding inputBinding{};
-		inputBinding.texture = m_accumTexture.Get();
-		inputBinding.type    = rhi::DescriptorType::INPUT_ATTACHMENT;
-		inputBinding.layout  = rhi::ImageLayout::RENDERING_LOCAL_READ;
-		m_stencilUpdateDescriptorSet->BindTexture(0, inputBinding);
+		// Recreate accumulation texture at new size
+		rhi::TextureDesc accumDesc{};
+		accumDesc.width             = width;
+		accumDesc.height            = height;
+		accumDesc.format            = swapchain->GetBackBuffer(0)->GetFormat();
+		accumDesc.isRenderTarget    = true;
+		accumDesc.isInputAttachment = true;
+		m_accumTextures[i]          = device->CreateTexture(accumDesc);
+
+		rhi::TextureViewDesc accumViewDesc{};
+		accumViewDesc.texture    = m_accumTextures[i].Get();
+		accumViewDesc.aspectMask = rhi::TextureAspect::COLOR;
+		m_accumTextureViews[i]   = device->CreateTextureView(accumViewDesc);
+
+		// Rebind to composite descriptor set
+		rhi::TextureBinding accumBinding{};
+		accumBinding.texture = m_accumTextures[i].Get();
+		accumBinding.sampler = m_compositeSampler.Get();
+		accumBinding.type    = rhi::DescriptorType::COMBINED_IMAGE_SAMPLER;
+		m_compositeDescriptorSets[i]->BindTexture(0, accumBinding);
+
+		// Recreate depth/stencil texture at new size
+		rhi::TextureDesc dsDesc{};
+		dsDesc.width              = width;
+		dsDesc.height             = height;
+		dsDesc.format             = rhi::TextureFormat::D32_SFLOAT_S8_UINT;
+		dsDesc.isDepthStencil     = true;
+		m_depthStencilTextures[i] = device->CreateTexture(dsDesc);
+
+		rhi::TextureViewDesc dsViewDesc{};
+		dsViewDesc.texture     = m_depthStencilTextures[i].Get();
+		dsViewDesc.aspectMask  = rhi::TextureAspect::DEPTH | rhi::TextureAspect::STENCIL;
+		m_depthStencilViews[i] = device->CreateTextureView(dsViewDesc);
+
+		// Rebind input attachment
+		if (m_stencilUpdateDescriptorSets[i])
+		{
+			rhi::TextureBinding inputBinding{};
+			inputBinding.texture = m_accumTextures[i].Get();
+			inputBinding.type    = rhi::DescriptorType::INPUT_ATTACHMENT;
+			inputBinding.layout  = rhi::ImageLayout::RENDERING_LOCAL_READ;
+			m_stencilUpdateDescriptorSets[i]->BindTexture(0, inputBinding);
+		}
 	}
 
 	LOG_INFO("Transmittance culling resources resized to {}x{}", width, height);
@@ -3229,7 +3279,8 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
     uint32_t              splatCount,
     uint32_t              width,
     uint32_t              height,
-    uint32_t              imageIndex)
+    uint32_t              imageIndex,
+    uint32_t              frameIndex)
 {
 	auto *swapchain = m_deviceManager->GetSwapchain();
 
@@ -3237,12 +3288,12 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
 
 	// Barrier: Transition accumulation texture to local read layout
 	rhi::TextureTransition accumTransition{};
-	accumTransition.texture = m_accumTexture.Get();
+	accumTransition.texture = m_accumTextures[frameIndex].Get();
 	accumTransition.before  = rhi::ResourceState::Undefined;
 	accumTransition.after   = rhi::ResourceState::RenderingLocalRead;
 
 	rhi::TextureTransition dsTransition{};
-	dsTransition.texture = m_depthStencilTexture.Get();
+	dsTransition.texture = m_depthStencilTextures[frameIndex].Get();
 	dsTransition.before  = rhi::ResourceState::Undefined;
 	dsTransition.after   = rhi::ResourceState::DepthStencilWrite;
 
@@ -3252,7 +3303,7 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
 
 	rhi::RenderingInfo renderInfo{};
 	renderInfo.colorAttachments.resize(1);
-	renderInfo.colorAttachments[0].view                = m_accumTextureView.Get();
+	renderInfo.colorAttachments[0].view                = m_accumTextureViews[frameIndex].Get();
 	renderInfo.colorAttachments[0].loadOp              = rhi::LoadOp::CLEAR;
 	renderInfo.colorAttachments[0].storeOp             = rhi::StoreOp::STORE;
 	renderInfo.colorAttachments[0].clearValue.color[0] = 0.0f;        // C_acc = 0
@@ -3261,7 +3312,7 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
 	renderInfo.colorAttachments[0].clearValue.color[3] = 1.0f;        // T = 1 (fully transparent)
 	renderInfo.colorAttachments[0].layout              = rhi::ImageLayout::RENDERING_LOCAL_READ;
 
-	renderInfo.depthStencilAttachment.view                            = m_depthStencilView.Get();
+	renderInfo.depthStencilAttachment.view                            = m_depthStencilViews[frameIndex].Get();
 	renderInfo.depthStencilAttachment.depthLoadOp                     = rhi::LoadOp::DONT_CARE;
 	renderInfo.depthStencilAttachment.stencilLoadOp                   = rhi::LoadOp::CLEAR;
 	renderInfo.depthStencilAttachment.stencilStoreOp                  = rhi::StoreOp::DONT_CARE;
@@ -3286,7 +3337,7 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
 
 		// === Render splats for this chunk ===
 		cmdList->SetPipeline(m_splatTransmCullingPipeline.Get());
-		cmdList->BindDescriptorSet(0, m_descriptorSet.Get());
+		cmdList->BindDescriptorSet(0, m_descriptorSets[frameIndex].Get());
 		cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
 		cmdList->DrawIndexedInstanced(4, chunkSplatCount, 0, 0, firstSplat);
 
@@ -3304,7 +3355,7 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
 
 			// Stencil update pass
 			cmdList->SetPipeline(m_stencilUpdatePipeline.Get());
-			cmdList->BindDescriptorSet(0, m_stencilUpdateDescriptorSet.Get());
+			cmdList->BindDescriptorSet(0, m_stencilUpdateDescriptorSets[frameIndex].Get());
 			cmdList->PushConstants(rhi::ShaderStageFlags::FRAGMENT, 0,
 			                       {reinterpret_cast<const std::byte *>(&m_saturationThreshold),
 			                        sizeof(float)});
@@ -3328,7 +3379,7 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
 	{
 		// Barrier: transition accumulation texture from local read to shader read for composite pass
 		rhi::TextureTransition accumToRead{};
-		accumToRead.texture = m_accumTexture.Get();
+		accumToRead.texture = m_accumTextures[frameIndex].Get();
 		accumToRead.before  = rhi::ResourceState::RenderingLocalRead;
 		accumToRead.after   = rhi::ResourceState::GeneralRead;
 
@@ -3356,7 +3407,7 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
 		cmdList->SetScissor(0, 0, width, height);
 
 		cmdList->SetPipeline(m_compositePipeline.Get());
-		cmdList->BindDescriptorSet(0, m_compositeDescriptorSet.Get());
+		cmdList->BindDescriptorSet(0, m_compositeDescriptorSets[frameIndex].Get());
 
 		// Set background color
 		float backgroundColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};

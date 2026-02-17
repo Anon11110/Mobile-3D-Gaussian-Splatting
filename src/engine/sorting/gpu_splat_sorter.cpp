@@ -13,14 +13,15 @@ GpuSplatSorter::GpuSplatSorter(rhi::IRHIDevice *device, container::shared_ptr<vf
 {
 }
 
-void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer)
+void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer, uint32_t pipelineDepth)
 {
 	if (isInitialized)
 	{
 		return;
 	}
 
-	this->totalSplatCount = totalSplatCount;
+	this->totalSplatCount   = totalSplatCount;
+	this->outputBufferCount = pipelineDepth;
 
 	rhi::BufferDesc bufferDesc = {};
 	bufferDesc.usage           = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST;
@@ -39,15 +40,19 @@ void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outp
 
 	// Sort pair buffers (ping-pong)
 	// With RadixPasses=4, the final pass writes to buffer B.
-	// Use the caller's output buffer as sortIndicesB so results are written directly.
+	// Use the caller's output buffer as primary output so results are written directly.
 	bufferDesc.size = totalSplatCount * sizeof(uint32_t) * 2;
 	sortPairsA      = device->CreateBuffer(bufferDesc);
 	sortPairsB      = device->CreateBuffer(bufferDesc);
 
-	// Output index buffers
-	bufferDesc.size  = totalSplatCount * sizeof(uint32_t);
-	sortIndicesB     = std::move(outputBuffer);
-	sortIndicesB_Alt = device->CreateBuffer(bufferDesc);
+	// Output index buffers: [0]=primary (caller-provided), [1..K-1]=alternates for pipelined async compute
+	bufferDesc.size = totalSplatCount * sizeof(uint32_t);
+	outputBuffers.resize(outputBufferCount);
+	outputBuffers[0] = std::move(outputBuffer);
+	for (uint32_t i = 1; i < outputBufferCount; ++i)
+	{
+		outputBuffers[i] = device->CreateBuffer(bufferDesc);
+	}
 
 	// Histogram buffer for radix sort
 	// Each workgroup generates a histogram with 256 bins for each of the 4 passes
@@ -83,7 +88,7 @@ void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outp
 	CreateDescriptorSets();
 
 	// Initialize cache to match the buffer bound in CreateDescriptorSets
-	lastBoundOutputBuffer = sortIndicesB.Get();
+	lastBoundOutputBuffer = outputBuffers[0].Get();
 
 	// Create timestamp query pool for GPU timing
 	rhi::QueryPoolDesc timestampDesc{};
@@ -542,7 +547,8 @@ void GpuSplatSorter::CreateDescriptorSets()
 	}
 
 	// Create descriptor sets for unpack indices (one per output buffer)
-	for (uint32_t bufferIdx = 0; bufferIdx < 2; ++bufferIdx)
+	unpackIndicesDescriptorSets.resize(outputBufferCount);
+	for (uint32_t bufferIdx = 0; bufferIdx < outputBufferCount; ++bufferIdx)
 	{
 		unpackIndicesDescriptorSets[bufferIdx] = device->CreateDescriptorSet(unpackIndicesSetLayout.Get(), rhi::QueueType::COMPUTE);
 
@@ -554,7 +560,7 @@ void GpuSplatSorter::CreateDescriptorSets()
 
 		// Binding 1: Output indices
 		rhi::BufferBinding indicesBinding = {};
-		indicesBinding.buffer             = (bufferIdx == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+		indicesBinding.buffer             = outputBuffers[bufferIdx].Get();
 		indicesBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
 		unpackIndicesDescriptorSets[bufferIdx]->BindBuffer(1, indicesBinding);
 	}
@@ -707,7 +713,10 @@ void GpuSplatSorter::CreateDescriptorSets()
 		uint32_t finalPass            = RadixPasses - 1;
 		uint32_t histogramSizePerPass = numWorkgroups * RadixSortBins * sizeof(uint32_t);
 
-		for (uint32_t bufferIdx = 0; bufferIdx < 2; ++bufferIdx)
+		scatterUnpackPrescanDescriptorSets.resize(outputBufferCount);
+		scatterUnpackIntegratedDescriptorSets.resize(outputBufferCount);
+
+		for (uint32_t bufferIdx = 0; bufferIdx < outputBufferCount; ++bufferIdx)
 		{
 			scatterUnpackPrescanDescriptorSets[bufferIdx] = device->CreateDescriptorSet(scatterPairsSetLayout.Get(), rhi::QueueType::COMPUTE);
 
@@ -719,7 +728,7 @@ void GpuSplatSorter::CreateDescriptorSets()
 
 			// Binding 1: Output indices
 			rhi::BufferBinding indicesOutBinding = {};
-			indicesOutBinding.buffer             = (bufferIdx == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+			indicesOutBinding.buffer             = outputBuffers[bufferIdx].Get();
 			indicesOutBinding.type               = rhi::DescriptorType::STORAGE_BUFFER;
 			scatterUnpackPrescanDescriptorSets[bufferIdx]->BindBuffer(1, indicesOutBinding);
 
@@ -928,11 +937,10 @@ void GpuSplatSorter::RecordUnpackIndices(rhi::IRHICommandList *cmdList)
 	cmdList->Dispatch(numWorkgroups);
 
 	// Barrier: output indices buffer written, needs to be readable for rendering
-	rhi::IRHIBuffer      *outputBuffer = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
-	rhi::BufferTransition transition   = {};
-	transition.buffer                  = outputBuffer;
-	transition.before                  = rhi::ResourceState::ShaderWrite;
-	transition.after                   = rhi::ResourceState::GeneralRead;
+	rhi::BufferTransition transition = {};
+	transition.buffer                = outputBuffers[activeOutputBufferIndex].Get();
+	transition.before                = rhi::ResourceState::ShaderWrite;
+	transition.after                 = rhi::ResourceState::GeneralRead;
 
 	cmdList->Barrier(
 	    rhi::PipelineScope::Compute,
@@ -1134,7 +1142,7 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList, bool 
 			if (isFinalPass && inlineUnpack)
 			{
 				// Final pass wrote to the output indices buffer
-				rhi::IRHIBuffer      *outputBuffer = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+				rhi::IRHIBuffer      *outputBuffer = outputBuffers[activeOutputBufferIndex].Get();
 				rhi::BufferTransition transition   = {};
 				transition.buffer                  = outputBuffer;
 				transition.before                  = rhi::ResourceState::ShaderWrite;
@@ -1255,7 +1263,7 @@ void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList, bo
 			if (isFinalPass && inlineUnpack)
 			{
 				// Final pass wrote to the output indices buffer
-				rhi::IRHIBuffer      *outputBuffer = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+				rhi::IRHIBuffer      *outputBuffer = outputBuffers[activeOutputBufferIndex].Get();
 				rhi::BufferTransition transition   = {};
 				transition.buffer                  = outputBuffer;
 				transition.before                  = rhi::ResourceState::ShaderWrite;
@@ -1296,32 +1304,33 @@ void GpuSplatSorter::RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList, bo
 rhi::BufferHandle GpuSplatSorter::GetSortedIndices() const
 {
 	// With pack/unpack, the final sorted indices are always unpacked to the active output buffer
-	return (activeOutputBufferIndex == 0) ? sortIndicesB : sortIndicesB_Alt;
+	return outputBuffers[activeOutputBufferIndex];
 }
 
-rhi::BufferHandle GpuSplatSorter::GetPrimaryOutputBuffer() const
+rhi::BufferHandle GpuSplatSorter::GetOutputBuffer(uint32_t index) const
 {
-	return sortIndicesB;
+	if (index < outputBuffers.size())
+	{
+		return outputBuffers[index];
+	}
+	return {};
 }
 
-rhi::BufferHandle GpuSplatSorter::GetAlternateOutputBuffer() const
+uint32_t GpuSplatSorter::GetOutputBufferCount() const
 {
-	return sortIndicesB_Alt;
+	return outputBufferCount;
 }
 
 GpuSplatSorter::BufferInfo GpuSplatSorter::GetBufferInfo() const
 {
 	return {splatDepths, splatIndicesOriginal, sortPairsA, sortPairsB,
-	        sortIndicesB, sortIndicesB_Alt, histograms,
+	        outputBuffers, histograms,
 	        blockSums, cameraUBO};
 }
 
 void GpuSplatSorter::SetOutputBuffer(rhi::BufferHandle outputBuffer)
 {
-	// Switch activeOutputBufferIndex to select which unpack descriptor set to use
-	// (sortIndicesB at index 0, sortIndicesB_Alt at index 1)
-	// No descriptor set updates needed - they were pre-created for both buffers.
-
+	// Switch activeOutputBufferIndex to select which unpack descriptor set to use.
 	rhi::IRHIBuffer *targetBuffer = outputBuffer.Get();
 
 	// Skip if already using this buffer
@@ -1332,22 +1341,18 @@ void GpuSplatSorter::SetOutputBuffer(rhi::BufferHandle outputBuffer)
 
 	lastBoundOutputBuffer = targetBuffer;
 
-	// Determine which buffer index to use
-	if (targetBuffer == sortIndicesB.Get())
+	for (uint32_t i = 0; i < outputBuffers.size(); ++i)
 	{
-		activeOutputBufferIndex = 0;
+		if (targetBuffer == outputBuffers[i].Get())
+		{
+			activeOutputBufferIndex = i;
+			return;
+		}
 	}
-	else if (targetBuffer == sortIndicesB_Alt.Get())
-	{
-		activeOutputBufferIndex = 1;
-	}
-	else
-	{
-		// External buffer - store it as sortIndicesB and use index 0
-		// This maintains backward compatibility for single-queue mode
-		sortIndicesB            = std::move(outputBuffer);
-		activeOutputBufferIndex = 0;
-	}
+
+	// External buffer: store as primary (index 0) for backward compatibility
+	outputBuffers[0]        = std::move(outputBuffer);
+	activeOutputBufferIndex = 0;
 }
 
 #ifdef ENABLE_SORT_VERIFICATION
@@ -1388,7 +1393,7 @@ void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
 	rhi::IRHIBuffer *finalSortedPairsBuffer = lastSortUsedInlineUnpack ? sortPairsA.Get() : sortPairsB.Get();
 	cmdList->CopyBuffer(finalSortedPairsBuffer, verificationPairsBuf.Get(), {&pairCopy, 1});
 
-	rhi::IRHIBuffer *activeOutput = (activeOutputBufferIndex == 0) ? sortIndicesB.Get() : sortIndicesB_Alt.Get();
+	rhi::IRHIBuffer *activeOutput = outputBuffers[activeOutputBufferIndex].Get();
 	cmdList->CopyBuffer(activeOutput, verificationSortedIndices.Get(), {&copyRegion, 1});
 
 	// Extract keys from pairs during CheckVerificationResults
