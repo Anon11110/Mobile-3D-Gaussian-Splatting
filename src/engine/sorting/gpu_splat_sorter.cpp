@@ -1377,6 +1377,16 @@ void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
 	verificationSortedKeys    = device->CreateBuffer(readbackDesc);
 	verificationSortedIndices = device->CreateBuffer(readbackDesc);
 
+	// Barrier: make sort outputs visible for transfer reads
+	rhi::IRHIBuffer      *finalPairsBuffer = lastSortUsedInlineUnpack ? sortPairsA.Get() : sortPairsB.Get();
+	rhi::IRHIBuffer      *activeOutput     = outputBuffers[activeOutputBufferIndex].Get();
+	rhi::BufferTransition preBarriers[4];
+	preBarriers[0] = {splatDepths.Get(), rhi::ResourceState::ShaderReadWrite, rhi::ResourceState::CopySource};
+	preBarriers[1] = {finalPairsBuffer, rhi::ResourceState::ShaderReadWrite, rhi::ResourceState::CopySource};
+	preBarriers[2] = {activeOutput, rhi::ResourceState::ShaderReadWrite, rhi::ResourceState::CopySource};
+	preBarriers[3] = {histograms.Get(), rhi::ResourceState::ShaderReadWrite, rhi::ResourceState::CopySource};
+	cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Copy, {preBarriers, 4}, {}, {});
+
 	// Copy depth keys (original unsorted)
 	rhi::BufferCopy copyRegion = {};
 	copyRegion.size            = totalSplatCount * sizeof(uint32_t);
@@ -1389,11 +1399,8 @@ void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
 	auto            verificationPairsBuf = device->CreateBuffer(readbackDesc);
 	rhi::BufferCopy pairCopy             = {};
 	pairCopy.size                        = totalSplatCount * sizeof(uint32_t) * 2;
+	cmdList->CopyBuffer(finalPairsBuffer, verificationPairsBuf.Get(), {&pairCopy, 1});
 
-	rhi::IRHIBuffer *finalSortedPairsBuffer = lastSortUsedInlineUnpack ? sortPairsA.Get() : sortPairsB.Get();
-	cmdList->CopyBuffer(finalSortedPairsBuffer, verificationPairsBuf.Get(), {&pairCopy, 1});
-
-	rhi::IRHIBuffer *activeOutput = outputBuffers[activeOutputBufferIndex].Get();
 	cmdList->CopyBuffer(activeOutput, verificationSortedIndices.Get(), {&copyRegion, 1});
 
 	// Extract keys from pairs during CheckVerificationResults
@@ -1412,31 +1419,20 @@ void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
 	histogramCopy.size            = totalHistogramSize;
 	cmdList->CopyBuffer(histograms.Get(), verificationHistogram.Get(), {&histogramCopy, 1});
 
-	// Transition all verification buffers
+	// Transition readback buffers for CPU access and restore source buffers for rendering
 	{
-		rhi::BufferTransition transitions[4];
-		transitions[0].buffer = verificationDepths.Get();
-		transitions[0].before = rhi::ResourceState::CopyDestination;
-		transitions[0].after  = rhi::ResourceState::GeneralRead;
+		rhi::BufferTransition transitions[5];
 
-		transitions[1].buffer = verificationSortedKeys.Get();
-		transitions[1].before = rhi::ResourceState::CopyDestination;
-		transitions[1].after  = rhi::ResourceState::GeneralRead;
+		// Readback buffers: CopyDestination → GeneralRead
+		transitions[0] = {verificationDepths.Get(), rhi::ResourceState::CopyDestination, rhi::ResourceState::GeneralRead};
+		transitions[1] = {verificationSortedKeys.Get(), rhi::ResourceState::CopyDestination, rhi::ResourceState::GeneralRead};
+		transitions[2] = {verificationSortedIndices.Get(), rhi::ResourceState::CopyDestination, rhi::ResourceState::GeneralRead};
+		transitions[3] = {verificationHistogram.Get(), rhi::ResourceState::CopyDestination, rhi::ResourceState::GeneralRead};
 
-		transitions[2].buffer = verificationSortedIndices.Get();
-		transitions[2].before = rhi::ResourceState::CopyDestination;
-		transitions[2].after  = rhi::ResourceState::GeneralRead;
+		// Output buffer: CopySource → GeneralRead (needed for rendering later this frame)
+		transitions[4] = {activeOutput, rhi::ResourceState::CopySource, rhi::ResourceState::GeneralRead};
 
-		transitions[3].buffer = verificationHistogram.Get();
-		transitions[3].before = rhi::ResourceState::CopyDestination;
-		transitions[3].after  = rhi::ResourceState::GeneralRead;
-
-		cmdList->Barrier(
-		    rhi::PipelineScope::Copy,
-		    rhi::PipelineScope::Copy,
-		    {transitions, 4},
-		    {},
-		    {});
+		cmdList->Barrier(rhi::PipelineScope::Copy, rhi::PipelineScope::Graphics, {transitions, 5}, {}, {});
 	}
 
 	LOG_INFO("Verification prepared - depths, sorted results, and histogram will be checked after GPU work completes");

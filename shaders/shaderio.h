@@ -36,7 +36,16 @@ struct FrameUBO
     SHADER_VEC4  screenRotation;
     SHADER_VEC2  basisViewport;
     SHADER_FLOAT inverseFocalAdj;
-    SHADER_FLOAT _pad0; // Padding to align to 16 bytes
+    SHADER_FLOAT _pad0;
+};
+
+// Pre-computed per-splat data
+struct HWRasterSplat
+{
+    SHADER_VEC4 centerClip; // Clip-space center position (xyzw)
+    SHADER_VEC2 ndcBasis1;  // Pre-rotated/scaled NDC basis vector 1
+    SHADER_VEC2 ndcBasis2;  // Pre-rotated/scaled NDC basis vector 2
+    SHADER_VEC4 color;      // Final RGBA
 };
 
 #endif // SHADERIO_H

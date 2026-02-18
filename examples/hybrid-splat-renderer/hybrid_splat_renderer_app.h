@@ -206,6 +206,7 @@ class HybridSplatRendererApp : public app::IApplication
 
 	void SwitchBackend(BackendType newType);
 	void ProcessPendingOperations();
+	void ResetAsyncPipelineState();
 
 	container::unique_ptr<engine::ShaderFactory> m_shaderFactory;
 
@@ -219,6 +220,20 @@ class HybridSplatRendererApp : public app::IApplication
 	rhi::ShaderHandle   m_vertexShader;
 	rhi::ShaderHandle   m_fragmentShader;
 	rhi::PipelineHandle m_renderPipeline;
+
+	// Splat precompute resources
+	bool                                                       m_splatPrecomputeEnabled     = true;
+	uint32_t                                                   m_splatPrecomputeAsyncWarmup = 0;        // Frames since precompute enabled on async compute
+	std::array<rhi::BufferHandle, MAX_FRAMES_IN_FLIGHT>        m_splatPrecomputeBuffers;
+	rhi::ShaderHandle                                          m_splatPrecomputeShader;
+	rhi::PipelineHandle                                        m_splatPrecomputePipeline;
+	rhi::DescriptorSetLayoutHandle                             m_splatPrecomputeDescriptorLayout;
+	std::array<rhi::DescriptorSetHandle, MAX_FRAMES_IN_FLIGHT> m_splatPrecomputeDescriptorSets;
+	rhi::ShaderHandle                                          m_vertexShaderPreprocessed;
+	rhi::PipelineHandle                                        m_renderPipelinePreprocessed;
+	rhi::PipelineHandle                                        m_splatTransmCullingPipelinePreprocessed;
+	rhi::DescriptorSetLayoutHandle                             m_descriptorSetLayoutPreprocessed;
+	std::array<rhi::DescriptorSetHandle, MAX_FRAMES_IN_FLIGHT> m_descriptorSetsPreprocessed;
 
 	// Transmittance culling resources
 	bool                m_transmittanceCullingEnabled = false;
@@ -252,6 +267,15 @@ class HybridSplatRendererApp : public app::IApplication
 	container::vector<rhi::SemaphoreHandle>                  m_renderFinishedSemaphores;
 	std::array<rhi::FenceHandle, MAX_FRAMES_IN_FLIGHT>       m_inFlightFences;
 	std::array<rhi::CommandListHandle, MAX_FRAMES_IN_FLIGHT> m_commandLists;
+
+	// Async compute resources
+	std::array<rhi::CommandListHandle, MAX_FRAMES_IN_FLIGHT> m_asyncComputeCmdLists;
+	std::array<rhi::FenceHandle, MAX_FRAMES_IN_FLIGHT>       m_asyncComputeFences;
+	std::array<rhi::SemaphoreHandle, MAX_FRAMES_IN_FLIGHT>   m_asyncComputeSemaphores;
+	rhi::CommandListHandle                                   m_asyncCleanupCmdList;        // For QFOT cleanup on toggle async compute only
+	uint32_t                                                 m_asyncPipelineFrameIndex         = 0;
+	bool                                                     m_asyncWarmupComplete             = false;
+	bool                                                     m_asyncSemaphoreSignaledThisFrame = false;
 
 	timer::Timer      m_applicationTimer;
 	timer::FPSCounter m_fpsCounter;
