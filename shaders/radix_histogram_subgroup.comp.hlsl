@@ -4,6 +4,10 @@
 #define WORKGROUP_SIZE 256
 #define RADIX_SORT_BINS 256
 
+#ifdef INDIRECT_DISPATCH
+[[vk::binding(0, 1)]] ByteAddressBuffer sortParams;
+struct PushConstants { uint shift; };
+#else
 struct PushConstants
 {
     uint numElements;
@@ -11,6 +15,7 @@ struct PushConstants
     uint numWorkgroups;
     uint numBlocksPerWorkgroup;
 };
+#endif
 [[vk::push_constant]] PushConstants pc;
 
 [[vk::binding(0, 0)]] StructuredBuffer<uint2> sortPairs;  // .x = depth key, .y = splat index
@@ -33,6 +38,16 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
     const uint waveId = WaveGetLaneIndex() == 0 ? (lid / WaveGetLaneCount()) : (lid / WaveGetLaneCount());
     const uint numWaves = WORKGROUP_SIZE / WaveGetLaneCount();
 
+#ifdef INDIRECT_DISPATCH
+    const uint numElements          = sortParams.Load(0);
+    const uint numWorkgroups        = sortParams.Load(4);
+    const uint numBlocksPerWorkgroup = sortParams.Load(8);
+#else
+    const uint numElements          = pc.numElements;
+    const uint numWorkgroups        = pc.numWorkgroups;
+    const uint numBlocksPerWorkgroup = pc.numBlocksPerWorkgroup;
+#endif
+
     if (lid < RADIX_SORT_BINS)
     {
         ldsHist[lid] = 0u;
@@ -44,15 +59,15 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
     }
     GroupMemoryBarrierWithGroupSync();
 
-    const uint wgSpan = pc.numBlocksPerWorkgroup * WORKGROUP_SIZE;
+    const uint wgSpan = numBlocksPerWorkgroup * WORKGROUP_SIZE;
     const uint baseElem = wid * wgSpan + lid;
     const uint mask = RADIX_SORT_BINS - 1u;
 
     // Accumulate into wave-private histogram to reduce contention
-    for (uint block = 0u; block < pc.numBlocksPerWorkgroup; ++block)
+    for (uint block = 0u; block < numBlocksPerWorkgroup; ++block)
     {
         const uint elemId = baseElem + block * WORKGROUP_SIZE;
-        if (elemId < pc.numElements)
+        if (elemId < numElements)
         {
             const uint key = sortPairs[elemId].x;
             const uint bin = (key >> pc.shift) & mask;
@@ -76,6 +91,6 @@ void main(uint3 groupThreadId : SV_GroupThreadID, uint3 groupId : SV_GroupID)
     if (lid < RADIX_SORT_BINS)
     {
         // Write in bin-major order: [bin0: WG0..WGn | bin1: WG0..WGn | ... | bin255: WG0..WGn]
-        histograms[lid * pc.numWorkgroups + wid] = ldsHist[lid];
+        histograms[lid * numWorkgroups + wid] = ldsHist[lid];
     }
 }

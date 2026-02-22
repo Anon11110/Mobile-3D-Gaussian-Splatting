@@ -5,12 +5,28 @@
 #define SUBGROUP_SIZE 32
 #define ELEMENTS_PER_THREAD 4
 
+#ifdef INDIRECT_DISPATCH
+[[vk::binding(0, 1)]] ByteAddressBuffer sortParams;
+struct PushConstants { uint passType; };
+#else
 struct PushConstants
 {
     uint numElements;
     uint passType;  // 0 = scan blocks, 1 = scan block sums, 2 = add offsets
 };
+#endif
 [[vk::push_constant]] PushConstants pc;
+
+#ifdef INDIRECT_DISPATCH
+// passType 1 (scan block sums) operates on numScanWorkgroups elements;
+// passType 0 (scan blocks) and 2 (add offsets) operate on numScanElements.
+uint GetNumElements()
+{
+    return (pc.passType == 1) ? sortParams.Load(16) : sortParams.Load(12);
+}
+#else
+uint GetNumElements() { return pc.numElements; }
+#endif
 
 [[vk::binding(0, 0)]] RWStructuredBuffer<uint> data;
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> blockSums;
@@ -22,6 +38,7 @@ groupshared uint blockTotalSum;
 // Generic block scanning function used by Pass 0 and 1
 void ScanElements(uint lID, uint wID)
 {
+    const uint numElements = GetNumElements();
     uint waveId = lID / WaveGetLaneCount();
     uint numWaves = WORKGROUP_SIZE / WaveGetLaneCount();
 
@@ -35,7 +52,7 @@ void ScanElements(uint lID, uint wID)
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i)
     {
         uint idx = blockStart + lID * ELEMENTS_PER_THREAD + i;
-        values[i] = (idx < pc.numElements) ? data[idx] : 0;
+        values[i] = (idx < numElements) ? data[idx] : 0;
         threadSum += values[i];
     }
 
@@ -70,7 +87,7 @@ void ScanElements(uint lID, uint wID)
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i)
     {
         uint idx = blockStart + lID * ELEMENTS_PER_THREAD + i;
-        if (idx < pc.numElements)
+        if (idx < numElements)
         {
             data[idx] = currentPrefix;
             currentPrefix += values[i];
@@ -87,6 +104,7 @@ void ScanElements(uint lID, uint wID)
 // Pass 2 function to add the scanned block offsets
 void AddBlockOffsets(uint lID, uint wID)
 {
+    const uint numElements = GetNumElements();
     uint elementsPerWorkgroup = WORKGROUP_SIZE * ELEMENTS_PER_THREAD;
     uint blockStart = wID * elementsPerWorkgroup;
 
@@ -95,7 +113,7 @@ void AddBlockOffsets(uint lID, uint wID)
     for (uint i = lID; i < elementsPerWorkgroup; i += WORKGROUP_SIZE)
     {
         uint idx = blockStart + i;
-        if (idx < pc.numElements)
+        if (idx < numElements)
         {
             data[idx] += offset;
         }

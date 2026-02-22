@@ -77,7 +77,7 @@ float3 ComputeSH(uint splatIndex, float3 dir, half3 baseColor)
 
     uint base = splatIndex * SH_UINT4_PER_SPLAT;
 
-    // SH Degree 1: load d0,d1 → extract sh[0..2]
+    // SH Degree 1: load d0,d1 -> extract sh[0..2]
     uint4 d0 = shRestInterleaved[base + 0];
     uint4 d1 = shRestInterleaved[base + 1];
 
@@ -85,7 +85,7 @@ float3 ComputeSH(uint splatIndex, float3 dir, half3 baseColor)
                        + z * half3(HALF_HI(d0.y), HALF_LO(d0.z), HALF_HI(d0.z))
                        - x * half3(HALF_LO(d0.w), HALF_HI(d0.w), HALF_LO(d1.x)));
 
-    // SH Degree 2: reuse d1, load d2 → extract sh[3..7]
+    // SH Degree 2: reuse d1, load d2 -> extract sh[3..7]
     uint4 d2 = shRestInterleaved[base + 2];
     half xx = x * x, yy = y * y, zz = z * z, xy = x * y, yz = y * z, xz = x * z;
 
@@ -95,7 +95,7 @@ float3 ComputeSH(uint splatIndex, float3 dir, half3 baseColor)
               SH_C2_3 * xz * half3(HALF_LO(d2.y), HALF_HI(d2.y), HALF_LO(d2.z)) +
               SH_C2_4 * (xx - yy) * half3(HALF_HI(d2.z), HALF_LO(d2.w), HALF_HI(d2.w));
 
-    // SH Degree 3: load d3,d4,d5 → extract sh[8..14]
+    // SH Degree 3: load d3,d4,d5 -> extract sh[8..14]
     uint4 d3 = shRestInterleaved[base + 3];
     uint4 d4 = shRestInterleaved[base + 4];
     uint4 d5 = shRestInterleaved[base + 5];

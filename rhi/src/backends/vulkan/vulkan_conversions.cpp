@@ -263,6 +263,10 @@ VkBufferUsageFlags BufferUsageToVulkan(BufferUsage usage)
 	{
 		result |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 	}
+	if (static_cast<uint32_t>(usage) & static_cast<uint32_t>(BufferUsage::INDIRECT))
+	{
+		result |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+	}
 
 	return result;
 }
@@ -760,8 +764,8 @@ void GetVulkanStagesAndAccess(ResourceState state, PipelineScope scope,
 			break;
 
 		case ResourceState::IndirectArgument:
-			stages = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
-			access = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+			stages = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			access = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
 			break;
 
 		case ResourceState::VertexBuffer:

@@ -24,8 +24,8 @@ struct PushConstants
 [[vk::push_constant]] PushConstants pc;
 
 // Converts a float to a sortable uint.
-// When sortAscending=0: larger Z → smaller uint key (far-to-near after ascending radix sort)
-// When sortAscending=1: smaller Z → smaller uint key (near-to-far after ascending radix sort)
+// When sortAscending=0: larger Z -> smaller uint key (far-to-near after ascending radix sort)
+// When sortAscending=1: smaller Z -> smaller uint key (near-to-far after ascending radix sort)
 uint FloatToSortableUint(float val)
 {
     uint u = asuint(val);

@@ -271,7 +271,7 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	pipelineDesc.descriptorSetLayouts                         = {m_descriptorSetLayout.Get()};
 	m_renderPipeline                                          = device->CreateGraphicsPipeline(pipelineDesc);
 
-	// HW Rasterization Preprocess Resources
+	// Splat precompute Resources
 	if (m_scene->GetTotalSplatCount() > 0 && m_currentBackendType == BackendType::GPU)
 	{
 		// Create per-frame preprocessed splats buffers
@@ -283,44 +283,69 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 			m_splatPrecomputeBuffers[k] = device->CreateBuffer(hwBufDesc);
 		}
 
+		// Create per-frame atomic counter buffers
+		rhi::BufferDesc atomicDesc{};
+		atomicDesc.size  = sizeof(uint32_t) * 2;        // [0] = visible count, [4] = workgroup completion counter
+		atomicDesc.usage = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST;
+		for (uint32_t k = 0; k < MAX_FRAMES_IN_FLIGHT; ++k)
+		{
+			m_atomicCounterBuffers[k] = device->CreateBuffer(atomicDesc);
+		}
+
+		// Create per-frame indirect args buffers
+		rhi::BufferDesc indirectDesc{};
+		indirectDesc.size  = 320;        // SortParams(32) + 4 DispatchIndirect(48) + DrawIndexedIndirect(20) + 8 chunk DrawCmds(160) + padding
+		indirectDesc.usage = rhi::BufferUsage::STORAGE | rhi::BufferUsage::INDIRECT;
+		for (uint32_t k = 0; k < MAX_FRAMES_IN_FLIGHT; ++k)
+		{
+			m_indirectArgsBuffers[k] = device->CreateBuffer(indirectDesc);
+		}
+
 		// Load preprocess shader
 		m_splatPrecomputeShader = m_shaderFactory->getOrCreateShader(
 		    "shaders/compiled/splat_precompute_cs", rhi::ShaderStage::COMPUTE);
 		m_vertexShaderPreprocessed = m_shaderFactory->getOrCreateShader(
 		    "shaders/compiled/splat_raster_preprocessed_vs", rhi::ShaderStage::VERTEX);
 
-		LOG_INFO("HW preprocess shaders loaded: compute={}, vertex={}",
+		LOG_INFO("Splat precompute shaders loaded: compute={}, vertex={}",
 		         m_splatPrecomputeShader != nullptr, m_vertexShaderPreprocessed != nullptr);
 
-		// Create preprocess compute descriptor set layout
-		rhi::DescriptorSetLayoutDesc hwPrepLayoutDesc{};
-		hwPrepLayoutDesc.bindings = {
-		    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},
-		    {1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},
-		    {2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},
-		    {3, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},
-		    {4, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},
-		    {5, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},
-		    {6, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},
-		    {7, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},
+		// Create splat precompute descriptor set layout
+		rhi::DescriptorSetLayoutDesc splatPrecomputeLayoutDesc{};
+		splatPrecomputeLayoutDesc.bindings = {
+		    {0, rhi::DescriptorType::UNIFORM_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},         // Frame UBO (view/proj matrices)
+		    {1, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},         // Splat positions
+		    {2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},         // Covariance 3D packed
+		    {3, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},         // Colors half-precision
+		    {4, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},         // SH rest coefficients interleaved
+		    {5, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},         // Mesh indices
+		    {6, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},         // Model matrices
+		    {7, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},         // Preprocessed splats output
+		    {8, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},         // Atomic counter for stream compaction
+		    {9, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},         // Sort pairs output (sorter's sortPairsB)
+		    {10, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE},        // Indirect args buffer
 		};
-		m_splatPrecomputeDescriptorLayout = device->CreateDescriptorSetLayout(hwPrepLayoutDesc);
+		m_splatPrecomputeDescriptorLayout = device->CreateDescriptorSetLayout(splatPrecomputeLayoutDesc);
 
-		// Create preprocess compute pipeline
+		// Create splat precompute pipeline
 		if (m_splatPrecomputeShader)
 		{
-			rhi::ComputePipelineDesc hwPrepPipelineDesc{};
-			hwPrepPipelineDesc.computeShader        = m_splatPrecomputeShader.Get();
-			hwPrepPipelineDesc.descriptorSetLayouts = {m_splatPrecomputeDescriptorLayout.Get()};
+			rhi::ComputePipelineDesc splatPrecomputePipelineDesc{};
+			splatPrecomputePipelineDesc.computeShader        = m_splatPrecomputeShader.Get();
+			splatPrecomputePipelineDesc.descriptorSetLayouts = {m_splatPrecomputeDescriptorLayout.Get()};
 
 			rhi::PushConstantRange pcRange{};
-			pcRange.stageFlags                    = rhi::ShaderStageFlags::COMPUTE;
-			pcRange.offset                        = 0;
-			pcRange.size                          = sizeof(uint32_t);        // numElements only
-			hwPrepPipelineDesc.pushConstantRanges = {pcRange};
+			pcRange.stageFlags                             = rhi::ShaderStageFlags::COMPUTE;
+			pcRange.offset                                 = 0;
+			pcRange.size                                   = sizeof(uint32_t) * 4;        // numElements + sortAscending + chunkCount + totalWorkgroups
+			splatPrecomputePipelineDesc.pushConstantRanges = {pcRange};
 
-			m_splatPrecomputePipeline = device->CreateComputePipeline(hwPrepPipelineDesc);
+			m_splatPrecomputePipeline = device->CreateComputePipeline(splatPrecomputePipelineDesc);
 		}
+
+		// Get sorter's sortPairsB for precompute binding
+		auto *gpuBackend = dynamic_cast<engine::GpuSplatSortBackend *>(m_backend.get());
+		auto *sorter     = gpuBackend ? gpuBackend->GetSorter() : nullptr;
 
 		// Create per-frame preprocess compute descriptor sets
 		if (m_splatPrecomputeDescriptorLayout)
@@ -384,6 +409,31 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 				prepBinding.buffer = m_splatPrecomputeBuffers[i].Get();
 				prepBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
 				m_splatPrecomputeDescriptorSets[i]->BindBuffer(7, prepBinding);
+
+				// Binding 8: Atomic counter (per-frame)
+				rhi::BufferBinding atomicBinding{};
+				atomicBinding.buffer = m_atomicCounterBuffers[i].Get();
+				atomicBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+				m_splatPrecomputeDescriptorSets[i]->BindBuffer(8, atomicBinding);
+
+				// Binding 9: Sort pairs output (sorter's sortPairsB, shared)
+				if (sorter)
+				{
+					auto bufInfo = sorter->GetBufferInfo();
+					if (bufInfo.sortPairsB)
+					{
+						rhi::BufferBinding sortPairsBinding{};
+						sortPairsBinding.buffer = bufInfo.sortPairsB.Get();
+						sortPairsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+						m_splatPrecomputeDescriptorSets[i]->BindBuffer(9, sortPairsBinding);
+					}
+				}
+
+				// Binding 10: Indirect args buffer (per-frame)
+				rhi::BufferBinding indirectBinding{};
+				indirectBinding.buffer = m_indirectArgsBuffers[i].Get();
+				indirectBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+				m_splatPrecomputeDescriptorSets[i]->BindBuffer(10, indirectBinding);
 			}
 		}
 
@@ -435,7 +485,16 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 			m_renderPipelinePreprocessed               = device->CreateGraphicsPipeline(prepPipelineDesc);
 		}
 
-		LOG_INFO("HW rasterization preprocess initialized: pipeline={}, renderPipeline={}",
+		// Initialize sorter for indirect dispatch
+		if (sorter)
+		{
+			container::vector<rhi::IRHIBuffer *> indirectPtrs;
+			for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+				indirectPtrs.push_back(m_indirectArgsBuffers[i].Get());
+			sorter->Initialize(0, {}, 0, {indirectPtrs.data(), indirectPtrs.size()});
+		}
+
+		LOG_INFO("Splat precompute initialized: pipeline={}, renderPipeline={}",
 		         m_splatPrecomputePipeline != nullptr, m_renderPipelinePreprocessed != nullptr);
 	}
 
@@ -538,8 +597,8 @@ void HybridSplatRendererApp::ResetAsyncPipelineState()
 
 	m_asyncPipelineFrameIndex         = 0;
 	m_asyncWarmupComplete             = false;
-	m_asyncSemaphoreSignaledThisFrame = false;
 	m_splatPrecomputeAsyncWarmup      = 0;
+	m_asyncPrecomputeTimingWriteCount = 0;
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
 	{
@@ -598,10 +657,41 @@ void HybridSplatRendererApp::SwitchBackend(BackendType newType)
 
 	m_currentBackendType = newType;
 
-	// HW preprocess requires GPU backend
+	// Splat precompute requires GPU backend
 	if (newType != BackendType::GPU)
 	{
 		m_splatPrecomputeEnabled = false;
+	}
+	else
+	{
+		// Reinitialize indirect dispatch and rebind precompute sortPairsB for new sorter
+		auto *gpuBackendSwitch = dynamic_cast<engine::GpuSplatSortBackend *>(m_backend.get());
+		auto *sorterSwitch     = gpuBackendSwitch ? gpuBackendSwitch->GetSorter() : nullptr;
+		if (sorterSwitch)
+		{
+			if (m_indirectArgsBuffers[0])
+			{
+				container::vector<rhi::IRHIBuffer *> indirectPtrs;
+				for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+					indirectPtrs.push_back(m_indirectArgsBuffers[i].Get());
+				sorterSwitch->Initialize(0, {}, 0, {indirectPtrs.data(), indirectPtrs.size()});
+			}
+
+			if (m_splatPrecomputeDescriptorSets[0])
+			{
+				auto bufInfo = sorterSwitch->GetBufferInfo();
+				if (bufInfo.sortPairsB)
+				{
+					for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+					{
+						rhi::BufferBinding sortPairsBinding{};
+						sortPairsBinding.buffer = bufInfo.sortPairsB.Get();
+						sortPairsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+						m_splatPrecomputeDescriptorSets[i]->BindBuffer(9, sortPairsBinding);
+					}
+				}
+			}
+		}
 	}
 
 	ResetAsyncPipelineState();
@@ -624,6 +714,15 @@ void HybridSplatRendererApp::ProcessPendingOperations()
 			m_profilingFrameIndex = 0;
 			m_currentGpuTiming    = {};
 		}
+	}
+
+	// Sorting toggle
+	if (m_pendingOps.sortingToggle)
+	{
+		m_sortingEnabled = m_pendingOps.sortingToggle->enable;
+		ResetAsyncPipelineState();
+		m_pendingOps.sortingToggle.reset();
+		LOG_INFO("Sorting {}", m_sortingEnabled ? "enabled" : "disabled");
 	}
 
 	// Async compute toggle
@@ -875,9 +974,10 @@ void HybridSplatRendererApp::OnRender()
 	BeginGpuFrame(cmdList);
 
 	// For hardware rasterization sorting only, compute rasterizer has its own tile sorting
-	bool       useComputeRasterization = m_computeRasterizer && m_rasterizationPipelineType == RasterizationPipelineType::ComputeRaster && m_computeRasterizer->IsInitialized();
-	const bool useSplatPrecompute      = m_splatPrecomputeEnabled && m_splatPrecomputePipeline && m_currentBackendType == BackendType::GPU;
-	if (m_backend && m_sortingEnabled && !useComputeRasterization)
+	bool             useComputeRasterization = m_computeRasterizer && m_rasterizationPipelineType == RasterizationPipelineType::ComputeRaster && m_computeRasterizer->IsInitialized();
+	const bool       useSplatPrecompute      = m_splatPrecomputeEnabled && m_splatPrecomputePipeline && m_currentBackendType == BackendType::GPU;
+	rhi::IRHIBuffer *indirectArgsForDraw     = nullptr;
+	if (m_backend && (m_sortingEnabled || useSplatPrecompute) && !useComputeRasterization)
 	{
 		// Check verification results from previous frame if pending
 		if (m_checkVerificationResults)
@@ -925,6 +1025,13 @@ void HybridSplatRendererApp::OnRender()
 
 				// Wait for this pipeline slot's previous compute submission
 				m_asyncComputeFences[writeIndex]->Wait(UINT64_MAX);
+
+				// Read async precompute timing from previous use of this slot (after fence ensures completion)
+				if (m_asyncPrecomputeTimingWriteCount >= MAX_FRAMES_IN_FLIGHT)
+				{
+					ReadAsyncPrecomputeTiming(writeIndex);
+				}
+
 				m_asyncComputeFences[writeIndex]->Reset();
 
 				rhi::IRHICommandList *computeCmdList = m_asyncComputeCmdLists[writeIndex].Get();
@@ -939,27 +1046,71 @@ void HybridSplatRendererApp::OnRender()
 				if (useSplatPrecompute)
 				{
 					uint32_t splatCount = m_scene->GetTotalSplatCount();
+
+					// Reset async precompute query pool for this slot
+					if (m_asyncPrecomputeQueryPool && m_profilingEnabled)
+					{
+						computeCmdList->ResetQueryPool(m_asyncPrecomputeQueryPool.Get(), writeIndex * 2, 2);
+						computeCmdList->WriteTimestamp(m_asyncPrecomputeQueryPool.Get(), writeIndex * 2, rhi::StageMask::ComputeShader);
+					}
+
+					// Clear visible count and workgroup completion counter
+					computeCmdList->FillBuffer(m_atomicCounterBuffers[writeIndex].Get(), 0, 8, 0);
+					rhi::BufferTransition clearBarrier{};
+					clearBarrier.buffer = m_atomicCounterBuffers[writeIndex].Get();
+					clearBarrier.before = rhi::ResourceState::CopyDestination;
+					clearBarrier.after  = rhi::ResourceState::ShaderReadWrite;
+					computeCmdList->Barrier(rhi::PipelineScope::Copy, rhi::PipelineScope::Compute,
+					                        {&clearBarrier, 1}, {}, {});
+
+					// Precompute dispatch: stream compaction + depth key + indirect args
 					computeCmdList->SetPipeline(m_splatPrecomputePipeline.Get());
 					computeCmdList->BindDescriptorSet(0, m_splatPrecomputeDescriptorSets[writeIndex].Get());
 
-					uint32_t numElements = splatCount;
+					uint32_t dispatchSize    = std::max((splatCount + 255) / 256, 1u);
+					uint32_t precomputePC[4] = {splatCount, needAscendingSort ? 1u : 0u, m_chunkCount, dispatchSize};
 					computeCmdList->PushConstants(rhi::ShaderStageFlags::COMPUTE, 0,
-					                              {reinterpret_cast<const std::byte *>(&numElements), sizeof(numElements)});
+					                              {reinterpret_cast<const std::byte *>(precomputePC), sizeof(precomputePC)});
+					computeCmdList->Dispatch(dispatchSize);
 
-					uint32_t numWorkgroups = (splatCount + 255) / 256;
-					computeCmdList->Dispatch(numWorkgroups);
+					// Barrier: precompute outputs + indirect args -> sort inputs
+					rhi::BufferTransition postPrecompute[4] = {};
+					postPrecompute[0].buffer                = m_atomicCounterBuffers[writeIndex].Get();
+					postPrecompute[0].before                = rhi::ResourceState::ShaderReadWrite;
+					postPrecompute[0].after                 = rhi::ResourceState::GeneralRead;
+					postPrecompute[1].buffer                = m_splatPrecomputeBuffers[writeIndex].Get();
+					postPrecompute[1].before                = rhi::ResourceState::ShaderWrite;
+					postPrecompute[1].after                 = rhi::ResourceState::GeneralRead;
+					auto sortPairsBuf                       = sorter->GetBufferInfo().sortPairsB;
+					postPrecompute[2].buffer                = sortPairsBuf.Get();
+					postPrecompute[2].before                = rhi::ResourceState::ShaderReadWrite;
+					postPrecompute[2].after                 = rhi::ResourceState::ShaderReadWrite;
+					postPrecompute[3].buffer                = m_indirectArgsBuffers[writeIndex].Get();
+					postPrecompute[3].before                = rhi::ResourceState::ShaderWrite;
+					postPrecompute[3].after                 = rhi::ResourceState::IndirectArgument;
+					computeCmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute,
+					                        {postPrecompute, 4}, {}, {});
+
+					// End precompute timestamp
+					if (m_asyncPrecomputeQueryPool && m_profilingEnabled)
+					{
+						computeCmdList->WriteTimestamp(m_asyncPrecomputeQueryPool.Get(), writeIndex * 2 + 1, rhi::StageMask::ComputeShader);
+						m_asyncPrecomputeTimingWriteCount++;
+					}
+
+					// Sorting
+					sorter->SortIndirect(computeCmdList, writeIndex);
+
 					m_splatPrecomputeAsyncWarmup++;
 				}
 				else
 				{
 					m_splatPrecomputeAsyncWarmup = 0;
+					sorter->Sort(computeCmdList, *m_scene, m_camera);
 				}
 
-				// Sorting
-				sorter->Sort(computeCmdList, *m_scene, m_camera);
-
 				// Build QFOT release buffer list
-				rhi::BufferTransition releaseBuffers[2] = {};
+				rhi::BufferTransition releaseBuffers[4] = {};
 				uint32_t              numReleaseBuffers = 0;
 
 				releaseBuffers[numReleaseBuffers].buffer = outputBuffer.Get();
@@ -972,6 +1123,11 @@ void HybridSplatRendererApp::OnRender()
 					releaseBuffers[numReleaseBuffers].buffer = m_splatPrecomputeBuffers[writeIndex].Get();
 					releaseBuffers[numReleaseBuffers].before = rhi::ResourceState::ShaderWrite;
 					releaseBuffers[numReleaseBuffers].after  = rhi::ResourceState::GeneralRead;
+					numReleaseBuffers++;
+
+					releaseBuffers[numReleaseBuffers].buffer = m_indirectArgsBuffers[writeIndex].Get();
+					releaseBuffers[numReleaseBuffers].before = rhi::ResourceState::IndirectArgument;
+					releaseBuffers[numReleaseBuffers].after  = rhi::ResourceState::IndirectArgument;
 					numReleaseBuffers++;
 				}
 
@@ -1005,8 +1161,13 @@ void HybridSplatRendererApp::OnRender()
 					submitInfo.signalFence = m_asyncComputeFences[writeIndex].Get();
 					device->SubmitCommandLists(computeCmdLists, rhi::QueueType::COMPUTE, submitInfo);
 					device->WaitIdle();
-					m_asyncSemaphoreSignaledThisFrame = false;
 					sorter->ReadTimingResults();
+
+					// Read async precompute timing
+					if (useSplatPrecompute)
+					{
+						ReadAsyncPrecomputeTiming(writeIndex);
+					}
 				}
 				else
 				{
@@ -1015,7 +1176,6 @@ void HybridSplatRendererApp::OnRender()
 					rhi::IRHISemaphore *signalSem = m_asyncComputeSemaphores[writeIndex].Get();
 					submitInfo.signalSemaphores   = std::span<rhi::IRHISemaphore *const>(&signalSem, 1);
 					device->SubmitCommandLists(computeCmdLists, rhi::QueueType::COMPUTE, submitInfo);
-					m_asyncSemaphoreSignaledThisFrame = true;
 					sorter->ReadTimingResultsNonBlocking();
 				}
 
@@ -1024,9 +1184,8 @@ void HybridSplatRendererApp::OnRender()
 		}
 		else if (useSplatPrecompute && !m_asyncComputeEnabled)
 		{
-			// Single-queue preprocess + Sort on graphics command list
+			// Single-queue GPU-driven preprocess + sort on graphics command list
 			m_splatPrecomputeAsyncWarmup = 0;
-			RecordSortTimestamp(cmdList, true);
 
 			auto *gpuBackend = dynamic_cast<engine::GpuSplatSortBackend *>(m_backend.get());
 			auto *sorter     = gpuBackend ? gpuBackend->GetSorter() : nullptr;
@@ -1034,32 +1193,70 @@ void HybridSplatRendererApp::OnRender()
 			if (sorter)
 			{
 				uint32_t splatCount = m_scene->GetTotalSplatCount();
+
+				RecordPrecomputeTimestamp(cmdList, true);
+
+				// Clear visible count and workgroup completion counter
+				cmdList->FillBuffer(m_atomicCounterBuffers[m_currentFrame].Get(), 0, 8, 0);
+				rhi::BufferTransition clearBarrier{};
+				clearBarrier.buffer = m_atomicCounterBuffers[m_currentFrame].Get();
+				clearBarrier.before = rhi::ResourceState::CopyDestination;
+				clearBarrier.after  = rhi::ResourceState::ShaderReadWrite;
+				cmdList->Barrier(rhi::PipelineScope::Copy, rhi::PipelineScope::Compute,
+				                 {&clearBarrier, 1}, {}, {});
+
+				// Precompute dispatch: stream compaction + depth key + indirect args
 				cmdList->SetPipeline(m_splatPrecomputePipeline.Get());
 				cmdList->BindDescriptorSet(0, m_splatPrecomputeDescriptorSets[m_currentFrame].Get());
 
-				uint32_t numElements = splatCount;
+				uint32_t dispatchSize    = std::max((splatCount + 255) / 256, 1u);
+				uint32_t precomputePC[4] = {splatCount, needAscendingSort ? 1u : 0u, m_chunkCount, dispatchSize};
 				cmdList->PushConstants(rhi::ShaderStageFlags::COMPUTE, 0,
-				                       {reinterpret_cast<const std::byte *>(&numElements), sizeof(numElements)});
+				                       {reinterpret_cast<const std::byte *>(precomputePC), sizeof(precomputePC)});
+				cmdList->Dispatch(dispatchSize);
 
-				uint32_t numWorkgroups = (splatCount + 255) / 256;
-				cmdList->Dispatch(numWorkgroups);
+				// Barrier: precompute outputs + indirect args -> sort inputs
+				rhi::BufferTransition postPrecompute[4] = {};
+				postPrecompute[0].buffer                = m_atomicCounterBuffers[m_currentFrame].Get();
+				postPrecompute[0].before                = rhi::ResourceState::ShaderReadWrite;
+				postPrecompute[0].after                 = rhi::ResourceState::GeneralRead;
+				postPrecompute[1].buffer                = m_splatPrecomputeBuffers[m_currentFrame].Get();
+				postPrecompute[1].before                = rhi::ResourceState::ShaderWrite;
+				postPrecompute[1].after                 = rhi::ResourceState::GeneralRead;
+				auto sortPairsBuf                       = sorter->GetBufferInfo().sortPairsB;
+				postPrecompute[2].buffer                = sortPairsBuf.Get();
+				postPrecompute[2].before                = rhi::ResourceState::ShaderReadWrite;
+				postPrecompute[2].after                 = rhi::ResourceState::ShaderReadWrite;
+				postPrecompute[3].buffer                = m_indirectArgsBuffers[m_currentFrame].Get();
+				postPrecompute[3].before                = rhi::ResourceState::ShaderWrite;
+				postPrecompute[3].after                 = rhi::ResourceState::IndirectArgument;
+				cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute,
+				                 {postPrecompute, 4}, {}, {});
 
+				RecordPrecomputeTimestamp(cmdList, false);
+
+				// Sort
+				RecordSortTimestamp(cmdList, true);
 				sorter->SetSortAscending(needAscendingSort);
 				sorter->SetOutputBuffer(m_sortedIndices);
-				sorter->Sort(cmdList, *m_scene, m_camera);
+				sorter->SortIndirect(cmdList, m_currentFrame);
+				RecordSortTimestamp(cmdList, false);
+				indirectArgsForDraw = m_indirectArgsBuffers[m_currentFrame].Get();
 
-				rhi::BufferTransition postBarriers[2] = {};
+				// Barrier: sort + precompute outputs -> graphics reads
+				rhi::BufferTransition postBarriers[3] = {};
 				postBarriers[0].buffer                = m_sortedIndices.Get();
 				postBarriers[0].before                = rhi::ResourceState::ShaderReadWrite;
 				postBarriers[0].after                 = rhi::ResourceState::GeneralRead;
 				postBarriers[1].buffer                = m_splatPrecomputeBuffers[m_currentFrame].Get();
-				postBarriers[1].before                = rhi::ResourceState::ShaderWrite;
+				postBarriers[1].before                = rhi::ResourceState::GeneralRead;
 				postBarriers[1].after                 = rhi::ResourceState::GeneralRead;
+				postBarriers[2].buffer                = m_indirectArgsBuffers[m_currentFrame].Get();
+				postBarriers[2].before                = rhi::ResourceState::IndirectArgument;
+				postBarriers[2].after                 = rhi::ResourceState::IndirectArgument;
 				cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Graphics,
-				                 {postBarriers, 2}, {}, {});
+				                 {postBarriers, 3}, {}, {});
 			}
-
-			RecordSortTimestamp(cmdList, false);
 		}
 		else if (m_currentBackendType == BackendType::GPU && !m_asyncComputeEnabled)
 		{
@@ -1145,6 +1342,7 @@ void HybridSplatRendererApp::OnRender()
 			GpuTimingResults avg{};
 			for (const auto &sample : m_gpuTimingHistory)
 			{
+				avg.precomputeTimeMs += sample.precomputeTimeMs;
 				avg.sortTimeMs += sample.sortTimeMs;
 				avg.renderTimeMs += sample.renderTimeMs;
 				avg.preprocessTimeMs += sample.preprocessTimeMs;
@@ -1153,6 +1351,7 @@ void HybridSplatRendererApp::OnRender()
 				avg.rasterTimeMs += sample.rasterTimeMs;
 			}
 			double count = static_cast<double>(m_gpuTimingHistory.size());
+			avg.precomputeTimeMs /= count;
 			avg.sortTimeMs /= count;
 			avg.renderTimeMs /= count;
 			avg.preprocessTimeMs /= count;
@@ -1174,6 +1373,17 @@ void HybridSplatRendererApp::OnRender()
 				         avg.rangesTimeMs,
 				         avg.rasterTimeMs,
 				         avg.renderTimeMs);
+			}
+			else if (avg.precomputeTimeMs > 0.0)
+			{
+				LOG_INFO("Frame FPS: {:.2f} | {} | Splats: {} | Precompute: {:.3f}ms | Sort: {:.3f}ms | Render: {:.3f}ms | Total: {:.3f}ms",
+				         m_fpsCounter.getFPS(),
+				         m_sortingEnabled ? (m_backend ? m_backend->GetMethodName() : "N/A") : "Disabled",
+				         m_scene->GetTotalSplatCount(),
+				         avg.precomputeTimeMs,
+				         avg.sortTimeMs,
+				         avg.renderTimeMs,
+				         avg.precomputeTimeMs + avg.sortTimeMs + avg.renderTimeMs);
 			}
 			else
 			{
@@ -1269,7 +1479,7 @@ void HybridSplatRendererApp::OnRender()
 		// Acquire sorted indices buffer from compute queue (GPU backend async compute only)
 		rhi::IRHIBuffer *sortedIndicesForRendering = m_sortedIndices.Get();
 
-		if (m_backend && m_sortingEnabled && m_asyncComputeEnabled)
+		if (m_backend && (m_sortingEnabled || useSplatPrecompute) && m_asyncComputeEnabled)
 		{
 			// K-buffered slot reads from K-1 frames behind write
 			uint32_t readIndex  = m_asyncPipelineFrameIndex % MAX_FRAMES_IN_FLIGHT;
@@ -1287,13 +1497,12 @@ void HybridSplatRendererApp::OnRender()
 			}
 
 			// Need compute semaphore when fully pipelined after 2*K frames
-			bool fullyWarmedUp = m_asyncPipelineFrameIndex >= 2 * MAX_FRAMES_IN_FLIGHT;
-			if (fullyWarmedUp && m_asyncSemaphoreSignaledThisFrame)
+			if (m_asyncPipelineFrameIndex >= 2 * MAX_FRAMES_IN_FLIGHT)
 			{
 				computeSemaphore = m_asyncComputeSemaphores[readIndex].Get();
 			}
 
-			if (computeSemaphore && fullyWarmedUp)
+			if (computeSemaphore)
 			{
 				// QFOT acquire sorted indices
 				rhi::BufferTransition acquireTransition{};
@@ -1305,13 +1514,19 @@ void HybridSplatRendererApp::OnRender()
 
 				if (prepWarmedUp)
 				{
-					// Acquire sorted indices + preprocessed splats
-					rhi::BufferTransition acquireTransitions[2] = {};
-					acquireTransitions[0]                       = acquireTransition;
-					acquireTransitions[1].buffer                = m_splatPrecomputeBuffers[readIndex].Get();
-					acquireTransitions[1].before                = rhi::ResourceState::ShaderWrite;
-					acquireTransitions[1].after                 = rhi::ResourceState::GeneralRead;
-					cmdList->AcquireFromQueue(rhi::QueueType::COMPUTE, {acquireTransitions, 2}, {});
+					// Acquire sorted indices + preprocessed splats + indirect args
+					rhi::BufferTransition acquireTransitions[3] = {};
+					uint32_t              numAcquire            = 0;
+					acquireTransitions[numAcquire++]            = acquireTransition;
+					acquireTransitions[numAcquire].buffer       = m_splatPrecomputeBuffers[readIndex].Get();
+					acquireTransitions[numAcquire].before       = rhi::ResourceState::ShaderWrite;
+					acquireTransitions[numAcquire].after        = rhi::ResourceState::GeneralRead;
+					numAcquire++;
+					acquireTransitions[numAcquire].buffer = m_indirectArgsBuffers[readIndex].Get();
+					acquireTransitions[numAcquire].before = rhi::ResourceState::IndirectArgument;
+					acquireTransitions[numAcquire].after  = rhi::ResourceState::IndirectArgument;
+					numAcquire++;
+					cmdList->AcquireFromQueue(rhi::QueueType::COMPUTE, {acquireTransitions, numAcquire}, {});
 
 					// Rebind correct K-slot to render descriptor
 					rhi::BufferBinding prepB{};
@@ -1337,14 +1552,35 @@ void HybridSplatRendererApp::OnRender()
 				indB.buffer = sortedIndicesForRendering;
 				indB.type   = rhi::DescriptorType::STORAGE_BUFFER;
 				m_descriptorSetsPreprocessed[m_currentFrame]->BindBuffer(1, indB);
+
+				// Set indirect args buffer for DrawIndexedIndirect
+				if (m_asyncPipelineFrameIndex > 0)
+				{
+					uint32_t indirectReadIndex = m_asyncWarmupComplete ? readIndex : (m_asyncPipelineFrameIndex - 1) % MAX_FRAMES_IN_FLIGHT;
+					indirectArgsForDraw        = m_indirectArgsBuffers[indirectReadIndex].Get();
+				}
 			}
 		}
-		else if (m_backend && m_sortingEnabled)
+		else if (m_backend && (m_sortingEnabled || useSplatPrecompute))
 		{
 			rhi::BufferBinding indicesBinding{};
 			indicesBinding.buffer = m_sortedIndices.Get();
 			indicesBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
 			m_descriptorSets[m_currentFrame]->BindBuffer(5, indicesBinding);
+
+			// Rebind preprocessed descriptor set to ensure correct bindings after async->sync switch
+			if (useSplatPrecompute && m_descriptorSetsPreprocessed[m_currentFrame])
+			{
+				rhi::BufferBinding indB{};
+				indB.buffer = m_sortedIndices.Get();
+				indB.type   = rhi::DescriptorType::STORAGE_BUFFER;
+				m_descriptorSetsPreprocessed[m_currentFrame]->BindBuffer(1, indB);
+
+				rhi::BufferBinding prepB{};
+				prepB.buffer = m_splatPrecomputeBuffers[m_currentFrame].Get();
+				prepB.type   = rhi::DescriptorType::STORAGE_BUFFER;
+				m_descriptorSetsPreprocessed[m_currentFrame]->BindBuffer(2, prepB);
+			}
 		}
 
 		uint32_t splatCount = m_scene->GetTotalSplatCount();
@@ -1360,7 +1596,7 @@ void HybridSplatRendererApp::OnRender()
 		{
 			// === Transmittance culling mode ===
 			// Renders splats front-to-back, using interleaved stencil updates to cull saturated pixels early
-			RenderTransmittanceCulling(cmdList, splatCount, width, height, imageIndex, m_currentFrame);
+			RenderTransmittanceCulling(cmdList, splatCount, width, height, imageIndex, m_currentFrame, indirectArgsForDraw);
 		}
 		else
 		{
@@ -1410,9 +1646,16 @@ void HybridSplatRendererApp::OnRender()
 				}
 				cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
 
-				// Draw using instanced rendering: 4 indices per strip, one instance per splat
-				uint32_t indexCount = 4;
-				cmdList->DrawIndexedInstanced(indexCount, splatCount, 0, 0, 0);
+				// Draw using indirect when GPU-driven pipeline is active, otherwise direct
+				if (indirectArgsForDraw)
+				{
+					cmdList->DrawIndexedIndirect(indirectArgsForDraw, 80, 1);
+				}
+				else
+				{
+					uint32_t indexCount = 4;
+					cmdList->DrawIndexedInstanced(indexCount, splatCount, 0, 0, 0);
+				}
 			}
 
 			if (m_imguiEnabled && m_showImGui)
@@ -1457,7 +1700,7 @@ void HybridSplatRendererApp::OnRender()
 	uint32_t               numWaitSemaphores = 0;
 
 	// Wait for compute sort to complete (GPU sorting backend only)
-	if (computeSemaphore && m_sortingEnabled && m_asyncComputeEnabled)
+	if (computeSemaphore && (m_sortingEnabled || useSplatPrecompute) && m_asyncComputeEnabled)
 	{
 		waitInfoArray[numWaitSemaphores].semaphore = computeSemaphore;
 		waitInfoArray[numWaitSemaphores].waitStage = rhi::StageMask::VertexInput;
@@ -1537,7 +1780,7 @@ void HybridSplatRendererApp::OnShutdown()
 	m_vertexShader   = nullptr;
 	m_fragmentShader = nullptr;
 
-	// HW preprocess resources
+	// Splat precompute resources
 	m_splatPrecomputePipeline = nullptr;
 	for (auto &ds : m_splatPrecomputeDescriptorSets)
 		ds = nullptr;
@@ -1551,6 +1794,12 @@ void HybridSplatRendererApp::OnShutdown()
 	for (auto &ds : m_descriptorSetsPreprocessed)
 		ds = nullptr;
 	m_descriptorSetLayoutPreprocessed = nullptr;
+
+	// GPU-driven indirect dispatch resources
+	for (auto &buf : m_atomicCounterBuffers)
+		buf = nullptr;
+	for (auto &buf : m_indirectArgsBuffers)
+		buf = nullptr;
 
 	// Async compute resources
 	for (auto &cl : m_asyncComputeCmdLists)
@@ -1618,9 +1867,7 @@ void HybridSplatRendererApp::OnKey(int key, int action, int mods)
 		{
 			case GLFW_KEY_SPACE:
 				// Toggle sorting on/off for performance comparison
-				m_sortingEnabled = !m_sortingEnabled;
-				ResetAsyncPipelineState();
-				LOG_INFO("Sorting {}", m_sortingEnabled ? "enabled" : "disabled");
+				m_pendingOps.sortingToggle = PendingOperations::SortingToggle{!m_sortingEnabled};
 				break;
 
 #	ifdef ENABLE_SORT_VERIFICATION
@@ -2095,7 +2342,7 @@ void HybridSplatRendererApp::RebindSceneDescriptors(uint32_t newSplatCount)
 		}
 	}
 
-	// Rebind HW preprocess resources
+	// Rebind Splat precompute resources
 	if (newSplatCount > 0 && m_splatPrecomputeDescriptorSets[0])
 	{
 		// Recreate K-buffered preprocessed splats buffers with new size
@@ -2220,6 +2467,35 @@ void HybridSplatRendererApp::ReinitializeSortBackend(uint32_t newSplatCount)
 			// Restore sort method and shader variant for GPU backend
 			m_backend->SetSortMethod(m_currentSortMethod);
 			m_backend->SetShaderVariant(m_currentShaderVariant);
+
+			// Reinitialize indirect dispatch and rebind precompute sortPairsB
+			auto *gpuBackendNew = dynamic_cast<engine::GpuSplatSortBackend *>(m_backend.get());
+			auto *sorterNew     = gpuBackendNew ? gpuBackendNew->GetSorter() : nullptr;
+			if (sorterNew)
+			{
+				if (m_indirectArgsBuffers[0])
+				{
+					container::vector<rhi::IRHIBuffer *> indirectPtrs;
+					for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+						indirectPtrs.push_back(m_indirectArgsBuffers[i].Get());
+					sorterNew->Initialize(0, {}, 0, {indirectPtrs.data(), indirectPtrs.size()});
+				}
+
+				if (m_splatPrecomputeDescriptorSets[0])
+				{
+					auto bufInfo = sorterNew->GetBufferInfo();
+					if (bufInfo.sortPairsB)
+					{
+						for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+						{
+							rhi::BufferBinding sortPairsBinding{};
+							sortPairsBinding.buffer = bufInfo.sortPairsB.Get();
+							sortPairsBinding.type   = rhi::DescriptorType::STORAGE_BUFFER;
+							m_splatPrecomputeDescriptorSets[i]->BindBuffer(9, sortPairsBinding);
+						}
+					}
+				}
+			}
 		}
 	}
 	else
@@ -2318,6 +2594,7 @@ void HybridSplatRendererApp::InitGpuProfiling()
 	// Initialize pipeline tracking for each frame slot
 	m_frameRasterizationPipelines.resize(m_gpuProfilingFrameLatency, RasterizationPipelineType::HardwareRaster);
 	m_frameSortAsyncEnabled.resize(m_gpuProfilingFrameLatency, false);
+	m_frameSplatPrecomputeEnabled.resize(m_gpuProfilingFrameLatency, false);
 
 	rhi::QueryPoolDesc timestampDesc{};
 	timestampDesc.queryType  = rhi::QueryType::TIMESTAMP;
@@ -2327,6 +2604,17 @@ void HybridSplatRendererApp::InitGpuProfiling()
 	if (!m_timestampQueryPool)
 	{
 		LOG_WARNING("Failed to create timestamp query pool, GPU timing disabled");
+	}
+
+	// Separate query pool for async compute precompute timing
+	rhi::QueryPoolDesc asyncPrecomputeDesc{};
+	asyncPrecomputeDesc.queryType  = rhi::QueryType::TIMESTAMP;
+	asyncPrecomputeDesc.queryCount = 2 * MAX_FRAMES_IN_FLIGHT;
+	m_asyncPrecomputeQueryPool     = device->CreateQueryPool(asyncPrecomputeDesc);
+
+	if (!m_asyncPrecomputeQueryPool)
+	{
+		LOG_WARNING("Failed to create async precompute query pool");
 	}
 
 	rhi::QueryPoolDesc statsDesc{};
@@ -2348,6 +2636,7 @@ void HybridSplatRendererApp::InitGpuProfiling()
 void HybridSplatRendererApp::ShutdownGpuProfiling()
 {
 	m_timestampQueryPool       = nullptr;
+	m_asyncPrecomputeQueryPool = nullptr;
 	m_pipelineStatsQueryPool   = nullptr;
 	m_pipelineStatsQueryActive = false;
 	m_gpuTimingHistory.clear();
@@ -2367,11 +2656,10 @@ void HybridSplatRendererApp::BeginGpuFrame(rhi::IRHICommandList *cmdList)
 	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
 	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
 
-	// Record which rendering pipeline is active for this frame
+	// Record state for this frame
 	m_frameRasterizationPipelines[frameSlot] = m_rasterizationPipelineType;
-
-	// Record whether async compute is enabled because it affects which timestamps are written
-	m_frameSortAsyncEnabled[frameSlot] = m_asyncComputeEnabled;
+	m_frameSortAsyncEnabled[frameSlot]       = m_asyncComputeEnabled;
+	m_frameSplatPrecomputeEnabled[frameSlot] = m_splatPrecomputeEnabled && m_splatPrecomputePipeline && m_currentBackendType == BackendType::GPU;
 
 	// Reset timestamp and pipeline stats queries for this frame
 	cmdList->ResetQueryPool(m_timestampQueryPool.Get(), timestampOffset, TIMESTAMPS_PER_FRAME);
@@ -2379,6 +2667,20 @@ void HybridSplatRendererApp::BeginGpuFrame(rhi::IRHICommandList *cmdList)
 	{
 		cmdList->ResetQueryPool(m_pipelineStatsQueryPool.Get(), frameSlot, 1);
 	}
+}
+
+void HybridSplatRendererApp::RecordPrecomputeTimestamp(rhi::IRHICommandList *cmdList, bool begin)
+{
+	if (!m_profilingEnabled || !m_timestampQueryPool || m_profilingJustEnabled)
+	{
+		return;
+	}
+
+	uint32_t frameSlot       = m_profilingFrameIndex % m_gpuProfilingFrameLatency;
+	uint32_t timestampOffset = frameSlot * TIMESTAMPS_PER_FRAME;
+	uint32_t queryIndex      = timestampOffset + (begin ? TIMESTAMP_HW_PRECOMPUTE_BEGIN : TIMESTAMP_HW_PRECOMPUTE_END);
+
+	cmdList->WriteTimestamp(m_timestampQueryPool.Get(), queryIndex, rhi::StageMask::ComputeShader);
 }
 
 void HybridSplatRendererApp::RecordSortTimestamp(rhi::IRHICommandList *cmdList, bool begin)
@@ -2500,6 +2802,29 @@ void HybridSplatRendererApp::EndPipelineStatsQuery(rhi::IRHICommandList *cmdList
 	m_pipelineStatsQueryActive = false;
 }
 
+void HybridSplatRendererApp::ReadAsyncPrecomputeTiming(uint32_t slotIndex)
+{
+	if (!m_asyncPrecomputeQueryPool || !m_profilingEnabled)
+	{
+		return;
+	}
+
+	rhi::IRHIDevice *device = m_deviceManager->GetDevice();
+
+	uint64_t asyncTs[2] = {};
+	bool     valid      = device->GetQueryPoolResults(
+        m_asyncPrecomputeQueryPool.Get(),
+        slotIndex * 2, 2,
+        asyncTs, 2 * sizeof(uint64_t), sizeof(uint64_t),
+        rhi::QueryResultFlags::NONE);
+
+	if (valid && asyncTs[1] > asyncTs[0])
+	{
+		double ticks                = static_cast<double>(asyncTs[1] - asyncTs[0]);
+		m_lastAsyncPrecomputeTimeMs = (ticks * m_timestampPeriod) / 1000000.0;
+	}
+}
+
 void HybridSplatRendererApp::ReadGpuTimingResults()
 {
 	if (!m_profilingEnabled || !m_timestampQueryPool || !m_deviceManager)
@@ -2520,8 +2845,9 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 	uint32_t timestampOffset = readFrameIndex * TIMESTAMPS_PER_FRAME;
 
 	GpuTimingResults          results{};
-	RasterizationPipelineType pipelineType   = m_frameRasterizationPipelines[readFrameIndex];
-	bool                      sortAsyncWasOn = m_frameSortAsyncEnabled[readFrameIndex];
+	RasterizationPipelineType pipelineType    = m_frameRasterizationPipelines[readFrameIndex];
+	bool                      sortAsyncWasOn  = m_frameSortAsyncEnabled[readFrameIndex];
+	bool                      precomputeWasOn = m_frameSplatPrecomputeEnabled[readFrameIndex];
 
 	// Read only the timestamps that were written for the active pipeline
 	uint64_t timestamps[TIMESTAMPS_PER_FRAME] = {};
@@ -2532,7 +2858,7 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 		// Hardware rasterization pipeline: read only the timestamps that were written
 		if (sortAsyncWasOn)
 		{
-			// Async compute enabled: only render timestamps (2-3) were written
+			// Async compute enabled: only render timestamps were written on graphics queue
 			timestampsValid = device->GetQueryPoolResults(
 			    m_timestampQueryPool.Get(),
 			    timestampOffset + TIMESTAMP_HW_RENDER_BEGIN,
@@ -2542,13 +2868,25 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 			    sizeof(uint64_t),
 			    rhi::QueryResultFlags::NONE);
 		}
+		else if (precomputeWasOn)
+		{
+			// Single-queue with precompute: precompute(0-1) + sort(2-3) + render(4-5) timestamps
+			timestampsValid = device->GetQueryPoolResults(
+			    m_timestampQueryPool.Get(),
+			    timestampOffset + TIMESTAMP_HW_PRECOMPUTE_BEGIN,
+			    6,        // Read 6 timestamps (PRECOMPUTE_BEGIN through RENDER_END)
+			    &timestamps[TIMESTAMP_HW_PRECOMPUTE_BEGIN],
+			    6 * sizeof(uint64_t),
+			    sizeof(uint64_t),
+			    rhi::QueryResultFlags::NONE);
+		}
 		else
 		{
-			// Normal mode: all 4 hardware timestamps (0-3) were written
+			// Normal mode (no precompute): sort(2-3) + render(4-5) timestamps
 			timestampsValid = device->GetQueryPoolResults(
 			    m_timestampQueryPool.Get(),
 			    timestampOffset + TIMESTAMP_HW_SORT_BEGIN,
-			    4,        // Read 4 timestamps (TIMESTAMP_HW_SORT_BEGIN through TIMESTAMP_HW_RENDER_END)
+			    4,        // Read 4 timestamps (SORT_BEGIN through RENDER_END)
 			    &timestamps[TIMESTAMP_HW_SORT_BEGIN],
 			    4 * sizeof(uint64_t),
 			    sizeof(uint64_t),
@@ -2557,11 +2895,11 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 	}
 	else        // RasterizationPipelineType::ComputeRaster
 	{
-		// Compute rasterization pipeline: read only timestamps 4-13
+		// Compute rasterization pipeline: read timestamps 6-15
 		timestampsValid = device->GetQueryPoolResults(
 		    m_timestampQueryPool.Get(),
 		    timestampOffset + TIMESTAMP_COMPUTE_PREPROCESS_BEGIN,
-		    10,        // Read 10 timestamps (TIMESTAMP_COMPUTE_PREPROCESS_BEGIN through TIMESTAMP_COMPUTE_RENDER_END)
+		    10,        // Read 10 timestamps (COMPUTE_PREPROCESS_BEGIN through COMPUTE_RENDER_END)
 		    &timestamps[TIMESTAMP_COMPUTE_PREPROCESS_BEGIN],
 		    10 * sizeof(uint64_t),
 		    sizeof(uint64_t),
@@ -2593,20 +2931,34 @@ void HybridSplatRendererApp::ReadGpuTimingResults()
 		}
 		else
 		{
-			// Hardware rasterization pipeline: sort + render
-			bool sortTimestampsWritten = m_sortingEnabled && m_currentBackendType == BackendType::GPU && !sortAsyncWasOn;
+			// Hardware rasterization pipeline
+			bool sortTimestampsWritten = (m_sortingEnabled || precomputeWasOn) && m_currentBackendType == BackendType::GPU && !sortAsyncWasOn;
 
+			// Precompute timing (single-queue only, async uses dedicated pool)
+			if (sortTimestampsWritten && precomputeWasOn && timestamps[TIMESTAMP_HW_PRECOMPUTE_BEGIN] != 0)
+			{
+				double precomputeTicks   = static_cast<double>(timestamps[TIMESTAMP_HW_PRECOMPUTE_END] - timestamps[TIMESTAMP_HW_PRECOMPUTE_BEGIN]);
+				results.precomputeTimeMs = (precomputeTicks * m_timestampPeriod) / 1000000.0;
+			}
+
+			// Sort timing
 			if (sortTimestampsWritten && timestamps[TIMESTAMP_HW_SORT_BEGIN] != 0)
 			{
 				// Sort happened on graphics queue
 				double sortTicks   = static_cast<double>(timestamps[TIMESTAMP_HW_SORT_END] - timestamps[TIMESTAMP_HW_SORT_BEGIN]);
 				results.sortTimeMs = (sortTicks * m_timestampPeriod) / 1000000.0;
 			}
-			else if (m_backend && m_sortingEnabled)
+			else if (m_backend && (m_sortingEnabled || precomputeWasOn))
 			{
 				// Sort happened on CPU or async compute queue: get timing from backend metrics
 				auto metrics       = m_backend->GetMetrics();
 				results.sortTimeMs = metrics.sortDurationMs;
+
+				// Precompute timing from async compute queue
+				if (sortAsyncWasOn && precomputeWasOn)
+				{
+					results.precomputeTimeMs = m_lastAsyncPrecomputeTimeMs;
+				}
 			}
 
 			if (timestamps[TIMESTAMP_HW_RENDER_BEGIN] != 0)
@@ -3051,9 +3403,10 @@ void HybridSplatRendererApp::RenderImGui()
 			if (m_profilingEnabled && !wasEnabled)
 			{
 				// Reset frame index when profiling is enabled to avoid reading stale queries
-				m_profilingFrameIndex  = 0;
-				m_currentGpuTiming     = {};
-				m_profilingJustEnabled = true;        // Skip query writes for rest of this frame
+				m_profilingFrameIndex             = 0;
+				m_asyncPrecomputeTimingWriteCount = 0;
+				m_currentGpuTiming                = {};
+				m_profilingJustEnabled            = true;        // Skip query writes for rest of this frame
 
 				CollectAndLogBufferMemory();
 			}
@@ -3076,10 +3429,16 @@ void HybridSplatRendererApp::RenderImGui()
 					if (m_currentBackendType == BackendType::GPU && m_currentGpuTiming.valid)
 					{
 						// GPU backend
-						double sortTime = m_sortingEnabled ? m_currentGpuTiming.sortTimeMs : 0.0;
+						double precomputeTime = m_currentGpuTiming.precomputeTimeMs;
+						double sortTime       = m_sortingEnabled ? m_currentGpuTiming.sortTimeMs : 0.0;
+						double totalTime      = precomputeTime + sortTime + m_currentGpuTiming.renderTimeMs;
+						if (precomputeTime > 0.0)
+						{
+							ImGui::Text("Precompute:   %.3f ms", precomputeTime);
+						}
 						ImGui::Text("Sort Pass:    %.3f ms", sortTime);
 						ImGui::Text("Render Pass:  %.3f ms", m_currentGpuTiming.renderTimeMs);
-						ImGui::Text("Total:        %.3f ms", sortTime + m_currentGpuTiming.renderTimeMs);
+						ImGui::Text("Total:        %.3f ms", totalTime);
 					}
 					else if (m_currentBackendType == BackendType::CPU && m_currentGpuTiming.valid)
 					{
@@ -3196,7 +3555,7 @@ void HybridSplatRendererApp::RenderImGui()
 		// Hardware rasterization pipeline controls
 		if (m_rasterizationPipelineType == RasterizationPipelineType::HardwareRaster)
 		{
-			// HW preprocess toggle
+			// Splat precompute toggle
 			if (m_splatPrecomputePipeline)
 			{
 				bool canUsePreprocess = (m_currentBackendType == BackendType::GPU);
@@ -3205,7 +3564,7 @@ void HybridSplatRendererApp::RenderImGui()
 				if (ImGui::Checkbox("Splat Precompute", &m_splatPrecomputeEnabled))
 				{
 					m_splatPrecomputeAsyncWarmup = 0;
-					LOG_INFO("HW rasterization preprocess {}",
+					LOG_INFO("Splat precompute {}",
 					         m_splatPrecomputeEnabled ? "enabled" : "disabled");
 				}
 				if (!canUsePreprocess)
@@ -3219,12 +3578,17 @@ void HybridSplatRendererApp::RenderImGui()
 				}
 			}
 
-			// Sorting enabled toggle
-			if (ImGui::Checkbox("Enable Sorting", &m_sortingEnabled))
+			// Sorting enabled toggle (always on when precompute is active)
+			bool precomputeForcesSorting = m_splatPrecomputeEnabled && m_splatPrecomputePipeline && m_currentBackendType == BackendType::GPU;
+			if (precomputeForcesSorting)
+				ImGui::BeginDisabled();
+			bool sortEnabled = m_sortingEnabled || precomputeForcesSorting;
+			if (ImGui::Checkbox("Enable Sorting", &sortEnabled))
 			{
-				ResetAsyncPipelineState();
-				LOG_INFO("Sorting {}", m_sortingEnabled ? "enabled" : "disabled");
+				m_pendingOps.sortingToggle = PendingOperations::SortingToggle{sortEnabled};
 			}
+			if (precomputeForcesSorting)
+				ImGui::EndDisabled();
 
 			// Transmittance culling toggle
 			bool tcEnabled = m_transmittanceCullingEnabled;
@@ -3893,10 +4257,14 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
     uint32_t              width,
     uint32_t              height,
     uint32_t              imageIndex,
-    uint32_t              frameIndex)
+    uint32_t              frameIndex,
+    rhi::IRHIBuffer      *indirectArgsBuffer)
 {
 	auto *swapchain = m_deviceManager->GetSwapchain();
 
+	// When using GPU-driven pipeline, per-chunk draw commands are pre-written
+	// at offset 100 in the indirect args buffer by PrepareIndirectArgs shader
+	// Otherwise, compute chunk sizes from total splatCount on the CPU
 	uint32_t splatsPerChunk = (splatCount + m_chunkCount - 1) / m_chunkCount;
 
 	// Barrier: Transition accumulation texture to local read layout
@@ -3942,12 +4310,6 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
 	// Render chunks with interleaved stencil updates
 	for (uint32_t chunk = 0; chunk < m_chunkCount; ++chunk)
 	{
-		uint32_t firstSplat      = chunk * splatsPerChunk;
-		uint32_t chunkSplatCount = std::min(splatsPerChunk, splatCount - firstSplat);
-
-		if (chunkSplatCount == 0)
-			break;
-
 		// === Render splats for this chunk ===
 		if (m_splatPrecomputeEnabled && m_splatTransmCullingPipelinePreprocessed && m_descriptorSetsPreprocessed[frameIndex])
 		{
@@ -3960,7 +4322,22 @@ void HybridSplatRendererApp::RenderTransmittanceCulling(
 			cmdList->BindDescriptorSet(0, m_descriptorSets[frameIndex].Get());
 		}
 		cmdList->BindIndexBuffer(m_quadIndexBuffer.Get());
-		cmdList->DrawIndexedInstanced(4, chunkSplatCount, 0, 0, firstSplat);
+
+		if (indirectArgsBuffer)
+		{
+			// GPU-driven: per-chunk draw commands at offset 100 + chunk * 20
+			constexpr size_t CHUNK_DRAW_OFFSET = 100;
+			constexpr size_t DRAW_CMD_SIZE     = 20;
+			cmdList->DrawIndexedIndirect(indirectArgsBuffer, CHUNK_DRAW_OFFSET + chunk * DRAW_CMD_SIZE, 1);
+		}
+		else
+		{
+			uint32_t firstSplat      = chunk * splatsPerChunk;
+			uint32_t chunkSplatCount = std::min(splatsPerChunk, splatCount - firstSplat);
+			if (chunkSplatCount == 0)
+				break;
+			cmdList->DrawIndexedInstanced(4, chunkSplatCount, 0, 0, firstSplat);
+		}
 
 		// === Stencil update pass (except for last chunk) ===
 		if (chunk < m_chunkCount - 1)

@@ -38,7 +38,8 @@ enum class BufferUsage : uint32_t
 	UNIFORM      = 1 << 2,
 	STORAGE      = 1 << 3,
 	TRANSFER_DST = 1 << 4,
-	TRANSFER_SRC = 1 << 5
+	TRANSFER_SRC = 1 << 5,
+	INDIRECT     = 1 << 6
 };
 
 // Index buffer data type

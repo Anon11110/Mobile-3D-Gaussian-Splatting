@@ -2,6 +2,10 @@
 #define RADIX_SORT_BINS 256
 #define SUBGROUP_SIZE 32
 
+#ifdef INDIRECT_DISPATCH
+[[vk::binding(0, 1)]] ByteAddressBuffer sortParams;
+struct PushConstants { uint shift; };
+#else
 struct PushConstants
 {
     uint numElements;
@@ -9,6 +13,7 @@ struct PushConstants
     uint numWorkgroups;
     uint numBlocksPerWorkgroup;
 };
+#endif
 [[vk::push_constant]] PushConstants pc;
 
 // Input/output as interleaved uint2 pairs: .x = depth key, .y = splat index
@@ -35,10 +40,20 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID,
     uint lID = groupThreadId.x;
     uint wID = groupId.x;
 
+#ifdef INDIRECT_DISPATCH
+    const uint numElements          = sortParams.Load(0);
+    const uint numWorkgroups        = sortParams.Load(4);
+    const uint numBlocksPerWorkgroup = sortParams.Load(8);
+#else
+    const uint numElements          = pc.numElements;
+    const uint numWorkgroups        = pc.numWorkgroups;
+    const uint numBlocksPerWorkgroup = pc.numBlocksPerWorkgroup;
+#endif
+
     if (lID < RADIX_SORT_BINS)
     {
         // Histogram: [bin0: WG0..WGn | bin1: WG0..WGn | ...]
-        localOffsets[lID] = scannedGlobalOffsets[lID * pc.numWorkgroups + wID];
+        localOffsets[lID] = scannedGlobalOffsets[lID * numWorkgroups + wID];
     }
     GroupMemoryBarrierWithGroupSync();
 
@@ -46,9 +61,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID,
     const uint flagsBin = lID / 32;
     const uint flagsBit = 1u << (lID % 32);
 
-    for (uint index = 0; index < pc.numBlocksPerWorkgroup; index++)
+    for (uint index = 0; index < numBlocksPerWorkgroup; index++)
     {
-        uint elementId = wID * pc.numBlocksPerWorkgroup * WORKGROUP_SIZE + index * WORKGROUP_SIZE + lID;
+        uint elementId = wID * numBlocksPerWorkgroup * WORKGROUP_SIZE + index * WORKGROUP_SIZE + lID;
 
         if (lID < RADIX_SORT_BINS)
         {
@@ -63,7 +78,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID,
         uint2 pair = uint2(0, 0);
         uint binID = 0;
 
-        if (elementId < pc.numElements)
+        if (elementId < numElements)
         {
             pair = inputPairs[elementId];
             binID = uint(pair.x >> pc.shift) & uint(RADIX_SORT_BINS - 1);
@@ -72,7 +87,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID,
         }
         GroupMemoryBarrierWithGroupSync();
 
-        if (elementId < pc.numElements)
+        if (elementId < numElements)
         {
             uint binOffset = localOffsets[binID];
 

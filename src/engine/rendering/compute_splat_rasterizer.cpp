@@ -753,7 +753,7 @@ void ComputeSplatRasterizer::ResizeTileBuffers(uint32_t newMaxTileInstances)
 	// Rebind descriptor sets with new sorter buffers
 	auto sorterBuffers = m_tileSorter->GetBufferInfo();
 
-	// Preprocess: binding 8 (tileKeys → sorter's splatDepths)
+	// Preprocess: binding 8 (tileKeys -> sorter's splatDepths)
 	{
 		rhi::BufferBinding binding = {};
 		binding.buffer             = sorterBuffers.splatDepths.Get();
@@ -761,7 +761,7 @@ void ComputeSplatRasterizer::ResizeTileBuffers(uint32_t newMaxTileInstances)
 		m_preprocessDescriptorSet->BindBuffer(8, binding);
 	}
 
-	// Preprocess: binding 9 (tileValues → sorter's splatIndicesOriginal)
+	// Preprocess: binding 9 (tileValues -> sorter's splatIndicesOriginal)
 	{
 		rhi::BufferBinding binding = {};
 		binding.buffer             = sorterBuffers.splatIndicesOriginal.Get();
@@ -769,7 +769,7 @@ void ComputeSplatRasterizer::ResizeTileBuffers(uint32_t newMaxTileInstances)
 		m_preprocessDescriptorSet->BindBuffer(9, binding);
 	}
 
-	// Ranges: binding 0 (sortedTilePairs → sorter's sortPairsB)
+	// Ranges: binding 0 (sortedTilePairs -> sorter's sortPairsB)
 	{
 		rhi::BufferBinding binding = {};
 		binding.buffer             = sorterBuffers.sortPairsB.Get();

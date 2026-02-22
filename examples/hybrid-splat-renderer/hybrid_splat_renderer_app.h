@@ -80,6 +80,10 @@ struct PendingOperations
 	{
 		BackendType targetBackend;
 	};
+	struct SortingToggle
+	{
+		bool enable;
+	};
 	struct AsyncComputeToggle
 	{
 		bool enable;
@@ -98,6 +102,7 @@ struct PendingOperations
 	};
 
 	std::optional<BackendSwitch>              backendSwitch;
+	std::optional<SortingToggle>              sortingToggle;
 	std::optional<AsyncComputeToggle>         asyncComputeToggle;
 	std::optional<TransmittanceCullingToggle> transmittanceCullingToggle;
 	std::optional<ModelLoad>                  modelLoad;
@@ -105,12 +110,13 @@ struct PendingOperations
 
 	bool HasPending() const
 	{
-		return backendSwitch || asyncComputeToggle || transmittanceCullingToggle || modelLoad || meshRemoval;
+		return backendSwitch || sortingToggle || asyncComputeToggle || transmittanceCullingToggle || modelLoad || meshRemoval;
 	}
 
 	void Clear()
 	{
 		backendSwitch.reset();
+		sortingToggle.reset();
 		asyncComputeToggle.reset();
 		transmittanceCullingToggle.reset();
 		modelLoad.reset();
@@ -235,6 +241,10 @@ class HybridSplatRendererApp : public app::IApplication
 	rhi::DescriptorSetLayoutHandle                             m_descriptorSetLayoutPreprocessed;
 	std::array<rhi::DescriptorSetHandle, MAX_FRAMES_IN_FLIGHT> m_descriptorSetsPreprocessed;
 
+	// GPU-driven indirect dispatch resources
+	std::array<rhi::BufferHandle, MAX_FRAMES_IN_FLIGHT> m_atomicCounterBuffers;
+	std::array<rhi::BufferHandle, MAX_FRAMES_IN_FLIGHT> m_indirectArgsBuffers;
+
 	// Transmittance culling resources
 	bool                m_transmittanceCullingEnabled = false;
 	uint32_t            m_chunkCount                  = 4;
@@ -273,9 +283,8 @@ class HybridSplatRendererApp : public app::IApplication
 	std::array<rhi::FenceHandle, MAX_FRAMES_IN_FLIGHT>       m_asyncComputeFences;
 	std::array<rhi::SemaphoreHandle, MAX_FRAMES_IN_FLIGHT>   m_asyncComputeSemaphores;
 	rhi::CommandListHandle                                   m_asyncCleanupCmdList;        // For QFOT cleanup on toggle async compute only
-	uint32_t                                                 m_asyncPipelineFrameIndex         = 0;
-	bool                                                     m_asyncWarmupComplete             = false;
-	bool                                                     m_asyncSemaphoreSignaledThisFrame = false;
+	uint32_t                                                 m_asyncPipelineFrameIndex = 0;
+	bool                                                     m_asyncWarmupComplete     = false;
 
 	timer::Timer      m_applicationTimer;
 	timer::FPSCounter m_fpsCounter;
@@ -363,36 +372,44 @@ class HybridSplatRendererApp : public app::IApplication
 	bool m_pipelineStatsQueryActive = false;
 
 	// Timestamp indices within a frame
-	// Hardware rasterization pipeline: indices 0-3
-	// Compute rasterization pipeline: indices 4-13
-	static constexpr uint32_t TIMESTAMP_HW_SORT_BEGIN            = 0;
-	static constexpr uint32_t TIMESTAMP_HW_SORT_END              = 1;
-	static constexpr uint32_t TIMESTAMP_HW_RENDER_BEGIN          = 2;
-	static constexpr uint32_t TIMESTAMP_HW_RENDER_END            = 3;
-	static constexpr uint32_t TIMESTAMP_COMPUTE_PREPROCESS_BEGIN = 4;
-	static constexpr uint32_t TIMESTAMP_COMPUTE_PREPROCESS_END   = 5;
-	static constexpr uint32_t TIMESTAMP_COMPUTE_SORT_BEGIN       = 6;
-	static constexpr uint32_t TIMESTAMP_COMPUTE_SORT_END         = 7;
-	static constexpr uint32_t TIMESTAMP_COMPUTE_RANGES_BEGIN     = 8;
-	static constexpr uint32_t TIMESTAMP_COMPUTE_RANGES_END       = 9;
-	static constexpr uint32_t TIMESTAMP_COMPUTE_RASTER_BEGIN     = 10;
-	static constexpr uint32_t TIMESTAMP_COMPUTE_RASTER_END       = 11;
-	static constexpr uint32_t TIMESTAMP_COMPUTE_RENDER_BEGIN     = 12;        // Total compute rendering time
-	static constexpr uint32_t TIMESTAMP_COMPUTE_RENDER_END       = 13;        // Total compute rendering time
-	static constexpr uint32_t TIMESTAMPS_PER_FRAME               = 14;
+	// Hardware rasterization pipeline: indices 0-5
+	// Compute rasterization pipeline: indices 6-15
+	static constexpr uint32_t TIMESTAMP_HW_PRECOMPUTE_BEGIN      = 0;
+	static constexpr uint32_t TIMESTAMP_HW_PRECOMPUTE_END        = 1;
+	static constexpr uint32_t TIMESTAMP_HW_SORT_BEGIN            = 2;
+	static constexpr uint32_t TIMESTAMP_HW_SORT_END              = 3;
+	static constexpr uint32_t TIMESTAMP_HW_RENDER_BEGIN          = 4;
+	static constexpr uint32_t TIMESTAMP_HW_RENDER_END            = 5;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_PREPROCESS_BEGIN = 6;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_PREPROCESS_END   = 7;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_SORT_BEGIN       = 8;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_SORT_END         = 9;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RANGES_BEGIN     = 10;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RANGES_END       = 11;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RASTER_BEGIN     = 12;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RASTER_END       = 13;
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RENDER_BEGIN     = 14;        // Total compute rendering time
+	static constexpr uint32_t TIMESTAMP_COMPUTE_RENDER_END       = 15;        // Total compute rendering time
+	static constexpr uint32_t TIMESTAMPS_PER_FRAME               = 16;
 
 	uint32_t                               m_gpuProfilingFrameLatency = 0;        // Set from swapchain image count
 	rhi::QueryPoolHandle                   m_timestampQueryPool;
 	rhi::QueryPoolHandle                   m_pipelineStatsQueryPool;
+	rhi::QueryPoolHandle                   m_asyncPrecomputeQueryPool;
 	double                                 m_timestampPeriod     = 1.0;          // nanoseconds per tick
 	uint32_t                               m_profilingFrameIndex = 0;            // Rolling frame index for query slots
 	std::vector<RasterizationPipelineType> m_frameRasterizationPipelines;        // Track which pipeline was used per frame slot
 	std::vector<bool>                      m_frameSortAsyncEnabled;              // Track if async compute was enabled per frame slot
+	std::vector<bool>                      m_frameSplatPrecomputeEnabled;        // Track if splat precompute was enabled per frame slot
+
+	double   m_lastAsyncPrecomputeTimeMs       = 0.0;
+	uint32_t m_asyncPrecomputeTimingWriteCount = 0;        // Tracks how many slots have valid timestamps
 
 	// Buffered GPU timing results
 	struct GpuTimingResults
 	{
 		// Hardware rasterization pipeline timings
+		double   precomputeTimeMs    = 0.0;        // Splat precompute + PrepareIndirectArgs
 		double   sortTimeMs          = 0.0;
 		double   renderTimeMs        = 0.0;
 		uint64_t vertexInvocations   = 0;
@@ -413,6 +430,7 @@ class HybridSplatRendererApp : public app::IApplication
 	void InitGpuProfiling();
 	void ShutdownGpuProfiling();
 	void BeginGpuFrame(rhi::IRHICommandList *cmdList);
+	void RecordPrecomputeTimestamp(rhi::IRHICommandList *cmdList, bool begin);
 	void RecordSortTimestamp(rhi::IRHICommandList *cmdList, bool begin);
 	void RecordRenderTimestamp(rhi::IRHICommandList *cmdList, bool begin);
 	void RecordComputePreprocessTimestamp(rhi::IRHICommandList *cmdList, bool begin);
@@ -422,6 +440,7 @@ class HybridSplatRendererApp : public app::IApplication
 	void BeginPipelineStatsQuery(rhi::IRHICommandList *cmdList);
 	void EndPipelineStatsQuery(rhi::IRHICommandList *cmdList);
 	void ReadGpuTimingResults();
+	void ReadAsyncPrecomputeTiming(uint32_t slotIndex);
 
 	// Buffer memory tracking
 	BufferMemoryTracker m_memoryTracker;
@@ -454,5 +473,5 @@ class HybridSplatRendererApp : public app::IApplication
 	void ResizeTransmCullingResources(uint32_t width, uint32_t height);
 	void RenderTransmittanceCulling(rhi::IRHICommandList *cmdList, uint32_t splatCount,
 	                                uint32_t width, uint32_t height, uint32_t imageIndex,
-	                                uint32_t frameIndex);
+	                                uint32_t frameIndex, rhi::IRHIBuffer *indirectArgsBuffer = nullptr);
 };

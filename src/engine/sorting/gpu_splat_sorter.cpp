@@ -13,10 +13,22 @@ GpuSplatSorter::GpuSplatSorter(rhi::IRHIDevice *device, container::shared_ptr<vf
 {
 }
 
-void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer, uint32_t pipelineDepth)
+void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer, uint32_t pipelineDepth,
+                                container::span<rhi::IRHIBuffer *const> indirectArgsBuffers)
 {
+	// If already initialized, only process newly-provided indirect args
 	if (isInitialized)
 	{
+		if (!indirectArgsBuffers.empty() && indirectArgsBufferPtrs.empty())
+		{
+			indirectArgsBufferPtrs.resize(indirectArgsBuffers.size());
+			for (size_t i = 0; i < indirectArgsBuffers.size(); ++i)
+			{
+				indirectArgsBufferPtrs[i] = indirectArgsBuffers[i];
+			}
+			CreateIndirectComputePipelines();
+			CreateIndirectDescriptorSets();
+		}
 		return;
 	}
 
@@ -100,6 +112,18 @@ void GpuSplatSorter::Initialize(uint32_t totalSplatCount, rhi::BufferHandle outp
 	{
 		timestampPeriod = device->GetTimestampPeriod();
 		LOG_INFO("GpuSplatSorter: GPU timing enabled, period = {} ns", timestampPeriod);
+	}
+
+	// Initialize indirect dispatch pipelines and descriptor sets
+	if (!indirectArgsBuffers.empty())
+	{
+		indirectArgsBufferPtrs.resize(indirectArgsBuffers.size());
+		for (size_t i = 0; i < indirectArgsBuffers.size(); ++i)
+		{
+			indirectArgsBufferPtrs[i] = indirectArgsBuffers[i];
+		}
+		CreateIndirectComputePipelines();
+		CreateIndirectDescriptorSets();
 	}
 
 	isInitialized = true;
@@ -537,7 +561,7 @@ void GpuSplatSorter::CreateDescriptorSets()
 		// Pack always writes to sortPairsA (pass 0 scatter reads from A when useA=true...
 		// but actually pass 0 outputs to A, so pack must write to the INPUT of pass 0).
 		// Pass 0 (useA=true): reads from opposite = B input would be wrong.
-		// Actually with packed pairs: pack → sortPairsB, pass 0 reads B writes A,
+		// Actually with packed pairs: pack -> sortPairsB, pass 0 reads B writes A,
 		// pass 1 reads A writes B, pass 2 reads B writes A, pass 3 reads A writes B.
 		// Final result in B. Unpack reads B.
 		rhi::BufferBinding pairsBinding = {};
@@ -575,7 +599,7 @@ void GpuSplatSorter::CreateDescriptorSets()
 			histogramDescriptorSets[pass] = device->CreateDescriptorSet(histogramSetLayout.Get(), rhi::QueueType::COMPUTE);
 
 			// Binding 0: Input pairs
-			// Ping-pong: pack→B, pass 0 writes A, pass 1 writes B, etc.
+			// Ping-pong: pack->B, pass 0 writes A, pass 1 writes B, etc.
 			// Histogram reads from previous scatter output:
 			// Pass 0: reads B (packed initial data)
 			// Pass 1: reads A (scatter pass 0 output)
@@ -647,7 +671,7 @@ void GpuSplatSorter::CreateDescriptorSets()
 
 		for (uint32_t pass = 0; pass < RadixPasses; ++pass)
 		{
-			// Ping-pong: pack→B, pass 0 reads B writes A, pass 1 reads A writes B, etc.
+			// Ping-pong: pack->B, pass 0 reads B writes A, pass 1 reads A writes B, etc.
 			bool writeToA = (pass % 2 == 0);
 
 			scatterPairsPrescanDescriptorSets[pass] = device->CreateDescriptorSet(scatterPairsSetLayout.Get(), rhi::QueueType::COMPUTE);
@@ -1087,7 +1111,7 @@ void GpuSplatSorter::RecordRadixSortPrescan(rhi::IRHICommandList *cmdList, bool 
 		cmdList->BindDescriptorSet(0, scanDescriptorSets[pass].Get());
 
 		scanPushConstants.numElements = numScanElements;
-		scanPushConstants.passType    = 2;        // Add offsets
+		scanPushConstants.passType    = 2;
 
 		cmdList->PushConstants(
 		    rhi::ShaderStageFlags::COMPUTE,
@@ -1423,13 +1447,13 @@ void GpuSplatSorter::PrepareVerification(rhi::IRHICommandList *cmdList)
 	{
 		rhi::BufferTransition transitions[5];
 
-		// Readback buffers: CopyDestination → GeneralRead
+		// Readback buffers: CopyDestination -> GeneralRead
 		transitions[0] = {verificationDepths.Get(), rhi::ResourceState::CopyDestination, rhi::ResourceState::GeneralRead};
 		transitions[1] = {verificationSortedKeys.Get(), rhi::ResourceState::CopyDestination, rhi::ResourceState::GeneralRead};
 		transitions[2] = {verificationSortedIndices.Get(), rhi::ResourceState::CopyDestination, rhi::ResourceState::GeneralRead};
 		transitions[3] = {verificationHistogram.Get(), rhi::ResourceState::CopyDestination, rhi::ResourceState::GeneralRead};
 
-		// Output buffer: CopySource → GeneralRead (needed for rendering later this frame)
+		// Output buffer: CopySource -> GeneralRead (needed for rendering later this frame)
 		transitions[4] = {activeOutput, rhi::ResourceState::CopySource, rhi::ResourceState::GeneralRead};
 
 		cmdList->Barrier(rhi::PipelineScope::Copy, rhi::PipelineScope::Graphics, {transitions, 5}, {}, {});
@@ -2254,7 +2278,7 @@ bool GpuSplatSorter::VerifySortOrder()
 	if (lastSortUsedInlineUnpack)
 	{
 		// With inline unpack: sortPairsA has pairs sorted by bits 0-23, sortIndicesB has final sorted order
-		// Build a lookup map: splatID → key, read sorted indices and look up keys
+		// Build a lookup map: splatID -> key, read sorted indices and look up keys
 		container::vector<uint32_t> splatIDToKey;
 		splatIDToKey.resize(totalSplatCount);
 		for (uint32_t i = 0; i < totalSplatCount; ++i)
@@ -2394,6 +2418,524 @@ bool GpuSplatSorter::ReadTimingResultsNonBlocking()
 	}
 
 	return false;
+}
+
+void GpuSplatSorter::CreateIndirectComputePipelines()
+{
+	ShaderFactory shaderFactory(device, vfs);
+
+	// Load indirect shader variants
+	rhi::ShaderHandle histogramIndirectShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_histogram_indirect_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle histogramSubgroupIndirectShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_histogram_subgroup_indirect_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle scatterPairsIndirectShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_scatter_pairs_indirect_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle scatterPairsPrescanIndirectShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_scatter_pairs_prescan_indirect_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle scatterUnpackIndirectShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_scatter_unpack_indirect_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle scatterUnpackPrescanIndirectShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_scatter_unpack_prescan_indirect_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle radixPrefixScanIndirectShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_prefix_scan_indirect_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	rhi::ShaderHandle radixPrefixScanSubgroupIndirectShader = shaderFactory.getOrCreateShader(
+	    "shaders/compiled/radix_prefix_scan_subgroup_indirect_cs",
+	    rhi::ShaderStage::COMPUTE);
+
+	// Create sortParams descriptor set layout
+	{
+		rhi::DescriptorSetLayoutDesc layoutDesc = {};
+		layoutDesc.bindings.push_back({0, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
+		sortParamsSetLayout = device->CreateDescriptorSetLayout(layoutDesc);
+	}
+
+	// Push constant range for indirect shaders, just a single uint32_t for shift or passType
+	rhi::PushConstantRange pushConstantRange = {};
+	pushConstantRange.stageFlags             = rhi::ShaderStageFlags::COMPUTE;
+	pushConstantRange.offset                 = 0;
+	pushConstantRange.size                   = sizeof(uint32_t);
+
+	// Portable histogram indirect pipeline
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = histogramIndirectShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {histogramSetLayout.Get(), sortParamsSetLayout.Get()};
+		pipelineDesc.pushConstantRanges       = {pushConstantRange};
+		histogramIndirectPipeline             = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Subgroup-optimized histogram indirect pipeline
+	if (histogramSubgroupIndirectShader)
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = histogramSubgroupIndirectShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {histogramSetLayout.Get(), sortParamsSetLayout.Get()};
+		pipelineDesc.pushConstantRanges       = {pushConstantRange};
+		histogramSubgroupIndirectPipeline     = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Portable radix prefix scan indirect pipeline
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = radixPrefixScanIndirectShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {scanSetLayout.Get(), sortParamsSetLayout.Get()};
+		pipelineDesc.pushConstantRanges       = {pushConstantRange};
+		radixPrefixScanIndirectPipeline       = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Subgroup-optimized radix prefix scan indirect pipeline
+	if (radixPrefixScanSubgroupIndirectShader)
+	{
+		rhi::ComputePipelineDesc pipelineDesc   = {};
+		pipelineDesc.computeShader              = radixPrefixScanSubgroupIndirectShader.Get();
+		pipelineDesc.descriptorSetLayouts       = {scanSetLayout.Get(), sortParamsSetLayout.Get()};
+		pipelineDesc.pushConstantRanges         = {pushConstantRange};
+		radixPrefixScanSubgroupIndirectPipeline = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Scatter pairs indirect pipeline with integrated scan
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = scatterPairsIndirectShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {scatterPairsIntegratedSetLayout.Get(), sortParamsSetLayout.Get()};
+		pipelineDesc.pushConstantRanges       = {pushConstantRange};
+		scatterPairsIndirectPipeline          = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Scatter pairs indirect pipeline with prescan
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = scatterPairsPrescanIndirectShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {scatterPairsSetLayout.Get(), sortParamsSetLayout.Get()};
+		pipelineDesc.pushConstantRanges       = {pushConstantRange};
+		scatterPairsPrescanIndirectPipeline   = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Scatter unpack indirect pipeline with integrated scan
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = scatterUnpackIndirectShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {scatterPairsIntegratedSetLayout.Get(), sortParamsSetLayout.Get()};
+		pipelineDesc.pushConstantRanges       = {pushConstantRange};
+		scatterUnpackIndirectPipeline         = device->CreateComputePipeline(pipelineDesc);
+	}
+
+	// Scatter unpack indirect pipeline with prescan
+	{
+		rhi::ComputePipelineDesc pipelineDesc = {};
+		pipelineDesc.computeShader            = scatterUnpackPrescanIndirectShader.Get();
+		pipelineDesc.descriptorSetLayouts     = {scatterPairsSetLayout.Get(), sortParamsSetLayout.Get()};
+		pipelineDesc.pushConstantRanges       = {pushConstantRange};
+		scatterUnpackPrescanIndirectPipeline  = device->CreateComputePipeline(pipelineDesc);
+	}
+}
+
+void GpuSplatSorter::CreateIndirectDescriptorSets()
+{
+	// Create one sortParams descriptor set per indirect args buffer
+	sortParamsDescriptorSets.resize(indirectArgsBufferPtrs.size());
+
+	for (size_t i = 0; i < indirectArgsBufferPtrs.size(); ++i)
+	{
+		auto descriptorSet = device->CreateDescriptorSet(sortParamsSetLayout.Get(), rhi::QueueType::COMPUTE);
+
+		rhi::BufferBinding binding = {};
+		binding.buffer             = indirectArgsBufferPtrs[i];
+		binding.offset             = 0;
+		binding.range              = 32;        // First 32 bytes = SortParams
+		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		descriptorSet->BindBuffer(0, binding);
+
+		sortParamsDescriptorSets[i] = std::move(descriptorSet);
+	}
+}
+
+void GpuSplatSorter::SortIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex)
+{
+	if (!isInitialized || indirectArgsBufferPtrs.empty())
+	{
+		LOG_WARNING("GpuSplatSorter::SortIndirect called before initialization");
+		return;
+	}
+
+	// Reset and record begin timestamp
+	uint32_t frameSlot       = timingFrameIndex % timingFrameLatency;
+	uint32_t timestampOffset = frameSlot * 2;        // 2 timestamps per frame
+
+	if (timestampQueryPool)
+	{
+		cmdList->ResetQueryPool(timestampQueryPool.Get(), timestampOffset, 2);
+		cmdList->WriteTimestamp(timestampQueryPool.Get(), timestampOffset, rhi::StageMask::ComputeShader);
+	}
+
+	// Record sorting
+	if (sortMethod == SortMethod::IntegratedScan)
+	{
+		RecordRadixSortIntegratedIndirect(cmdList, indirectBufferIndex);
+	}
+	else
+	{
+		RecordRadixSortPrescanIndirect(cmdList, indirectBufferIndex);
+	}
+
+	// Record end timestamp for GPU timing
+	if (timestampQueryPool)
+	{
+		cmdList->WriteTimestamp(timestampQueryPool.Get(), timestampOffset + 1, rhi::StageMask::ComputeShader);
+	}
+
+	timingFrameIndex++;
+}
+
+void GpuSplatSorter::RecordRadixSortIntegratedIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex)
+{
+	if (!histogramIndirectPipeline || !scatterPairsIndirectPipeline)
+	{
+		LOG_WARNING("Required indirect pipelines for integrated scan method not created");
+		return;
+	}
+
+	// Select histogram pipeline based on shader variant
+	rhi::IRHIPipeline *activeHistogramPipeline = histogramIndirectPipeline.Get();
+
+	if (shaderVariant == ShaderVariant::SubgroupOptimized && histogramSubgroupIndirectPipeline)
+	{
+		activeHistogramPipeline = histogramSubgroupIndirectPipeline.Get();
+	}
+
+	// DispatchIndirect offsets from the indirectArgs buffer layout:
+	//   Offset 32: histogram/scatter dispatches (numWorkgroups)
+	//   Offset 44: scan blocks/add offsets dispatches (numScanWorkgroups)
+	//   Offset 56: scan block sums dispatch ({1,1,1})
+	constexpr uint32_t dispatchOffsetHistogramScatter = 32;
+
+	// 8 bits per radix pass
+	for (uint32_t pass = 0; pass < RadixPasses; ++pass)
+	{
+		uint32_t shift = pass * 8;        // 0, 8, 16, 24
+
+		// --- Pass 1: HISTOGRAM (raw counts, not scanned) ---
+		cmdList->SetPipeline(activeHistogramPipeline);
+		cmdList->BindDescriptorSet(0, histogramDescriptorSets[pass].Get());
+		cmdList->BindDescriptorSet(1, sortParamsDescriptorSets[indirectBufferIndex].Get());
+
+		cmdList->PushConstants(
+		    rhi::ShaderStageFlags::COMPUTE,
+		    0,
+		    {reinterpret_cast<const std::byte *>(&shift), sizeof(uint32_t)});
+		cmdList->DispatchIndirect(indirectArgsBufferPtrs[indirectBufferIndex], dispatchOffsetHistogramScatter);
+
+		// Barrier: Ensure histogram writes are finished
+		rhi::BufferTransition histogramWriteTransition = {};
+		histogramWriteTransition.buffer                = histograms.Get();
+		histogramWriteTransition.before                = rhi::ResourceState::ShaderWrite;
+		histogramWriteTransition.after                 = rhi::ResourceState::GeneralRead;
+
+		cmdList->Barrier(
+		    rhi::PipelineScope::Compute,
+		    rhi::PipelineScope::Compute,
+		    {&histogramWriteTransition, 1},
+		    {},
+		    {});
+
+		// --- Pass 2: SCATTER with integrated prefix sum ---
+		bool isFinalPass = (pass == RadixPasses - 1);
+
+		if (isFinalPass)
+		{
+			// Final pass with inline unpack, writing indices directly to output buffer
+			cmdList->SetPipeline(scatterUnpackIndirectPipeline.Get());
+			cmdList->BindDescriptorSet(0, scatterUnpackIntegratedDescriptorSets[activeOutputBufferIndex].Get());
+		}
+		else
+		{
+			cmdList->SetPipeline(scatterPairsIndirectPipeline.Get());
+			cmdList->BindDescriptorSet(0, scatterPairsIntegratedDescriptorSets[pass].Get());
+		}
+
+		cmdList->BindDescriptorSet(1, sortParamsDescriptorSets[indirectBufferIndex].Get());
+
+		cmdList->PushConstants(
+		    rhi::ShaderStageFlags::COMPUTE,
+		    0,
+		    {reinterpret_cast<const std::byte *>(&shift), sizeof(uint32_t)});
+		cmdList->DispatchIndirect(indirectArgsBufferPtrs[indirectBufferIndex], dispatchOffsetHistogramScatter);
+
+		// Barrier after scatter to ensure write completion
+		{
+			bool writeToA = (pass % 2 == 0);
+
+			if (isFinalPass)
+			{
+				// Final pass wrote to the output indices buffer
+				rhi::IRHIBuffer      *outputBuffer = outputBuffers[activeOutputBufferIndex].Get();
+				rhi::BufferTransition transition   = {};
+				transition.buffer                  = outputBuffer;
+				transition.before                  = rhi::ResourceState::ShaderWrite;
+				transition.after                   = rhi::ResourceState::GeneralRead;
+
+				cmdList->Barrier(
+				    rhi::PipelineScope::Compute,
+				    rhi::PipelineScope::Compute,
+				    {&transition, 1},
+				    {},
+				    {});
+			}
+			else
+			{
+				rhi::BufferTransition scatterTransitions[2];
+
+				// Transition the pair buffer that was written to
+				scatterTransitions[0].buffer = writeToA ? sortPairsA.Get() : sortPairsB.Get();
+				scatterTransitions[0].before = rhi::ResourceState::ShaderWrite;
+				scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
+
+				// Transition histogram back to write-enabled for next pass
+				scatterTransitions[1].buffer = histograms.Get();
+				scatterTransitions[1].before = rhi::ResourceState::GeneralRead;
+				scatterTransitions[1].after  = rhi::ResourceState::ShaderWrite;
+
+				cmdList->Barrier(
+				    rhi::PipelineScope::Compute,
+				    rhi::PipelineScope::Compute,
+				    {scatterTransitions, 2},
+				    {},
+				    {});
+			}
+		}
+	}
+}
+
+void GpuSplatSorter::RecordRadixSortPrescanIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex)
+{
+	if (!histogramIndirectPipeline || !radixPrefixScanIndirectPipeline || !scatterPairsPrescanIndirectPipeline)
+	{
+		LOG_WARNING("Required indirect pipelines for prescan method not created");
+		return;
+	}
+
+	// Select pipelines based on shader variant
+	rhi::IRHIPipeline *activeHistogramPipeline = histogramIndirectPipeline.Get();
+	rhi::IRHIPipeline *activeScanPipeline      = radixPrefixScanIndirectPipeline.Get();
+
+	if (shaderVariant == ShaderVariant::SubgroupOptimized)
+	{
+		if (histogramSubgroupIndirectPipeline && radixPrefixScanSubgroupIndirectPipeline)
+		{
+			activeHistogramPipeline = histogramSubgroupIndirectPipeline.Get();
+			activeScanPipeline      = radixPrefixScanSubgroupIndirectPipeline.Get();
+		}
+		else
+		{
+			LOG_WARNING("Subgroup-optimized indirect shaders not available, falling back to portable");
+		}
+	}
+
+	// DispatchIndirect offsets from the indirectArgs buffer layout:
+	//   Offset 32: histogram/scatter dispatches (numWorkgroups)
+	//   Offset 44: scan blocks/add offsets dispatches (numScanWorkgroups)
+	//   Offset 56: scan block sums dispatch ({1,1,1})
+	constexpr uint32_t dispatchOffsetHistogramScatter = 32;
+	constexpr uint32_t dispatchOffsetScanBlocks       = 44;
+	constexpr uint32_t dispatchOffsetScanBlockSums    = 56;
+
+	// 8 bits per radix pass
+	for (uint32_t pass = 0; pass < RadixPasses; ++pass)
+	{
+		uint32_t shift = pass * 8;        // 0, 8, 16, 24
+
+		// --- Pass 1: HISTOGRAM ---
+		cmdList->SetPipeline(activeHistogramPipeline);
+		cmdList->BindDescriptorSet(0, histogramDescriptorSets[pass].Get());
+		cmdList->BindDescriptorSet(1, sortParamsDescriptorSets[indirectBufferIndex].Get());
+
+		cmdList->PushConstants(
+		    rhi::ShaderStageFlags::COMPUTE,
+		    0,
+		    {reinterpret_cast<const std::byte *>(&shift), sizeof(uint32_t)});
+		cmdList->DispatchIndirect(indirectArgsBufferPtrs[indirectBufferIndex], dispatchOffsetHistogramScatter);
+
+		// Barrier: Ensure histogram writes are finished
+		rhi::BufferTransition histogramWriteTransition = {};
+		histogramWriteTransition.buffer                = histograms.Get();
+		histogramWriteTransition.before                = rhi::ResourceState::ShaderWrite;
+		histogramWriteTransition.after                 = rhi::ResourceState::ShaderReadWrite;
+
+		cmdList->Barrier(
+		    rhi::PipelineScope::Compute,
+		    rhi::PipelineScope::Compute,
+		    {&histogramWriteTransition, 1},
+		    {},
+		    {});
+
+		// --- Pass 2: SCAN BLOCKS ---
+		cmdList->SetPipeline(activeScanPipeline);
+		cmdList->BindDescriptorSet(0, scanDescriptorSets[pass].Get());
+		cmdList->BindDescriptorSet(1, sortParamsDescriptorSets[indirectBufferIndex].Get());
+
+		uint32_t passType = 0;        // Scan blocks
+		cmdList->PushConstants(
+		    rhi::ShaderStageFlags::COMPUTE,
+		    0,
+		    {reinterpret_cast<const std::byte *>(&passType), sizeof(uint32_t)});
+		cmdList->DispatchIndirect(indirectArgsBufferPtrs[indirectBufferIndex], dispatchOffsetScanBlocks);
+
+		// Barrier: Ensure block scan and block sum writes are finished
+		{
+			rhi::BufferTransition scanBlockTransitions[2];
+			scanBlockTransitions[0].buffer = histograms.Get();
+			scanBlockTransitions[0].before = rhi::ResourceState::ShaderReadWrite;
+			scanBlockTransitions[0].after  = rhi::ResourceState::ShaderReadWrite;
+
+			scanBlockTransitions[1].buffer = blockSums.Get();
+			scanBlockTransitions[1].before = rhi::ResourceState::ShaderReadWrite;
+			scanBlockTransitions[1].after  = rhi::ResourceState::ShaderReadWrite;
+
+			cmdList->Barrier(
+			    rhi::PipelineScope::Compute,
+			    rhi::PipelineScope::Compute,
+			    {scanBlockTransitions, 2},
+			    {},
+			    {});
+		}
+
+		// --- Pass 3: SCAN BLOCK SUMS ---
+		cmdList->SetPipeline(activeScanPipeline);
+		cmdList->BindDescriptorSet(0, scanBlockSumsDescriptorSet.Get());
+		cmdList->BindDescriptorSet(1, sortParamsDescriptorSets[indirectBufferIndex].Get());
+
+		passType = 1;        // Scan block sums
+		cmdList->PushConstants(
+		    rhi::ShaderStageFlags::COMPUTE,
+		    0,
+		    {reinterpret_cast<const std::byte *>(&passType), sizeof(uint32_t)});
+		cmdList->DispatchIndirect(indirectArgsBufferPtrs[indirectBufferIndex], dispatchOffsetScanBlockSums);
+
+		// Barrier: Ensure scan of block sums is finished
+		rhi::BufferTransition blockSumScanTransition = {};
+		blockSumScanTransition.buffer                = blockSums.Get();
+		blockSumScanTransition.before                = rhi::ResourceState::ShaderReadWrite;
+		blockSumScanTransition.after                 = rhi::ResourceState::GeneralRead;
+
+		cmdList->Barrier(
+		    rhi::PipelineScope::Compute,
+		    rhi::PipelineScope::Compute,
+		    {&blockSumScanTransition, 1},
+		    {},
+		    {});
+
+		// --- Pass 4: ADD OFFSETS ---
+		cmdList->SetPipeline(activeScanPipeline);
+		cmdList->BindDescriptorSet(0, scanDescriptorSets[pass].Get());
+		cmdList->BindDescriptorSet(1, sortParamsDescriptorSets[indirectBufferIndex].Get());
+
+		passType = 2;
+		cmdList->PushConstants(
+		    rhi::ShaderStageFlags::COMPUTE,
+		    0,
+		    {reinterpret_cast<const std::byte *>(&passType), sizeof(uint32_t)});
+		cmdList->DispatchIndirect(indirectArgsBufferPtrs[indirectBufferIndex], dispatchOffsetScanBlocks);
+
+		// Barrier: Ensure final offsets are written
+		{
+			rhi::BufferTransition addOffsetTransitions[2];
+			addOffsetTransitions[0].buffer = histograms.Get();
+			addOffsetTransitions[0].before = rhi::ResourceState::ShaderReadWrite;
+			addOffsetTransitions[0].after  = rhi::ResourceState::GeneralRead;
+
+			addOffsetTransitions[1].buffer = blockSums.Get();
+			addOffsetTransitions[1].before = rhi::ResourceState::GeneralRead;
+			addOffsetTransitions[1].after  = rhi::ResourceState::ShaderReadWrite;
+
+			cmdList->Barrier(
+			    rhi::PipelineScope::Compute,
+			    rhi::PipelineScope::Compute,
+			    {addOffsetTransitions, 2},
+			    {},
+			    {});
+		}
+
+		// --- Pass 5: SCATTER ---
+		bool isFinalPass = (pass == RadixPasses - 1);
+
+		if (isFinalPass)
+		{
+			// Final pass with inline unpack, writing indices directly to output buffer
+			cmdList->SetPipeline(scatterUnpackPrescanIndirectPipeline.Get());
+			cmdList->BindDescriptorSet(0, scatterUnpackPrescanDescriptorSets[activeOutputBufferIndex].Get());
+		}
+		else
+		{
+			cmdList->SetPipeline(scatterPairsPrescanIndirectPipeline.Get());
+			cmdList->BindDescriptorSet(0, scatterPairsPrescanDescriptorSets[pass].Get());
+		}
+
+		cmdList->BindDescriptorSet(1, sortParamsDescriptorSets[indirectBufferIndex].Get());
+
+		cmdList->PushConstants(
+		    rhi::ShaderStageFlags::COMPUTE,
+		    0,
+		    {reinterpret_cast<const std::byte *>(&shift), sizeof(uint32_t)});
+		cmdList->DispatchIndirect(indirectArgsBufferPtrs[indirectBufferIndex], dispatchOffsetHistogramScatter);
+
+		// Barrier after scatter to ensure write completion
+		{
+			bool writeToA = (pass % 2 == 0);
+
+			if (isFinalPass)
+			{
+				// Final pass wrote to the output indices buffer
+				rhi::IRHIBuffer      *outputBuffer = outputBuffers[activeOutputBufferIndex].Get();
+				rhi::BufferTransition transition   = {};
+				transition.buffer                  = outputBuffer;
+				transition.before                  = rhi::ResourceState::ShaderWrite;
+				transition.after                   = rhi::ResourceState::GeneralRead;
+
+				cmdList->Barrier(
+				    rhi::PipelineScope::Compute,
+				    rhi::PipelineScope::Compute,
+				    {&transition, 1},
+				    {},
+				    {});
+			}
+			else
+			{
+				rhi::BufferTransition scatterTransitions[2];
+
+				// Transition the pair buffer that was written to
+				scatterTransitions[0].buffer = writeToA ? sortPairsA.Get() : sortPairsB.Get();
+				scatterTransitions[0].before = rhi::ResourceState::ShaderWrite;
+				scatterTransitions[0].after  = rhi::ResourceState::GeneralRead;
+
+				// Transition histogram back to write-enabled for next pass
+				scatterTransitions[1].buffer = histograms.Get();
+				scatterTransitions[1].before = rhi::ResourceState::GeneralRead;
+				scatterTransitions[1].after  = rhi::ResourceState::ShaderWrite;
+
+				cmdList->Barrier(
+				    rhi::PipelineScope::Compute,
+				    rhi::PipelineScope::Compute,
+				    {scatterTransitions, 2},
+				    {},
+				    {});
+			}
+		}
+	}
 }
 
 }        // namespace msplat::engine

@@ -33,12 +33,16 @@ class GpuSplatSorter
 	GpuSplatSorter(GpuSplatSorter &&) noexcept            = default;
 	GpuSplatSorter &operator=(GpuSplatSorter &&) noexcept = default;
 
-	void Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer, uint32_t pipelineDepth = 2);
+	void Initialize(uint32_t totalSplatCount, rhi::BufferHandle outputBuffer, uint32_t pipelineDepth = 2,
+	                container::span<rhi::IRHIBuffer *const> indirectArgsBuffers = {});
 
 	void Sort(rhi::IRHICommandList *cmdList, const Scene &scene, const app::Camera &camera);
 
 	// Sort pre-written keys without depth calculation.
 	void SortOnly(rhi::IRHICommandList *cmdList);
+
+	// Sort using DispatchIndirect, indirectBufferIndex selects which K-buffered indirect args buffer to use
+	void SortIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex);
 
 	rhi::BufferHandle GetSortedIndices() const;
 
@@ -155,6 +159,10 @@ class GpuSplatSorter
 	void RecordUnpackIndices(rhi::IRHICommandList *cmdList);
 	void RecordRadixSortPrescan(rhi::IRHICommandList *cmdList, bool inlineUnpack = false);
 	void RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList, bool inlineUnpack = false);
+	void CreateIndirectComputePipelines();
+	void CreateIndirectDescriptorSets();
+	void RecordRadixSortPrescanIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex);
+	void RecordRadixSortIntegratedIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex);
 
 	static constexpr uint32_t WorkgroupSize    = 256;
 	static constexpr uint32_t MaxWorkgroups    = 256;
@@ -222,6 +230,16 @@ class GpuSplatSorter
 	rhi::PipelineHandle scatterUnpackPipeline;               // Final-pass scatter: writes indices directly (integrated)
 	rhi::PipelineHandle scatterUnpackPrescanPipeline;        // Final-pass scatter: writes indices directly (prescan)
 
+	// Indirect dispatch pipeline variants
+	rhi::PipelineHandle histogramIndirectPipeline;
+	rhi::PipelineHandle histogramSubgroupIndirectPipeline;
+	rhi::PipelineHandle radixPrefixScanIndirectPipeline;
+	rhi::PipelineHandle radixPrefixScanSubgroupIndirectPipeline;
+	rhi::PipelineHandle scatterPairsIndirectPipeline;
+	rhi::PipelineHandle scatterPairsPrescanIndirectPipeline;
+	rhi::PipelineHandle scatterUnpackIndirectPipeline;
+	rhi::PipelineHandle scatterUnpackPrescanIndirectPipeline;
+
 	rhi::DescriptorSetLayoutHandle depthCalcSetLayout;
 	rhi::DescriptorSetLayoutHandle packPairsSetLayout;
 	rhi::DescriptorSetLayoutHandle unpackIndicesSetLayout;
@@ -229,6 +247,7 @@ class GpuSplatSorter
 	rhi::DescriptorSetLayoutHandle scanSetLayout;
 	rhi::DescriptorSetLayoutHandle scatterPairsSetLayout;                  // For prescan method
 	rhi::DescriptorSetLayoutHandle scatterPairsIntegratedSetLayout;        // For integrated scan method
+	rhi::DescriptorSetLayoutHandle sortParamsSetLayout;                    // Set 1: sortParams for indirect dispatch
 
 	rhi::DescriptorSetHandle                    depthCalcDescriptorSet;
 	rhi::DescriptorSetHandle                    packPairsDescriptorSet;
@@ -242,6 +261,10 @@ class GpuSplatSorter
 	container::vector<rhi::DescriptorSetHandle> scatterUnpackIntegratedDescriptorSets;          // [bufferIdx] final pass writes indices
 	uint32_t                                    activeOutputBufferIndex = 0;
 	uint32_t                                    outputBufferCount       = 2;
+
+	// Indirect dispatch descriptor sets
+	container::vector<rhi::DescriptorSetHandle> sortParamsDescriptorSets;        // [indirectBufferIndex]
+	container::vector<rhi::IRHIBuffer *>        indirectArgsBufferPtrs;
 
 	SortMethod    sortMethod    = SortMethod::IntegratedScan;
 	ShaderVariant shaderVariant = ShaderVariant::Portable;
