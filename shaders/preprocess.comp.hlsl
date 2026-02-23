@@ -1,6 +1,9 @@
 #include "shaderio.h"
 #include "compute_raster_types.h"
 
+// SH degree default to 3, overridden at pipeline creation
+[[vk::constant_id(0)]] const uint SH_DEGREE = 3;
+
 // SH Constants for degrees 1-3
 static const half SH_C1   = half(0.4886025119029199);
 static const half SH_C2_0 = half(1.0925484305920792);
@@ -214,41 +217,51 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupID : SV_Group
 
     // Evaluate Spherical Harmonics for view-dependent color
     float3 viewDir = normalize(ubo.cameraPos.xyz - worldPos);
-    half x = half(viewDir.x), y = half(viewDir.y), z = half(viewDir.z);
     half3 shColor = baseColor.rgb;
 
-    uint shBase = splatIndex * SH_UINT4_PER_SPLAT;
+    if (SH_DEGREE > 0)
+    {
+        half x = half(viewDir.x), y = half(viewDir.y), z = half(viewDir.z);
 
-    // SH Degree 1: load d0,d1 -> extract sh[0..2]
-    uint4 d0 = shRestInterleaved[shBase + 0];
-    uint4 d1 = shRestInterleaved[shBase + 1];
+        uint shBase = splatIndex * SH_UINT4_PER_SPLAT;
 
-    shColor += SH_C1 * (-y * half3(HALF_LO(d0.x), HALF_HI(d0.x), HALF_LO(d0.y))
-                        + z * half3(HALF_HI(d0.y), HALF_LO(d0.z), HALF_HI(d0.z))
-                        - x * half3(HALF_LO(d0.w), HALF_HI(d0.w), HALF_LO(d1.x)));
+        // SH Degree 1: load d0,d1 -> extract sh[0..2]
+        uint4 d0 = shRestInterleaved[shBase + 0];
+        uint4 d1 = shRestInterleaved[shBase + 1];
 
-    // SH Degree 2: reuse d1, load d2 -> extract sh[3..7]
-    uint4 d2 = shRestInterleaved[shBase + 2];
-    half xx = x * x, yy = y * y, zz = z * z, xy = x * y, yz = y * z, xz = x * z;
+        shColor += SH_C1 * (-y * half3(HALF_LO(d0.x), HALF_HI(d0.x), HALF_LO(d0.y))
+                            + z * half3(HALF_HI(d0.y), HALF_LO(d0.z), HALF_HI(d0.z))
+                            - x * half3(HALF_LO(d0.w), HALF_HI(d0.w), HALF_LO(d1.x)));
 
-    shColor += SH_C2_0 * xy * half3(HALF_HI(d1.x), HALF_LO(d1.y), HALF_HI(d1.y)) +
-               SH_C2_1 * yz * half3(HALF_LO(d1.z), HALF_HI(d1.z), HALF_LO(d1.w)) +
-               SH_C2_2 * (half(2.0) * zz - xx - yy) * half3(HALF_HI(d1.w), HALF_LO(d2.x), HALF_HI(d2.x)) +
-               SH_C2_3 * xz * half3(HALF_LO(d2.y), HALF_HI(d2.y), HALF_LO(d2.z)) +
-               SH_C2_4 * (xx - yy) * half3(HALF_HI(d2.z), HALF_LO(d2.w), HALF_HI(d2.w));
+        if (SH_DEGREE >= 2)
+        {
+            // SH Degree 2: reuse d1, load d2 -> extract sh[3..7]
+            uint4 d2 = shRestInterleaved[shBase + 2];
+            half xx = x * x, yy = y * y, zz = z * z, xy = x * y, yz = y * z, xz = x * z;
 
-    // SH Degree 3: load d3,d4,d5 -> extract sh[8..14]
-    uint4 d3 = shRestInterleaved[shBase + 3];
-    uint4 d4 = shRestInterleaved[shBase + 4];
-    uint4 d5 = shRestInterleaved[shBase + 5];
+            shColor += SH_C2_0 * xy * half3(HALF_HI(d1.x), HALF_LO(d1.y), HALF_HI(d1.y)) +
+                       SH_C2_1 * yz * half3(HALF_LO(d1.z), HALF_HI(d1.z), HALF_LO(d1.w)) +
+                       SH_C2_2 * (half(2.0) * zz - xx - yy) * half3(HALF_HI(d1.w), HALF_LO(d2.x), HALF_HI(d2.x)) +
+                       SH_C2_3 * xz * half3(HALF_LO(d2.y), HALF_HI(d2.y), HALF_LO(d2.z)) +
+                       SH_C2_4 * (xx - yy) * half3(HALF_HI(d2.z), HALF_LO(d2.w), HALF_HI(d2.w));
 
-    shColor += SH_C3_0 * y * (half(3.0) * xx - yy) * half3(HALF_LO(d3.x), HALF_HI(d3.x), HALF_LO(d3.y)) +
-               SH_C3_1 * xy * z * half3(HALF_HI(d3.y), HALF_LO(d3.z), HALF_HI(d3.z)) +
-               SH_C3_2 * y * (half(4.0) * zz - xx - yy) * half3(HALF_LO(d3.w), HALF_HI(d3.w), HALF_LO(d4.x)) +
-               SH_C3_3 * z * (half(2.0) * zz - half(3.0) * xx - half(3.0) * yy) * half3(HALF_HI(d4.x), HALF_LO(d4.y), HALF_HI(d4.y)) +
-               SH_C3_4 * x * (half(4.0) * zz - xx - yy) * half3(HALF_LO(d4.z), HALF_HI(d4.z), HALF_LO(d4.w)) +
-               SH_C3_5 * z * (xx - yy) * half3(HALF_HI(d4.w), HALF_LO(d5.x), HALF_HI(d5.x)) +
-               SH_C3_6 * x * (xx - half(3.0) * yy) * half3(HALF_LO(d5.y), HALF_HI(d5.y), HALF_LO(d5.z));
+            if (SH_DEGREE >= 3)
+            {
+                // SH Degree 3: load d3,d4,d5 -> extract sh[8..14]
+                uint4 d3 = shRestInterleaved[shBase + 3];
+                uint4 d4 = shRestInterleaved[shBase + 4];
+                uint4 d5 = shRestInterleaved[shBase + 5];
+
+                shColor += SH_C3_0 * y * (half(3.0) * xx - yy) * half3(HALF_LO(d3.x), HALF_HI(d3.x), HALF_LO(d3.y)) +
+                           SH_C3_1 * xy * z * half3(HALF_HI(d3.y), HALF_LO(d3.z), HALF_HI(d3.z)) +
+                           SH_C3_2 * y * (half(4.0) * zz - xx - yy) * half3(HALF_LO(d3.w), HALF_HI(d3.w), HALF_LO(d4.x)) +
+                           SH_C3_3 * z * (half(2.0) * zz - half(3.0) * xx - half(3.0) * yy) * half3(HALF_HI(d4.x), HALF_LO(d4.y), HALF_HI(d4.y)) +
+                           SH_C3_4 * x * (half(4.0) * zz - xx - yy) * half3(HALF_LO(d4.z), HALF_HI(d4.z), HALF_LO(d4.w)) +
+                           SH_C3_5 * z * (xx - yy) * half3(HALF_HI(d4.w), HALF_LO(d5.x), HALF_HI(d5.x)) +
+                           SH_C3_6 * x * (xx - half(3.0) * yy) * half3(HALF_LO(d5.y), HALF_HI(d5.y), HALF_LO(d5.z));
+            }
+        }
+    }
 
     shColor = max(shColor, half3(0.0, 0.0, 0.0));
 

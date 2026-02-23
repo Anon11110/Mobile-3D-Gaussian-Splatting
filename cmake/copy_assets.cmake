@@ -14,8 +14,10 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # These are the default assets that will be copied to all splat-rendering targets
 set(SPLAT_ASSET_MAPPINGS
     "flowers_1/flowers_1.ply:flowers_1.ply"
-    "train/point_cloud/iteration_7000/point_cloud.ply:train_7000.ply"
     "train/point_cloud/iteration_30000/point_cloud.ply:train_30000.ply"
+    "garden/garden-7k.splat:garden-7k.splat"
+    "bicycle/point_cloud/iteration_7000/point_cloud.ply:bicycle_7000.ply"
+    "kitchen/kitchen-7k.splat:kitchen-7k.splat"
 )
 
 # Function to add pre-build asset download step

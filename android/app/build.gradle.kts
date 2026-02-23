@@ -28,6 +28,11 @@ android {
     compileSdk = 34
     ndkVersion = findNewestNdk(27) ?: "27.0.0"
 
+    // Don't compress PLY/splat 3D models
+    androidResources {
+        noCompress += listOf("ply", "splat")
+    }
+
     defaultConfig {
         applicationId = "com.msplat.gaussiansplatting"
         minSdk = 24  // Vulkan 1.0 support requires API 24+
@@ -131,11 +136,30 @@ tasks.register("copyModels") {
             into(modelsDir)
         }
 
-        // Copy train_30000.ply (rename from point_cloud.ply)
+        // Copy train_30000.ply
         copy {
             from("../../assets/splats/train/point_cloud/iteration_30000/point_cloud.ply")
             into(modelsDir)
             rename { "train_30000.ply" }
+        }
+
+        // Copy garden-7k.splat
+        copy {
+            from("../../assets/splats/garden/garden-7k.splat")
+            into(modelsDir)
+        }
+
+        // Copy bicycle_7000.ply
+        copy {
+            from("../../assets/splats/bicycle/point_cloud/iteration_7000/point_cloud.ply")
+            into(modelsDir)
+            rename { "bicycle_7000.ply" }
+        }
+
+        // Copy kitchen-7k.splat
+        copy {
+            from("../../assets/splats/kitchen/kitchen-7k.splat")
+            into(modelsDir)
         }
     }
 }

@@ -77,9 +77,11 @@ SplatMesh::ID Scene::AddMesh(container::shared_ptr<SplatSoA> splatData,
 	meshes.emplace_back(meshId, std::move(splatData), initialTransform);
 
 	totalSplatCount += meshes.back().GetSplatData()->numSplats;
+	maxShDegree = math::Max(maxShDegree, meshes.back().GetSplatData()->shDegree);
 
-	LOG_INFO("Added mesh {} with {} splats. Total: {} splats",
-	         meshId, meshes.back().GetSplatData()->numSplats, totalSplatCount);
+	LOG_INFO("Added mesh {} with {} splats (SH degree {}). Total: {} splats",
+	         meshId, meshes.back().GetSplatData()->numSplats,
+	         meshes.back().GetSplatData()->shDegree, totalSplatCount);
 
 	// If GPU data was already uploaded, reallocate and re-upload everything
 	if (needsReallocation)
@@ -148,6 +150,16 @@ bool Scene::RemoveMesh(SplatMesh::ID id)
 		std::swap(*it, meshes.back());
 	}
 	meshes.pop_back();
+
+	// Recalculate max SH degree from remaining meshes
+	maxShDegree = 0;
+	for (const auto &mesh : meshes)
+	{
+		if (mesh.HasCpuData())
+		{
+			maxShDegree = math::Max(maxShDegree, mesh.GetSplatData()->shDegree);
+		}
+	}
 
 	LOG_INFO("Removed mesh {}. Total: {} splats", id, totalSplatCount);
 
@@ -328,7 +340,7 @@ rhi::FenceHandle Scene::UploadAttributeDataInternal()
 			const uint32_t meshShPerSplat   = splatData->shCoeffsPerSplat;
 			const uint32_t coeffsPerChannel = (meshShPerSplat > 0) ? meshShPerSplat / 3 : 0;
 
-			for (uint32_t si = 0; si < count; ++si)
+			for (uint32_t si = 0; si < count && meshShPerSplat > 0; ++si)
 			{
 				const uint32_t splatBase = si * meshShPerSplat;
 
@@ -699,6 +711,11 @@ uint32_t Scene::CalculateMaxShCoeffsPerSplat() const
 		}
 	}
 	return maxShCoeffsPerSplat;
+}
+
+uint32_t Scene::GetMaxShDegree() const
+{
+	return maxShDegree;
 }
 
 void Scene::UpdateSplatPositions()

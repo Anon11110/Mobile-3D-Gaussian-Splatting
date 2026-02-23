@@ -140,6 +140,7 @@ class ComputeSplatRasterizer
   private:
 	void CreateBuffers(uint32_t maxSplatCount);
 	void CreateComputePipelines();
+	void RecreatePreprocessPipeline(uint32_t shDegree);
 	void CreateDescriptorSets();
 	void RebindSceneDescriptors(const Scene &scene);
 	void RecordPreprocess(rhi::IRHICommandList *cmdList, const Scene &scene, const FrameUBO &frameUBO);
@@ -207,6 +208,12 @@ class ComputeSplatRasterizer
 
 	// Output storage image
 	rhi::TextureHandle m_outputImage;
+
+	// Shaders retained for pipeline recreation
+	rhi::ShaderHandle m_preprocessShader;
+
+	// SH degree for specialization constants
+	uint32_t m_currentShDegree = 3;
 
 	// Pipelines
 	rhi::PipelineHandle m_preprocessPipeline;

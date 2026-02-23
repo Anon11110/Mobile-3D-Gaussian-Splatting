@@ -6,6 +6,44 @@
 namespace rhi::vulkan
 {
 
+namespace
+{
+
+// Helper to translate RHI SpecializationInfo to Vulkan VkSpecializationInfo
+struct VulkanSpecHelper
+{
+	std::vector<VkSpecializationMapEntry> mapEntries;
+	VkSpecializationInfo                  info{};
+
+	void Build(const SpecializationInfo &spec)
+	{
+		if (spec.entries.empty())
+			return;
+
+		mapEntries.reserve(spec.entries.size());
+		for (const auto &e : spec.entries)
+		{
+			VkSpecializationMapEntry entry{};
+			entry.constantID = e.constantID;
+			entry.offset     = e.offset;
+			entry.size       = e.size;
+			mapEntries.push_back(entry);
+		}
+
+		info.mapEntryCount = static_cast<uint32_t>(mapEntries.size());
+		info.pMapEntries   = mapEntries.data();
+		info.dataSize      = spec.data.size();
+		info.pData         = spec.data.data();
+	}
+
+	VkSpecializationInfo *GetPtr()
+	{
+		return mapEntries.empty() ? nullptr : &info;
+	}
+};
+
+}        // namespace
+
 VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc) :
     device(device), pipeline(VK_NULL_HANDLE), pipelineLayout(VK_NULL_HANDLE), pipelineType(PipelineType::GRAPHICS)
 {
@@ -17,18 +55,25 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const GraphicsPipelineDesc &desc
 	// Shader stages
 	std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
 
+	// Build specialization constants for each shader stage
+	VulkanSpecHelper vertexSpec, fragmentSpec;
+	vertexSpec.Build(desc.vertexSpecialization);
+	fragmentSpec.Build(desc.fragmentSpecialization);
+
 	VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
-	vertShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	vertShaderStageInfo.stage  = VK_SHADER_STAGE_VERTEX_BIT;
-	vertShaderStageInfo.module = vertexShader->GetHandle();
-	vertShaderStageInfo.pName  = vertexShader->GetEntryPoint();
+	vertShaderStageInfo.sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	vertShaderStageInfo.stage               = VK_SHADER_STAGE_VERTEX_BIT;
+	vertShaderStageInfo.module              = vertexShader->GetHandle();
+	vertShaderStageInfo.pName               = vertexShader->GetEntryPoint();
+	vertShaderStageInfo.pSpecializationInfo = vertexSpec.GetPtr();
 	shaderStages.push_back(vertShaderStageInfo);
 
 	VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
-	fragShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	fragShaderStageInfo.stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
-	fragShaderStageInfo.module = fragmentShader->GetHandle();
-	fragShaderStageInfo.pName  = fragmentShader->GetEntryPoint();
+	fragShaderStageInfo.sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	fragShaderStageInfo.stage               = VK_SHADER_STAGE_FRAGMENT_BIT;
+	fragShaderStageInfo.module              = fragmentShader->GetHandle();
+	fragShaderStageInfo.pName               = fragmentShader->GetEntryPoint();
+	fragShaderStageInfo.pSpecializationInfo = fragmentSpec.GetPtr();
 	shaderStages.push_back(fragShaderStageInfo);
 
 	// Vertex input
@@ -245,12 +290,17 @@ VulkanPipeline::VulkanPipeline(VkDevice device, const ComputePipelineDesc &desc)
 {
 	auto *computeShader = static_cast<VulkanShader *>(desc.computeShader);
 
+	// Build specialization constants
+	VulkanSpecHelper computeSpec;
+	computeSpec.Build(desc.specialization);
+
 	// Shader stage
 	VkPipelineShaderStageCreateInfo computeShaderStageInfo{};
-	computeShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	computeShaderStageInfo.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
-	computeShaderStageInfo.module = computeShader->GetHandle();
-	computeShaderStageInfo.pName  = computeShader->GetEntryPoint();
+	computeShaderStageInfo.sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	computeShaderStageInfo.stage               = VK_SHADER_STAGE_COMPUTE_BIT;
+	computeShaderStageInfo.module              = computeShader->GetHandle();
+	computeShaderStageInfo.pName               = computeShader->GetEntryPoint();
+	computeShaderStageInfo.pSpecializationInfo = computeSpec.GetPtr();
 
 	// Collect descriptor set layouts
 	std::vector<VkDescriptorSetLayout> descriptorSetLayouts;

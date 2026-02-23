@@ -87,6 +87,8 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 		LoadSplatFile(m_splatPath.c_str());
 	}
 
+	m_currentShDegree = m_scene->GetMaxShDegree();
+
 	// Create app-owned sorted indices buffer
 	if (m_scene->GetTotalSplatCount() > 0)
 	{
@@ -269,6 +271,7 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	pipelineDesc.colorBlendAttachments[0].dstAlphaBlendFactor = rhi::BlendFactor::ONE;
 	pipelineDesc.targetSignature.colorFormats                 = {swapchain->GetBackBuffer(0)->GetFormat()};
 	pipelineDesc.descriptorSetLayouts                         = {m_descriptorSetLayout.Get()};
+	pipelineDesc.vertexSpecialization                         = rhi::MakeSpecConstantU32(0, m_currentShDegree);
 	m_renderPipeline                                          = device->CreateGraphicsPipeline(pipelineDesc);
 
 	// Splat precompute Resources
@@ -339,6 +342,7 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 			pcRange.offset                                 = 0;
 			pcRange.size                                   = sizeof(uint32_t) * 4;        // numElements + sortAscending + chunkCount + totalWorkgroups
 			splatPrecomputePipelineDesc.pushConstantRanges = {pcRange};
+			splatPrecomputePipelineDesc.specialization     = rhi::MakeSpecConstantU32(0, m_currentShDegree);
 
 			m_splatPrecomputePipeline = device->CreateComputePipeline(splatPrecomputePipelineDesc);
 		}
@@ -2104,6 +2108,15 @@ void HybridSplatRendererApp::LoadSplatFile(const char *filepath)
 				RebindSceneDescriptors(newSplatCount);
 				ReinitializeSortBackend(newSplatCount);
 			}
+
+			// Check if SH degree changed
+			uint32_t newShDegree = m_scene->GetMaxShDegree();
+			if (newShDegree != m_currentShDegree)
+			{
+				LOG_INFO("SH degree changed: {} -> {}, recreating pipelines", m_currentShDegree, newShDegree);
+				m_currentShDegree = newShDegree;
+				RecreateSHDependentPipelines();
+			}
 		}
 	}
 	else
@@ -2260,6 +2273,59 @@ void HybridSplatRendererApp::OnSceneBuffersChanged(const engine::Scene::GpuData 
 
 	RebindSceneDescriptors(newSplatCount);
 	ReinitializeSortBackend(newSplatCount);
+
+	uint32_t newShDegree = m_scene->GetMaxShDegree();
+	if (newShDegree != m_currentShDegree)
+	{
+		LOG_INFO("SH degree changed: {} -> {}, recreating pipelines", m_currentShDegree, newShDegree);
+		m_currentShDegree = newShDegree;
+		RecreateSHDependentPipelines();
+	}
+}
+
+void HybridSplatRendererApp::RecreateSHDependentPipelines()
+{
+	rhi::IRHIDevice    *device    = m_deviceManager->GetDevice();
+	rhi::IRHISwapchain *swapchain = m_deviceManager->GetSwapchain();
+
+	// Recreate graphics render pipeline
+	if (m_vertexShader && m_fragmentShader)
+	{
+		rhi::GraphicsPipelineDesc pipelineDesc{};
+		pipelineDesc.vertexShader                = m_vertexShader.Get();
+		pipelineDesc.fragmentShader              = m_fragmentShader.Get();
+		pipelineDesc.topology                    = rhi::PrimitiveTopology::TRIANGLE_STRIP;
+		pipelineDesc.rasterizationState.cullMode = rhi::CullMode::NONE;
+		pipelineDesc.colorBlendAttachments.resize(1);
+		pipelineDesc.colorBlendAttachments[0].blendEnable         = true;
+		pipelineDesc.colorBlendAttachments[0].srcColorBlendFactor = rhi::BlendFactor::SRC_ALPHA;
+		pipelineDesc.colorBlendAttachments[0].dstColorBlendFactor = rhi::BlendFactor::ONE_MINUS_SRC_ALPHA;
+		pipelineDesc.colorBlendAttachments[0].srcAlphaBlendFactor = rhi::BlendFactor::ONE;
+		pipelineDesc.colorBlendAttachments[0].dstAlphaBlendFactor = rhi::BlendFactor::ONE;
+		pipelineDesc.targetSignature.colorFormats                 = {swapchain->GetBackBuffer(0)->GetFormat()};
+		pipelineDesc.descriptorSetLayouts                         = {m_descriptorSetLayout.Get()};
+		pipelineDesc.vertexSpecialization                         = rhi::MakeSpecConstantU32(0, m_currentShDegree);
+		m_renderPipeline                                          = device->CreateGraphicsPipeline(pipelineDesc);
+	}
+
+	// Recreate splat precompute pipeline
+	if (m_splatPrecomputeShader && m_splatPrecomputeDescriptorLayout)
+	{
+		rhi::ComputePipelineDesc splatPrecomputePipelineDesc{};
+		splatPrecomputePipelineDesc.computeShader        = m_splatPrecomputeShader.Get();
+		splatPrecomputePipelineDesc.descriptorSetLayouts = {m_splatPrecomputeDescriptorLayout.Get()};
+
+		rhi::PushConstantRange pcRange{};
+		pcRange.stageFlags                             = rhi::ShaderStageFlags::COMPUTE;
+		pcRange.offset                                 = 0;
+		pcRange.size                                   = sizeof(uint32_t) * 4;
+		splatPrecomputePipelineDesc.pushConstantRanges = {pcRange};
+		splatPrecomputePipelineDesc.specialization     = rhi::MakeSpecConstantU32(0, m_currentShDegree);
+
+		m_splatPrecomputePipeline = device->CreateComputePipeline(splatPrecomputePipelineDesc);
+	}
+
+	LOG_INFO("Recreated SH-dependent pipelines with SH degree {}", m_currentShDegree);
 }
 
 void HybridSplatRendererApp::RebindSceneDescriptors(uint32_t newSplatCount)

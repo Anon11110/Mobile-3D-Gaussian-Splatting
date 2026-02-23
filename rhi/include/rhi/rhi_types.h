@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <span>
 #include <vector>
@@ -687,6 +688,29 @@ struct PushConstantRange
 	uint32_t         size;
 };
 
+// Specialization constants for compile-time shader configuration
+struct SpecializationConstant
+{
+	uint32_t constantID;
+	uint32_t offset;
+	uint32_t size;
+};
+
+struct SpecializationInfo
+{
+	std::vector<SpecializationConstant> entries;
+	std::vector<std::byte>              data;
+};
+
+inline SpecializationInfo MakeSpecConstantU32(uint32_t constantID, uint32_t value)
+{
+	SpecializationInfo spec;
+	spec.entries.push_back({constantID, 0, sizeof(uint32_t)});
+	spec.data.resize(sizeof(uint32_t));
+	std::memcpy(spec.data.data(), &value, sizeof(uint32_t));
+	return spec;
+}
+
 struct BufferBinding
 {
 	IRHIBuffer    *buffer;
@@ -828,6 +852,8 @@ struct GraphicsPipelineDesc
 	RenderTargetSignature                  targetSignature;
 	std::vector<IRHIDescriptorSetLayout *> descriptorSetLayouts;
 	std::vector<PushConstantRange>         pushConstantRanges;
+	SpecializationInfo                     vertexSpecialization;
+	SpecializationInfo                     fragmentSpecialization;
 };
 
 struct ComputePipelineDesc
@@ -835,6 +861,9 @@ struct ComputePipelineDesc
 	IRHIShader                            *computeShader;
 	std::vector<IRHIDescriptorSetLayout *> descriptorSetLayouts;
 	std::vector<PushConstantRange>         pushConstantRanges;
+
+	// Specialization constants (optional, empty = use shader defaults)
+	SpecializationInfo specialization;
 };
 
 // Window handle types for cross-platform surface creation

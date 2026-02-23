@@ -77,6 +77,7 @@ class Scene
 
 	const GpuData &GetGpuData() const;
 	uint32_t       GetTotalSplatCount() const;
+	uint32_t       GetMaxShDegree() const;
 	bool           IsAttributeDataUploaded() const;
 
 	// Reallocates GPU buffers after mesh add/remove
@@ -127,6 +128,7 @@ class Scene
 	container::vector<SplatMesh> meshes;
 	uint32_t                     nextMeshId{0};
 	uint32_t                     totalSplatCount{0};
+	uint32_t                     maxShDegree{0};
 	bool                         attributeDataUploaded{false};        // Track if attribute data has been uploaded
 	bool                         gpuBuffersAllocated{false};          // Track if GPU buffers are allocated
 

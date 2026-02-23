@@ -188,11 +188,11 @@ void ComputeSplatRasterizer::CreateComputePipelines()
 	ShaderFactory shaderFactory(m_device, m_vfs);
 
 	// --- Preprocess pipeline ---
-	rhi::ShaderHandle preprocessShader = shaderFactory.getOrCreateShader(
+	m_preprocessShader = shaderFactory.getOrCreateShader(
 	    "shaders/compiled/preprocess_cs",
 	    rhi::ShaderStage::COMPUTE);
 
-	if (!preprocessShader)
+	if (!m_preprocessShader)
 	{
 		LOG_ERROR("ComputeSplatRasterizer: Failed to load preprocess.comp.spv");
 		return;
@@ -231,7 +231,7 @@ void ComputeSplatRasterizer::CreateComputePipelines()
 	// Create preprocess pipeline
 	{
 		rhi::ComputePipelineDesc pipelineDesc = {};
-		pipelineDesc.computeShader            = preprocessShader.Get();
+		pipelineDesc.computeShader            = m_preprocessShader.Get();
 		pipelineDesc.descriptorSetLayouts     = {m_preprocessLayout.Get()};
 
 		rhi::PushConstantRange pushConstantRange = {};
@@ -239,6 +239,7 @@ void ComputeSplatRasterizer::CreateComputePipelines()
 		pushConstantRange.offset                 = 0;
 		pushConstantRange.size                   = sizeof(PreprocessPC);
 		pipelineDesc.pushConstantRanges          = {pushConstantRange};
+		pipelineDesc.specialization              = rhi::MakeSpecConstantU32(0, m_currentShDegree);
 
 		m_preprocessPipeline = m_device->CreateComputePipeline(pipelineDesc);
 	}
@@ -324,6 +325,29 @@ void ComputeSplatRasterizer::CreateComputePipelines()
 	}
 
 	LOG_INFO("ComputeSplatRasterizer: Compute pipelines created (preprocess + identify_ranges + rasterize)");
+}
+
+void ComputeSplatRasterizer::RecreatePreprocessPipeline(uint32_t shDegree)
+{
+	if (!m_preprocessShader || !m_preprocessLayout)
+		return;
+
+	m_currentShDegree = shDegree;
+
+	rhi::ComputePipelineDesc pipelineDesc = {};
+	pipelineDesc.computeShader            = m_preprocessShader.Get();
+	pipelineDesc.descriptorSetLayouts     = {m_preprocessLayout.Get()};
+
+	rhi::PushConstantRange pushConstantRange = {};
+	pushConstantRange.stageFlags             = rhi::ShaderStageFlags::COMPUTE;
+	pushConstantRange.offset                 = 0;
+	pushConstantRange.size                   = sizeof(PreprocessPC);
+	pipelineDesc.pushConstantRanges          = {pushConstantRange};
+	pipelineDesc.specialization              = rhi::MakeSpecConstantU32(0, m_currentShDegree);
+
+	m_preprocessPipeline = m_device->CreateComputePipeline(pipelineDesc);
+
+	LOG_INFO("ComputeSplatRasterizer: Recreated preprocess pipeline with SH degree {}", m_currentShDegree);
 }
 
 void ComputeSplatRasterizer::CreateDescriptorSets()
@@ -518,6 +542,13 @@ void ComputeSplatRasterizer::RecordPreprocess(rhi::IRHICommandList *cmdList, con
 	if (&scene != m_lastBoundScene)
 	{
 		RebindSceneDescriptors(scene);
+	}
+
+	// Recreate preprocess pipeline if SH degree changed
+	uint32_t sceneShDegree = scene.GetMaxShDegree();
+	if (sceneShDegree != m_currentShDegree)
+	{
+		RecreatePreprocessPipeline(sceneShDegree);
 	}
 
 	// Update frame UBO

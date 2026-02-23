@@ -1,5 +1,8 @@
 #include "shaderio.h"
 
+// SH degree default to 3, overridden at pipeline creation
+[[vk::constant_id(0)]] const uint SH_DEGREE = 3;
+
 // SH Constants for degrees 1-3
 static const half SH_C1   = half(0.4886025119029199);
 static const half SH_C2_0 = half(1.0925484305920792);
@@ -217,9 +220,12 @@ bool IsCulledByFrustum(float4 centerClip, float radius1, float radius2)
            any(centerNDC > float2(1.3, 1.3) + ndcMargin);
 }
 
-// SH evaluation function for degrees 0-3
+// SH evaluation function
 float3 ComputeSH(uint splatIndex, float3 dir, half3 baseColor)
 {
+    if (SH_DEGREE == 0)
+        return float3(max(baseColor, half3(0.0, 0.0, 0.0)));
+
     half x = half(dir.x), y = half(dir.y), z = half(dir.z);
     half3 result = baseColor;
 
@@ -233,28 +239,34 @@ float3 ComputeSH(uint splatIndex, float3 dir, half3 baseColor)
                        + z * half3(HALF_HI(d0.y), HALF_LO(d0.z), HALF_HI(d0.z))
                        - x * half3(HALF_LO(d0.w), HALF_HI(d0.w), HALF_LO(d1.x)));
 
-    // SH Degree 2: reuse d1, load d2 -> extract sh[3..7]
-    uint4 d2 = shRestInterleaved[base + 2];
-    half xx = x * x, yy = y * y, zz = z * z, xy = x * y, yz = y * z, xz = x * z;
+    if (SH_DEGREE >= 2)
+    {
+        // SH Degree 2: reuse d1, load d2 -> extract sh[3..7]
+        uint4 d2 = shRestInterleaved[base + 2];
+        half xx = x * x, yy = y * y, zz = z * z, xy = x * y, yz = y * z, xz = x * z;
 
-    result += SH_C2_0 * xy * half3(HALF_HI(d1.x), HALF_LO(d1.y), HALF_HI(d1.y)) +
-              SH_C2_1 * yz * half3(HALF_LO(d1.z), HALF_HI(d1.z), HALF_LO(d1.w)) +
-              SH_C2_2 * (half(2.0) * zz - xx - yy) * half3(HALF_HI(d1.w), HALF_LO(d2.x), HALF_HI(d2.x)) +
-              SH_C2_3 * xz * half3(HALF_LO(d2.y), HALF_HI(d2.y), HALF_LO(d2.z)) +
-              SH_C2_4 * (xx - yy) * half3(HALF_HI(d2.z), HALF_LO(d2.w), HALF_HI(d2.w));
+        result += SH_C2_0 * xy * half3(HALF_HI(d1.x), HALF_LO(d1.y), HALF_HI(d1.y)) +
+                  SH_C2_1 * yz * half3(HALF_LO(d1.z), HALF_HI(d1.z), HALF_LO(d1.w)) +
+                  SH_C2_2 * (half(2.0) * zz - xx - yy) * half3(HALF_HI(d1.w), HALF_LO(d2.x), HALF_HI(d2.x)) +
+                  SH_C2_3 * xz * half3(HALF_LO(d2.y), HALF_HI(d2.y), HALF_LO(d2.z)) +
+                  SH_C2_4 * (xx - yy) * half3(HALF_HI(d2.z), HALF_LO(d2.w), HALF_HI(d2.w));
 
-    // SH Degree 3: load d3,d4,d5 -> extract sh[8..14]
-    uint4 d3 = shRestInterleaved[base + 3];
-    uint4 d4 = shRestInterleaved[base + 4];
-    uint4 d5 = shRestInterleaved[base + 5];
+        if (SH_DEGREE >= 3)
+        {
+            // SH Degree 3: load d3,d4,d5 -> extract sh[8..14]
+            uint4 d3 = shRestInterleaved[base + 3];
+            uint4 d4 = shRestInterleaved[base + 4];
+            uint4 d5 = shRestInterleaved[base + 5];
 
-    result += SH_C3_0 * y * (half(3.0) * xx - yy) * half3(HALF_LO(d3.x), HALF_HI(d3.x), HALF_LO(d3.y)) +
-              SH_C3_1 * xy * z * half3(HALF_HI(d3.y), HALF_LO(d3.z), HALF_HI(d3.z)) +
-              SH_C3_2 * y * (half(4.0) * zz - xx - yy) * half3(HALF_LO(d3.w), HALF_HI(d3.w), HALF_LO(d4.x)) +
-              SH_C3_3 * z * (half(2.0) * zz - half(3.0) * xx - half(3.0) * yy) * half3(HALF_HI(d4.x), HALF_LO(d4.y), HALF_HI(d4.y)) +
-              SH_C3_4 * x * (half(4.0) * zz - xx - yy) * half3(HALF_LO(d4.z), HALF_HI(d4.z), HALF_LO(d4.w)) +
-              SH_C3_5 * z * (xx - yy) * half3(HALF_HI(d4.w), HALF_LO(d5.x), HALF_HI(d5.x)) +
-              SH_C3_6 * x * (xx - half(3.0) * yy) * half3(HALF_LO(d5.y), HALF_HI(d5.y), HALF_LO(d5.z));
+            result += SH_C3_0 * y * (half(3.0) * xx - yy) * half3(HALF_LO(d3.x), HALF_HI(d3.x), HALF_LO(d3.y)) +
+                      SH_C3_1 * xy * z * half3(HALF_HI(d3.y), HALF_LO(d3.z), HALF_HI(d3.z)) +
+                      SH_C3_2 * y * (half(4.0) * zz - xx - yy) * half3(HALF_LO(d3.w), HALF_HI(d3.w), HALF_LO(d4.x)) +
+                      SH_C3_3 * z * (half(2.0) * zz - half(3.0) * xx - half(3.0) * yy) * half3(HALF_HI(d4.x), HALF_LO(d4.y), HALF_HI(d4.y)) +
+                      SH_C3_4 * x * (half(4.0) * zz - xx - yy) * half3(HALF_LO(d4.z), HALF_HI(d4.z), HALF_LO(d4.w)) +
+                      SH_C3_5 * z * (xx - yy) * half3(HALF_HI(d4.w), HALF_LO(d5.x), HALF_HI(d5.x)) +
+                      SH_C3_6 * x * (xx - half(3.0) * yy) * half3(HALF_LO(d5.y), HALF_HI(d5.y), HALF_LO(d5.z));
+        }
+    }
 
     return float3(max(result, half3(0.0, 0.0, 0.0)));
 }

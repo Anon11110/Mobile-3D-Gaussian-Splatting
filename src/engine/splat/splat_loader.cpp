@@ -7,9 +7,14 @@
 
 #include <miniply.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <cmath>
 #include <condition_variable>
+#include <cstring>
 #include <exception>
+#include <fstream>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -70,7 +75,7 @@ class SplatLoader::Impl
 
 			try
 			{
-				auto data = InnerLoad(task.path);
+				auto data = DispatchLoad(task.path);
 				task.promise.set_value(data);
 			}
 			catch (...)
@@ -80,7 +85,147 @@ class SplatLoader::Impl
 		}
 	}
 
-	container::shared_ptr<SplatSoA> InnerLoad(const container::filesystem::path &path)
+	container::shared_ptr<SplatSoA> DispatchLoad(const container::filesystem::path &path)
+	{
+		auto ext = path.extension().string();
+		std::transform(ext.begin(), ext.end(), ext.begin(),
+		               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+		if (ext == ".splat")
+		{
+			return InnerLoadSplat(path);
+		}
+		else if (ext == ".ply")
+		{
+			return InnerLoadPly(path);
+		}
+		else
+		{
+			throw SplatLoaderException(
+			    container::string("Unsupported file format: ") +
+			    container::to_pmr_string(ext));
+		}
+	}
+
+	container::shared_ptr<SplatSoA> InnerLoadSplat(const container::filesystem::path &path)
+	{
+		auto pathStr = container::to_pmr_string(path.string());
+
+		std::ifstream file(path, std::ios::binary | std::ios::ate);
+		if (!file.is_open())
+		{
+			throw SplatLoaderException(container::string("Failed to open .splat file: ") + pathStr);
+		}
+
+		auto fileSize = file.tellg();
+		file.seekg(0, std::ios::beg);
+
+		constexpr size_t BYTES_PER_SPLAT = 32;
+		if (fileSize <= 0 || (static_cast<size_t>(fileSize) % BYTES_PER_SPLAT) != 0)
+		{
+			throw SplatLoaderException(
+			    container::string("Invalid .splat file size (must be multiple of 32): ") + pathStr);
+		}
+
+		uint32_t numSplats = static_cast<uint32_t>(static_cast<size_t>(fileSize) / BYTES_PER_SPLAT);
+
+		// .splat files have no spherical harmonics
+		constexpr uint32_t shCoeffsPerSplat = 0;
+
+#ifdef MSPLAT_USE_STD_CONTAINERS
+		auto data = std::make_shared<SplatSoA>();
+#else
+		auto data = std::make_shared<SplatSoA>(memoryResource);
+#endif
+		data->Resize(numSplats, shCoeffsPerSplat);
+
+		std::vector<uint8_t> buffer(static_cast<size_t>(fileSize));
+		if (!file.read(reinterpret_cast<char *>(buffer.data()), fileSize))
+		{
+			throw SplatLoaderException(
+			    container::string("Failed to read .splat file data: ") + pathStr);
+		}
+
+		// .splat record layout (32 bytes, little-endian, no header):
+		//   [0..11]  position:  3 x float32 (x, y, z)
+		//   [12..23] scale:     3 x float32 (actual scale, NOT log-space)
+		//   [24..27] color:     4 x uint8   (R, G, B, A)
+		//   [28..31] rotation:  4 x uint8   (W, X, Y, Z, 128-centered)
+
+		constexpr float SH_C0 = 0.28209479177387814f;
+
+		for (uint32_t i = 0; i < numSplats; ++i)
+		{
+			const uint8_t *record = buffer.data() + static_cast<size_t>(i) * BYTES_PER_SPLAT;
+
+			// Position (float32, bytes 0-11)
+			float px, py, pz;
+			std::memcpy(&px, record + 0, sizeof(float));
+			std::memcpy(&py, record + 4, sizeof(float));
+			std::memcpy(&pz, record + 8, sizeof(float));
+			data->posX[i] = px;
+			data->posY[i] = py;
+			data->posZ[i] = pz;
+
+			// Scale (float32, bytes 12-23), convert actual scale to log-space
+			float sx, sy, sz;
+			std::memcpy(&sx, record + 12, sizeof(float));
+			std::memcpy(&sy, record + 16, sizeof(float));
+			std::memcpy(&sz, record + 20, sizeof(float));
+			data->scaleX[i] = std::log(std::max(sx, 1e-7f));
+			data->scaleY[i] = std::log(std::max(sy, 1e-7f));
+			data->scaleZ[i] = std::log(std::max(sz, 1e-7f));
+
+			// Color (uint8 RGBA, bytes 24-27), convert to SH DC coefficients
+			uint8_t r = record[24];
+			uint8_t g = record[25];
+			uint8_t b = record[26];
+			uint8_t a = record[27];
+
+			data->fDc0[i] = (static_cast<float>(r) / 255.0f - 0.5f) / SH_C0;
+			data->fDc1[i] = (static_cast<float>(g) / 255.0f - 0.5f) / SH_C0;
+			data->fDc2[i] = (static_cast<float>(b) / 255.0f - 0.5f) / SH_C0;
+
+			// Opacity (uint8 alpha, byte 27), convert to logit
+			float alpha      = std::clamp(static_cast<float>(a) / 255.0f, 1e-6f, 1.0f - 1e-6f);
+			data->opacity[i] = std::log(alpha / (1.0f - alpha));
+
+			// Rotation (uint8 WXYZ, bytes 28-31), convert 128-centered to float quaternion
+			float qw = (static_cast<float>(record[28]) - 128.0f) / 128.0f;
+			float qx = (static_cast<float>(record[29]) - 128.0f) / 128.0f;
+			float qy = (static_cast<float>(record[30]) - 128.0f) / 128.0f;
+			float qz = (static_cast<float>(record[31]) - 128.0f) / 128.0f;
+
+			float len = std::sqrt(qw * qw + qx * qx + qy * qy + qz * qz);
+			if (len > 1e-8f)
+			{
+				float inv = 1.0f / len;
+				qw *= inv;
+				qx *= inv;
+				qy *= inv;
+				qz *= inv;
+			}
+			else
+			{
+				qw = 1.0f;
+				qx = 0.0f;
+				qy = 0.0f;
+				qz = 0.0f;
+			}
+
+			data->rotX[i] = qw;        // rot_0 (W)
+			data->rotY[i] = qx;        // rot_1 (X)
+			data->rotZ[i] = qy;        // rot_2 (Y)
+			data->rotW[i] = qz;        // rot_3 (Z)
+		}
+
+		LOG_INFO("Loaded {} splats with SH degree {} from {}",
+		         numSplats, data->shDegree, container::to_std_string(pathStr));
+
+		return data;
+	}
+
+	container::shared_ptr<SplatSoA> InnerLoadPly(const container::filesystem::path &path)
 	{
 		auto               pathStr = container::to_pmr_string(path.string());
 		miniply::PLYReader reader(pathStr.c_str());

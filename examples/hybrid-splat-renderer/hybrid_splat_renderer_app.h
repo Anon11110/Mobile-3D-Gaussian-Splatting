@@ -213,6 +213,7 @@ class HybridSplatRendererApp : public app::IApplication
 	void SwitchBackend(BackendType newType);
 	void ProcessPendingOperations();
 	void ResetAsyncPipelineState();
+	void RecreateSHDependentPipelines();
 
 	container::unique_ptr<engine::ShaderFactory> m_shaderFactory;
 
@@ -302,6 +303,8 @@ class HybridSplatRendererApp : public app::IApplication
 	uint32_t          m_frameCount   = 0;
 	uint32_t          m_currentFrame = 0;        // Index into per-frame-in-flight arrays
 
+	uint32_t m_currentShDegree = 3;        // Current SH degree for pipeline specialization
+
 	container::vector<math::vec3> m_testSplatPositions;
 
 	container::string m_splatPath;
@@ -316,11 +319,17 @@ class HybridSplatRendererApp : public app::IApplication
 	static constexpr PredefinedModel k_predefinedModels[] = {
 	    {"Flowers", "models/flowers_1.ply"},
 	    {"Train (30K)", "models/train_30000.ply"},
+	    {"Garden (7K)", "models/garden-7k.splat"},
+	    {"Bicycle (7K)", "models/bicycle_7000.ply"},
+	    {"Kitchen (7K)", "models/kitchen-7k.splat"},
 	};
 #else
 	static constexpr PredefinedModel k_predefinedModels[] = {
 	    {"Flowers", "assets/flowers_1.ply"},
 	    {"Train (30K)", "assets/train_30000.ply"},
+	    {"Garden (7K)", "assets/garden-7k.splat"},
+	    {"Bicycle (7K)", "assets/bicycle_7000.ply"},
+	    {"Kitchen (7K)", "assets/kitchen-7k.splat"},
 	};
 #endif
 	static constexpr int k_predefinedModelCount = sizeof(k_predefinedModels) / sizeof(k_predefinedModels[0]);

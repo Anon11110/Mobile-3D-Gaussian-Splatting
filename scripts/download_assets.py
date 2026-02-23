@@ -4,7 +4,7 @@ Download and extract large asset files that are too big for Git.
 
 Supports downloading from:
 - NVIDIA servers (flowers_1)
-- Hugging Face datasets (train, drjohnson, playroom, truck)
+- Hugging Face datasets (train, drjohnson, playroom, truck, garden, bicycle, kitchen)
 """
 
 import os
@@ -91,10 +91,37 @@ ASSETS = {
         "output_file": "point_cloud.ply",
         "description": "Truck scene iteration 30000"
     },
+    "garden": {
+        "source": "huggingface",
+        "dataset": "dylanebert/3dgs",
+        "path": "garden/garden-7k.splat",
+        "output_dir": "garden",
+        "output_file": "garden-7k.splat",
+        "description": "Garden scene"
+    },
+    "bicycle_7000": {
+        "source": "huggingface",
+        "dataset": "dylanebert/3dgs",
+        "path": "bicycle/point_cloud/iteration_7000/point_cloud.ply",
+        "output_dir": "bicycle/point_cloud/iteration_7000",
+        "output_file": "point_cloud.ply",
+        "description": "Bicycle scene iteration 7000"
+    },
+    "kitchen": {
+        "source": "huggingface",
+        "dataset": "dylanebert/3dgs",
+        "path": "kitchen/kitchen-7k.splat",
+        "output_dir": "kitchen",
+        "output_file": "kitchen-7k.splat",
+        "description": "Kitchen scene"
+    },
 }
 
 # Default assets to download when no specific assets are requested
-DEFAULT_ASSETS = ["flowers_1", "train_7000", "train_30000"]
+DEFAULT_ASSETS = [
+    "flowers_1", "train_30000", "garden",
+    "bicycle_7000", "kitchen",
+]
 
 
 def download_file(url, dest_path, description=""):
