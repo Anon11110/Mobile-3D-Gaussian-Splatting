@@ -531,9 +531,10 @@ bool HybridSplatRendererApp::OnInit(app::DeviceManager *deviceManager)
 	// Async compute resources
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
 	{
-		m_asyncComputeCmdLists[i]   = device->CreateCommandList(rhi::QueueType::COMPUTE);
-		m_asyncComputeFences[i]     = device->CreateFence(true);
-		m_asyncComputeSemaphores[i] = device->CreateSemaphore();
+		m_asyncComputeCmdLists[i]        = device->CreateCommandList(rhi::QueueType::COMPUTE);
+		m_asyncComputeFences[i]          = device->CreateFence(true);
+		m_asyncComputeSemaphores[i]      = device->CreateSemaphore();
+		m_graphicsToComputeSemaphores[i] = device->CreateSemaphore();
 	}
 	m_asyncCleanupCmdList = device->CreateCommandList(rhi::QueueType::GRAPHICS);
 
@@ -606,8 +607,9 @@ void HybridSplatRendererApp::ResetAsyncPipelineState()
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
 	{
-		m_asyncComputeFences[i]     = device->CreateFence(true);
-		m_asyncComputeSemaphores[i] = device->CreateSemaphore();
+		m_asyncComputeFences[i]          = device->CreateFence(true);
+		m_asyncComputeSemaphores[i]      = device->CreateSemaphore();
+		m_graphicsToComputeSemaphores[i] = device->CreateSemaphore();
 	}
 }
 
@@ -1039,12 +1041,87 @@ void HybridSplatRendererApp::OnRender()
 				m_asyncComputeFences[writeIndex]->Reset();
 
 				rhi::IRHICommandList *computeCmdList = m_asyncComputeCmdLists[writeIndex].Get();
-				computeCmdList->Begin();
 
 				// Set sort output to this slot's K-buffered output
 				rhi::BufferHandle outputBuffer = sorter->GetOutputBuffer(writeIndex);
 				sorter->SetOutputBuffer(outputBuffer);
 				sorter->SetSortAscending(needAscendingSort);
+
+				// Reverse QFOT transfers buffer ownership from graphics back to compute
+				bool needsReverseQFOT = m_asyncPipelineFrameIndex >= 2 * MAX_FRAMES_IN_FLIGHT;
+				if (needsReverseQFOT)
+				{
+					// Ensure the previous graphics frame that read this slot has completed
+					uint32_t otherFrameSlot = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+					m_inFlightFences[otherFrameSlot]->Wait(UINT64_MAX);
+
+					bool prepWarmedUp = useSplatPrecompute && m_splatPrecomputeAsyncWarmup >= MAX_FRAMES_IN_FLIGHT;
+
+					// QFOT release on graphics queue: give up ownership of buffers
+					rhi::IRHICommandList *gfxCmd = m_asyncCleanupCmdList.Get();
+					gfxCmd->Begin();
+
+					rhi::BufferTransition gfxRelease[3] = {};
+					uint32_t              numGfxRelease = 0;
+
+					gfxRelease[numGfxRelease].buffer = outputBuffer.Get();
+					gfxRelease[numGfxRelease].before = rhi::ResourceState::GeneralRead;
+					gfxRelease[numGfxRelease].after  = rhi::ResourceState::ShaderReadWrite;
+					numGfxRelease++;
+
+					if (prepWarmedUp)
+					{
+						gfxRelease[numGfxRelease].buffer = m_splatPrecomputeBuffers[writeIndex].Get();
+						gfxRelease[numGfxRelease].before = rhi::ResourceState::GeneralRead;
+						gfxRelease[numGfxRelease].after  = rhi::ResourceState::ShaderWrite;
+						numGfxRelease++;
+
+						gfxRelease[numGfxRelease].buffer = m_indirectArgsBuffers[writeIndex].Get();
+						gfxRelease[numGfxRelease].before = rhi::ResourceState::IndirectArgument;
+						gfxRelease[numGfxRelease].after  = rhi::ResourceState::ShaderWrite;
+						numGfxRelease++;
+					}
+
+					gfxCmd->ReleaseToQueue(rhi::QueueType::COMPUTE, {gfxRelease, numGfxRelease}, {});
+					gfxCmd->End();
+
+					rhi::SubmitInfo     gfxSubmitInfo{};
+					rhi::IRHISemaphore *gfxSignalSem                  = m_graphicsToComputeSemaphores[writeIndex].Get();
+					gfxSubmitInfo.signalSemaphores                    = std::span<rhi::IRHISemaphore *const>(&gfxSignalSem, 1);
+					std::array<rhi::IRHICommandList *, 1> gfxCmdLists = {gfxCmd};
+					device->SubmitCommandLists(gfxCmdLists, rhi::QueueType::GRAPHICS, gfxSubmitInfo);
+				}
+
+				computeCmdList->Begin();
+
+				// QFOT acquire take ownership of buffers from graphics on compute queue
+				if (needsReverseQFOT)
+				{
+					bool prepWarmedUp = useSplatPrecompute && m_splatPrecomputeAsyncWarmup >= MAX_FRAMES_IN_FLIGHT;
+
+					rhi::BufferTransition computeAcquire[3] = {};
+					uint32_t              numComputeAcquire = 0;
+
+					computeAcquire[numComputeAcquire].buffer = outputBuffer.Get();
+					computeAcquire[numComputeAcquire].before = rhi::ResourceState::GeneralRead;
+					computeAcquire[numComputeAcquire].after  = rhi::ResourceState::ShaderReadWrite;
+					numComputeAcquire++;
+
+					if (prepWarmedUp)
+					{
+						computeAcquire[numComputeAcquire].buffer = m_splatPrecomputeBuffers[writeIndex].Get();
+						computeAcquire[numComputeAcquire].before = rhi::ResourceState::GeneralRead;
+						computeAcquire[numComputeAcquire].after  = rhi::ResourceState::ShaderWrite;
+						numComputeAcquire++;
+
+						computeAcquire[numComputeAcquire].buffer = m_indirectArgsBuffers[writeIndex].Get();
+						computeAcquire[numComputeAcquire].before = rhi::ResourceState::IndirectArgument;
+						computeAcquire[numComputeAcquire].after  = rhi::ResourceState::ShaderWrite;
+						numComputeAcquire++;
+					}
+
+					computeCmdList->AcquireFromQueue(rhi::QueueType::GRAPHICS, {computeAcquire, numComputeAcquire}, {});
+				}
 
 				// Dispatch preprocess if enabled
 				if (useSplatPrecompute)
@@ -1179,6 +1256,18 @@ void HybridSplatRendererApp::OnRender()
 					submitInfo.signalFence        = m_asyncComputeFences[writeIndex].Get();
 					rhi::IRHISemaphore *signalSem = m_asyncComputeSemaphores[writeIndex].Get();
 					submitInfo.signalSemaphores   = std::span<rhi::IRHISemaphore *const>(&signalSem, 1);
+
+					// Wait for graphics -> compute QFOT release to complete before compute writes
+					rhi::SemaphoreWaitInfo computeWaits[1];
+					uint32_t               numComputeWaits = 0;
+					if (needsReverseQFOT)
+					{
+						computeWaits[numComputeWaits].semaphore = m_graphicsToComputeSemaphores[writeIndex].Get();
+						computeWaits[numComputeWaits].waitStage = rhi::StageMask::ComputeShader;
+						numComputeWaits++;
+					}
+					submitInfo.waitSemaphores = std::span<const rhi::SemaphoreWaitInfo>(computeWaits, numComputeWaits);
+
 					device->SubmitCommandLists(computeCmdLists, rhi::QueueType::COMPUTE, submitInfo);
 					sorter->ReadTimingResultsNonBlocking();
 				}
@@ -1707,7 +1796,7 @@ void HybridSplatRendererApp::OnRender()
 	if (computeSemaphore && (m_sortingEnabled || useSplatPrecompute) && m_asyncComputeEnabled)
 	{
 		waitInfoArray[numWaitSemaphores].semaphore = computeSemaphore;
-		waitInfoArray[numWaitSemaphores].waitStage = rhi::StageMask::VertexInput;
+		waitInfoArray[numWaitSemaphores].waitStage = useSplatPrecompute ? rhi::StageMask::DrawIndirect : rhi::StageMask::VertexInput;
 		numWaitSemaphores++;
 	}
 
@@ -1811,6 +1900,8 @@ void HybridSplatRendererApp::OnShutdown()
 	for (auto &f : m_asyncComputeFences)
 		f = nullptr;
 	for (auto &s : m_asyncComputeSemaphores)
+		s = nullptr;
+	for (auto &s : m_graphicsToComputeSemaphores)
 		s = nullptr;
 	m_asyncCleanupCmdList = nullptr;
 

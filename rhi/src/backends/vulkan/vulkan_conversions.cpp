@@ -947,7 +947,7 @@ void GetVulkanStagesAndAccess2(ResourceState state, PipelineScope scope,
 			break;
 
 		case ResourceState::GeneralRead:
-			access = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+			access = VK_ACCESS_2_SHADER_READ_BIT;
 			if (scope == PipelineScope::Compute)
 			{
 				stages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;

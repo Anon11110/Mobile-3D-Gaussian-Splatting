@@ -283,7 +283,8 @@ class HybridSplatRendererApp : public app::IApplication
 	std::array<rhi::CommandListHandle, MAX_FRAMES_IN_FLIGHT> m_asyncComputeCmdLists;
 	std::array<rhi::FenceHandle, MAX_FRAMES_IN_FLIGHT>       m_asyncComputeFences;
 	std::array<rhi::SemaphoreHandle, MAX_FRAMES_IN_FLIGHT>   m_asyncComputeSemaphores;
-	rhi::CommandListHandle                                   m_asyncCleanupCmdList;        // For QFOT cleanup on toggle async compute only
+	std::array<rhi::SemaphoreHandle, MAX_FRAMES_IN_FLIGHT>   m_graphicsToComputeSemaphores;        // QFOT sync
+	rhi::CommandListHandle                                   m_asyncCleanupCmdList;                // For QFOT cleanup on toggle async compute only
 	uint32_t                                                 m_asyncPipelineFrameIndex = 0;
 	bool                                                     m_asyncWarmupComplete     = false;
 
