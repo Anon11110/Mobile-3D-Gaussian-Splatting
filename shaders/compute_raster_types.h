@@ -42,6 +42,8 @@ struct RasterPC
     uint tilesY;        // Number of tiles in Y dimension
     uint screenWidth;   // Screen width in pixels
     uint screenHeight;  // Screen height in pixels
+    uint transmittanceStatsMode; // 0=off, 1=stats only, 2=stats+heatmap
+    uint _rasterPad0;   // Padding to 8-byte alignment
 };
 
 // Tile range structure: stores start and end indices for each tile

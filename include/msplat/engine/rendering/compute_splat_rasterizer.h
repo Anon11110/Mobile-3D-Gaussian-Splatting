@@ -69,6 +69,14 @@ class ComputeSplatRasterizer
 		return m_tileConfig;
 	}
 
+	struct TransmittanceStats
+	{
+		uint64_t totalEvaluations;         // Total possible splat-pixel evaluations
+		uint64_t actualEvaluations;        // Actual evaluations performed before early exit
+		uint32_t earlyExitPixels;          // Pixels that triggered transmittance early exit
+		float    savingsPercent;           // Percentage of evaluations saved
+	};
+
 	struct Statistics
 	{
 		uint32_t activeSplats;              // Number of splats after culling
@@ -78,6 +86,8 @@ class ComputeSplatRasterizer
 		double   sortMs;                    // Sort pass duration
 		double   rangesMs;                  // Identify ranges pass duration
 		double   rasterMs;                  // Rasterization pass duration
+
+		TransmittanceStats transmittance;        // Transmittance culling savings
 	};
 
 	Statistics GetStatistics() const
@@ -122,6 +132,18 @@ class ComputeSplatRasterizer
 	int  GetSortMethod() const;
 	void SetShaderVariant(int variant);
 	int  GetShaderVariant() const;
+
+	// Transmittance culling analysis mode
+	// mode: 0=off, 1=stats only, 2=stats+heatmap
+	void SetTransmittanceStatsMode(uint32_t mode)
+	{
+		m_transmittanceStatsMode = mode;
+	}
+	uint32_t GetTransmittanceStatsMode() const
+	{
+		return m_transmittanceStatsMode;
+	}
+	TransmittanceStats ReadTransmittanceStats();
 
 	// Profiling callbacks for GPU timestamp queries
 	using TimestampCallback = std::function<void(rhi::IRHICommandList *, bool begin)>;
@@ -176,6 +198,8 @@ class ComputeSplatRasterizer
 		uint32_t tilesY;
 		uint32_t screenWidth;
 		uint32_t screenHeight;
+		uint32_t transmittanceStatsMode;
+		uint32_t _rasterPad0;
 	};
 
 	static constexpr uint32_t WorkgroupSize        = 256;
@@ -241,6 +265,11 @@ class ComputeSplatRasterizer
 
 	// Dynamic tile buffer resize tracking
 	bool m_hasRenderedOneFrame = false;
+
+	// Transmittance stats analysis
+	uint32_t          m_transmittanceStatsMode = 0;        // 0=off, 1=stats only, 2=stats+heatmap
+	rhi::BufferHandle m_transmittanceStatsBuffer;          // 3 x uint32: totalEvals, actualEvals, earlyExitPixels
+	rhi::BufferHandle m_transmittanceStatsReadback;        // CPU-readable copy
 
 	// Debug CPU sort
 	bool              m_cpuSortDebugEnabled = false;

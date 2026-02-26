@@ -142,6 +142,22 @@ void ComputeSplatRasterizer::CreateBuffers(uint32_t maxSplatCount)
 	m_sortVerifyReadback                 = m_device->CreateBuffer(verifyDesc);
 #endif
 
+	// Transmittance stats buffer:
+	{
+		rhi::BufferDesc statsDesc  = {};
+		statsDesc.size             = sizeof(uint32_t) * 3;        // totalEvals, actualEvals, earlyExitPixels
+		statsDesc.usage            = rhi::BufferUsage::STORAGE | rhi::BufferUsage::TRANSFER_DST | rhi::BufferUsage::TRANSFER_SRC;
+		statsDesc.resourceUsage    = rhi::ResourceUsage::Static;
+		m_transmittanceStatsBuffer = m_device->CreateBuffer(statsDesc);
+
+		rhi::BufferDesc statsReadbackDesc           = {};
+		statsReadbackDesc.size                      = sizeof(uint32_t) * 3;
+		statsReadbackDesc.usage                     = rhi::BufferUsage::TRANSFER_DST;
+		statsReadbackDesc.resourceUsage             = rhi::ResourceUsage::Readback;
+		statsReadbackDesc.hints.persistently_mapped = true;
+		m_transmittanceStatsReadback                = m_device->CreateBuffer(statsReadbackDesc);
+	}
+
 	LOG_INFO("ComputeSplatRasterizer: Buffers created - geometry: {:.1f} MB, tileKeys(sorter): {:.1f} MB, sortedValues: {:.1f} MB",
 	         (maxSplatCount * 48) / (1024.0 * 1024.0),
 	         (m_maxTileInstances * 4) / (1024.0 * 1024.0),
@@ -305,6 +321,8 @@ void ComputeSplatRasterizer::CreateComputePipelines()
 		layoutDesc.bindings.push_back({2, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
 		// Binding 3: outputImage
 		layoutDesc.bindings.push_back({3, rhi::DescriptorType::STORAGE_TEXTURE, 1, rhi::ShaderStageFlags::COMPUTE});
+		// Binding 4: transmittanceStats
+		layoutDesc.bindings.push_back({4, rhi::DescriptorType::STORAGE_BUFFER, 1, rhi::ShaderStageFlags::COMPUTE});
 
 		m_rasterLayout = m_device->CreateDescriptorSetLayout(layoutDesc);
 	}
@@ -441,6 +459,14 @@ void ComputeSplatRasterizer::CreateDescriptorSets()
 		binding.buffer             = m_tileRanges.Get();
 		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
 		m_rasterDescriptorSet->BindBuffer(2, binding);
+	}
+
+	// Binding 4: transmittanceStats
+	{
+		rhi::BufferBinding binding = {};
+		binding.buffer             = m_transmittanceStatsBuffer.Get();
+		binding.type               = rhi::DescriptorType::STORAGE_BUFFER;
+		m_rasterDescriptorSet->BindBuffer(4, binding);
 	}
 
 	// Binding 3: outputImage
@@ -704,6 +730,21 @@ void ComputeSplatRasterizer::RecordRasterize(rhi::IRHICommandList *cmdList)
 		return;
 	}
 
+	bool statsEnabled = (m_transmittanceStatsMode > 0);
+
+	// Clear transmittance stats buffer when enabled
+	if (statsEnabled && m_transmittanceStatsBuffer)
+	{
+		cmdList->FillBuffer(m_transmittanceStatsBuffer.Get(), 0, sizeof(uint32_t) * 3, 0);
+
+		rhi::BufferTransition statsTransition = {};
+		statsTransition.buffer                = m_transmittanceStatsBuffer.Get();
+		statsTransition.before                = rhi::ResourceState::CopyDestination;
+		statsTransition.after                 = rhi::ResourceState::ShaderReadWrite;
+		cmdList->Barrier(rhi::PipelineScope::Copy, rhi::PipelineScope::Compute,
+		                 {&statsTransition, 1}, {}, {});
+	}
+
 	// Pre-rasterize barriers: transition sorted values and output image
 	{
 		rhi::BufferTransition bufTransition = {};
@@ -723,16 +764,33 @@ void ComputeSplatRasterizer::RecordRasterize(rhi::IRHICommandList *cmdList)
 	cmdList->SetPipeline(m_rasterPipeline.Get());
 	cmdList->BindDescriptorSet(0, m_rasterDescriptorSet.Get());
 
-	RasterPC pc     = {};
-	pc.tilesX       = m_tileConfig.tilesX;
-	pc.tilesY       = m_tileConfig.tilesY;
-	pc.screenWidth  = m_tileConfig.screenWidth;
-	pc.screenHeight = m_tileConfig.screenHeight;
+	RasterPC pc               = {};
+	pc.tilesX                 = m_tileConfig.tilesX;
+	pc.tilesY                 = m_tileConfig.tilesY;
+	pc.screenWidth            = m_tileConfig.screenWidth;
+	pc.screenHeight           = m_tileConfig.screenHeight;
+	pc.transmittanceStatsMode = m_transmittanceStatsMode;
+	pc._rasterPad0            = 0;
 
 	cmdList->PushConstants(rhi::ShaderStageFlags::COMPUTE, 0,
 	                       {reinterpret_cast<const std::byte *>(&pc), sizeof(pc)});
 
 	cmdList->Dispatch(m_tileConfig.tilesX, m_tileConfig.tilesY, 1);
+
+	// Post-rasterize: copy stats to readback if enabled
+	if (statsEnabled && m_transmittanceStatsBuffer)
+	{
+		rhi::BufferTransition statsTransition = {};
+		statsTransition.buffer                = m_transmittanceStatsBuffer.Get();
+		statsTransition.before                = rhi::ResourceState::ShaderReadWrite;
+		statsTransition.after                 = rhi::ResourceState::CopySource;
+		cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Copy,
+		                 {&statsTransition, 1}, {}, {});
+
+		rhi::BufferCopy copy = {};
+		copy.size            = sizeof(uint32_t) * 3;
+		cmdList->CopyBuffer(m_transmittanceStatsBuffer.Get(), m_transmittanceStatsReadback.Get(), {&copy, 1});
+	}
 
 	// Transition output image for transfer/read
 	rhi::TextureTransition outputTransition = {};
@@ -1177,6 +1235,36 @@ int ComputeSplatRasterizer::GetShaderVariant() const
 		return static_cast<int>(m_tileSorter->GetShaderVariant());
 	}
 	return 0;
+}
+
+ComputeSplatRasterizer::TransmittanceStats ComputeSplatRasterizer::ReadTransmittanceStats()
+{
+	TransmittanceStats result = {};
+
+	if (!m_transmittanceStatsReadback || m_transmittanceStatsMode == 0)
+	{
+		return result;
+	}
+
+	void *ptr = m_transmittanceStatsReadback->Map();
+	if (!ptr)
+	{
+		return result;
+	}
+
+	const auto *data         = static_cast<const uint32_t *>(ptr);
+	result.totalEvaluations  = data[0];
+	result.actualEvaluations = data[1];
+	result.earlyExitPixels   = data[2];
+
+	if (result.totalEvaluations > 0)
+	{
+		uint64_t saved        = result.totalEvaluations - result.actualEvaluations;
+		result.savingsPercent = static_cast<float>(saved) * 100.0f / static_cast<float>(result.totalEvaluations);
+	}
+
+	m_stats.transmittance = result;
+	return result;
 }
 
 }        // namespace msplat::engine

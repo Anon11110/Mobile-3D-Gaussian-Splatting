@@ -3925,6 +3925,68 @@ void HybridSplatRendererApp::RenderImGui()
 				ImGui::EndTooltip();
 			}
 
+			ImGui::Spacing();
+
+			// Transmittance Culling Analysis
+			ImGui::Separator();
+			ImGui::Text("Transmittance Analysis");
+
+			bool statsEnabled   = (m_transmittanceStatsMode >= 1);
+			bool heatmapEnabled = (m_transmittanceStatsMode == 2);
+
+			if (ImGui::Checkbox("Enable Stats", &statsEnabled))
+			{
+				m_transmittanceStatsMode = statsEnabled ? (heatmapEnabled ? 2 : 1) : 0;
+				m_computeRasterizer->SetTransmittanceStatsMode(m_transmittanceStatsMode);
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("(?)");
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::BeginTooltip();
+				ImGui::Text("Measure calculation savings from transmittance early exit.");
+				ImGui::Text("Counts total vs actual splat evaluations per pixel.");
+				ImGui::EndTooltip();
+			}
+
+			if (statsEnabled)
+			{
+				if (ImGui::Checkbox("Savings Heatmap", &heatmapEnabled))
+				{
+					m_transmittanceStatsMode = heatmapEnabled ? 2 : 1;
+					m_computeRasterizer->SetTransmittanceStatsMode(m_transmittanceStatsMode);
+				}
+				ImGui::SameLine();
+				ImGui::TextDisabled("(?)");
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::BeginTooltip();
+					ImGui::Text("Visualize per-pixel savings as a heatmap:");
+					ImGui::Text("  Green = no savings (all splats needed)");
+					ImGui::Text("  Yellow = moderate savings");
+					ImGui::Text("  Red = high savings (early exit)");
+					ImGui::EndTooltip();
+				}
+
+				auto     tStats       = m_computeRasterizer->ReadTransmittanceStats();
+				uint64_t savedEvals   = tStats.totalEvaluations - tStats.actualEvaluations;
+				uint32_t totalPixels  = m_computeRasterizer->GetTileConfig().screenWidth * m_computeRasterizer->GetTileConfig().screenHeight;
+				float    earlyExitPct = totalPixels > 0 ? static_cast<float>(tStats.earlyExitPixels) * 100.0f / static_cast<float>(totalPixels) : 0.0f;
+
+				ImGui::Text("Total Evals:  %llu", static_cast<unsigned long long>(tStats.totalEvaluations));
+				ImGui::Text("Actual Evals: %llu", static_cast<unsigned long long>(tStats.actualEvaluations));
+				ImGui::Text("Saved Evals:  %llu", static_cast<unsigned long long>(savedEvals));
+				ImGui::Text("Savings:      %.1f%%", tStats.savingsPercent);
+				ImGui::Text("Early Exit Pixels: %u / %u (%.1f%%)",
+				            tStats.earlyExitPixels, totalPixels, earlyExitPct);
+
+				if (tStats.totalEvaluations > 0)
+				{
+					float fraction = static_cast<float>(tStats.actualEvaluations) / static_cast<float>(tStats.totalEvaluations);
+					ImGui::ProgressBar(fraction, ImVec2(-1, 0), "Actual / Total Evals");
+				}
+			}
+
 #ifdef ENABLE_SORT_VERIFICATION
 			// Verify sort order button
 			if (ImGui::Button("Verify Sort Order"))

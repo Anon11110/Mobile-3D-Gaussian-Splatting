@@ -5,6 +5,7 @@
 [[vk::binding(1, 0)]] StructuredBuffer<uint> sortedTileValues;
 [[vk::binding(2, 0)]] StructuredBuffer<int2> tileRanges;
 [[vk::binding(3, 0)]] RWTexture2D<float4> outputImage;
+[[vk::binding(4, 0)]] RWStructuredBuffer<uint> transmittanceStats;  // [0]=totalEvals, [1]=actualEvals, [2]=earlyExitPixels
 
 [[vk::push_constant]] RasterPC pc;
 
@@ -22,6 +23,24 @@ struct GaussianShared
 
 groupshared GaussianShared sharedSplats[BATCH_SIZE];
 
+groupshared uint sharedTotalEvals;
+groupshared uint sharedActualEvals;
+groupshared uint sharedEarlyExitPixels;
+
+// Green -> Yellow -> Red heatmap based on savings ratio [0, 1]
+float3 SavingsHeatmap(float ratio)
+{
+    // green = no savings, yellow = medium, red = all skipped
+    float3 green  = float3(0.0, 0.8, 0.2);
+    float3 yellow = float3(1.0, 0.9, 0.1);
+    float3 red    = float3(0.9, 0.1, 0.0);
+
+    if (ratio < 0.5)
+        return lerp(green, yellow, ratio * 2.0);
+    else
+        return lerp(yellow, red, (ratio - 0.5) * 2.0);
+}
+
 [numthreads(TILE_SIZE, TILE_SIZE, 1)]
 void main(uint3 localID : SV_GroupThreadID, uint3 groupID : SV_GroupID, uint3 globalID : SV_DispatchThreadID)
 {
@@ -32,6 +51,7 @@ void main(uint3 localID : SV_GroupThreadID, uint3 groupID : SV_GroupID, uint3 gl
     uint flatTileID = tileCoord.y * pc.tilesX + tileCoord.x;
 
     bool pixelInBounds = (pixelCoord.x < pc.screenWidth && pixelCoord.y < pc.screenHeight);
+    bool statsEnabled = (pc.transmittanceStatsMode > 0);
 
     int2 range = tileRanges[flatTileID];
     int rangeStart = range.x;
@@ -40,8 +60,15 @@ void main(uint3 localID : SV_GroupThreadID, uint3 groupID : SV_GroupID, uint3 gl
     float3 accum = float3(0, 0, 0);
     float T = 1.0;
 
+    // Per-pixel stats tracking
+    uint localTotal     = 0;
+    uint localProcessed = 0;
+    bool didEarlyExit   = false;
+
     if (rangeStart >= 0 && rangeEnd > rangeStart)
     {
+        localTotal = uint(rangeEnd - rangeStart);
+
         for (int batchStart = rangeStart; batchStart < rangeEnd; batchStart += BATCH_SIZE)
         {
             int loadIdx = batchStart + lid;
@@ -71,7 +98,13 @@ void main(uint3 localID : SV_GroupThreadID, uint3 groupID : SV_GroupID, uint3 gl
                 for (int i = 0; i < batchCount; i++)
                 {
                     // Early exit when pixel is fully opaque
-                    if (T < 1.0 / 255.0) break;
+                    if (T < 1.0 / 255.0)
+                    {
+                        didEarlyExit = true;
+                        break;
+                    }
+
+                    localProcessed++;
 
                     GaussianShared gs = sharedSplats[i];
 
@@ -108,8 +141,48 @@ void main(uint3 localID : SV_GroupThreadID, uint3 groupID : SV_GroupID, uint3 gl
         }
     }
 
+    // Transmittance stats
+    if (statsEnabled)
+    {
+        if (lid == 0)
+        {
+            sharedTotalEvals = 0;
+            sharedActualEvals = 0;
+            sharedEarlyExitPixels = 0;
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        // Each thread contributes its local stats
+        if (pixelInBounds)
+        {
+            InterlockedAdd(sharedTotalEvals, localTotal);
+            InterlockedAdd(sharedActualEvals, localProcessed);
+            if (didEarlyExit)
+                InterlockedAdd(sharedEarlyExitPixels, 1u);
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        // Thread 0 writes tile totals to global buffer
+        if (lid == 0)
+        {
+            InterlockedAdd(transmittanceStats[0], sharedTotalEvals);
+            InterlockedAdd(transmittanceStats[1], sharedActualEvals);
+            InterlockedAdd(transmittanceStats[2], sharedEarlyExitPixels);
+        }
+    }
+
     if (pixelInBounds)
     {
-        outputImage[pixelCoord] = float4(accum, 1.0 - T);
+        // Heatmap mode: visualize per-pixel savings ratio
+        if (pc.transmittanceStatsMode == 2 && localTotal > 0)
+        {
+            float savingsRatio = 1.0 - float(localProcessed) / float(localTotal);
+            float3 heatColor = SavingsHeatmap(savingsRatio);
+            outputImage[pixelCoord] = float4(heatColor, 1.0);
+        }
+        else
+        {
+            outputImage[pixelCoord] = float4(accum, 1.0 - T);
+        }
     }
 }
