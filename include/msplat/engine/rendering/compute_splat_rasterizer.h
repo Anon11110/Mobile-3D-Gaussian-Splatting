@@ -167,12 +167,18 @@ class ComputeSplatRasterizer
 	void RebindSceneDescriptors(const Scene &scene);
 	void RecordPreprocess(rhi::IRHICommandList *cmdList, const Scene &scene, const FrameUBO &frameUBO);
 	void RecordSort(rhi::IRHICommandList *cmdList);
+	void RecordRekey(rhi::IRHICommandList *cmdList);
 	void RecordIdentifyRanges(rhi::IRHICommandList *cmdList);
 	void RecordRasterize(rhi::IRHICommandList *cmdList);
 	void CreateOutputImage();
 	void RebindRasterDescriptors();
 	void PerformCPUSort();
 	void ResizeTileBuffers(uint32_t newMaxTileInstances);
+
+	struct WriteArgsPC
+	{
+		uint32_t maxTileInstances;
+	};
 
 	struct PreprocessPC
 	{
@@ -216,12 +222,15 @@ class ComputeSplatRasterizer
 	uint32_t m_maxTileInstances = 0;
 
 	// Buffers
-	rhi::BufferHandle m_geometryBuffer;          // Gaussian2D[] - preprocessed 2D data
-	rhi::BufferHandle m_tileRanges;              // int2[] - per-tile start/end
-	rhi::BufferHandle m_globalCounter;           // uint32_t - atomic counter
-	rhi::BufferHandle m_counterReadback;         // CPU-readable copy of counter
-	rhi::BufferHandle m_frameUBO;                // FrameUBO for preprocess shader
-	rhi::BufferHandle m_sortedTileValues;        // Output buffer for sorted tile values
+	rhi::BufferHandle m_geometryBuffer;            // Gaussian2D[] - preprocessed 2D data
+	rhi::BufferHandle m_tileRanges;                // int2[] - per-tile start/end
+	rhi::BufferHandle m_globalCounter;             // uint32_t - atomic counter
+	rhi::BufferHandle m_counterReadback;           // CPU-readable copy of counter
+	rhi::BufferHandle m_frameUBO;                  // FrameUBO for preprocess shader
+	rhi::BufferHandle m_sortedTileValues;          // Output buffer for sorted tile values
+	rhi::BufferHandle m_indirectArgsBuffer;        // Sort indirect args (SortParams + DispatchIndirect commands)
+	rhi::BufferHandle m_tileTileIDs;               // tileID per tile instance
+	rhi::BufferHandle m_tileSplatIDs;              // splatIndex per tile instance
 
 	// Tile key sorter
 	// Preprocess writes directly to sorter's splatDepths (keys) and splatIndicesOriginal (values)
@@ -240,19 +249,25 @@ class ComputeSplatRasterizer
 	uint32_t m_currentShDegree = 3;
 
 	// Pipelines
+	rhi::PipelineHandle m_writeArgsPipeline;
 	rhi::PipelineHandle m_preprocessPipeline;
 	rhi::PipelineHandle m_rangesPipeline;
 	rhi::PipelineHandle m_rasterPipeline;
+	rhi::PipelineHandle m_rekeyPipeline;
 
 	// Descriptor set layouts
+	rhi::DescriptorSetLayoutHandle m_writeArgsLayout;
 	rhi::DescriptorSetLayoutHandle m_preprocessLayout;
 	rhi::DescriptorSetLayoutHandle m_rangesLayout;
 	rhi::DescriptorSetLayoutHandle m_rasterLayout;
+	rhi::DescriptorSetLayoutHandle m_rekeyLayout;
 
 	// Descriptor sets
+	rhi::DescriptorSetHandle m_writeArgsDescriptorSet;
 	rhi::DescriptorSetHandle m_preprocessDescriptorSet;
 	rhi::DescriptorSetHandle m_rangesDescriptorSet;
 	rhi::DescriptorSetHandle m_rasterDescriptorSet;
+	rhi::DescriptorSetHandle m_rekeyDescriptorSet;
 
 	// Track bound scene for descriptor rebinding
 	const Scene *m_lastBoundScene = nullptr;

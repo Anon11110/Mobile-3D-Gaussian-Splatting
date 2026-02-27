@@ -8,6 +8,9 @@
 [[vk::binding(0, 0)]] StructuredBuffer<uint2> sortedTilePairs;
 [[vk::binding(1, 0)]] RWStructuredBuffer<int2> tileRanges;
 
+// Indirect args buffer, the actual tile instance count
+[[vk::binding(2, 0)]] ByteAddressBuffer sortParams;
+
 [[vk::push_constant]] RangesPC pc;
 
 [numthreads(256, 1, 1)]
@@ -15,13 +18,16 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     uint idx = dispatchThreadID.x;
 
-    if (idx >= pc.numTileInstances)
+    // Read actual tile instance count from indirect sort params
+    uint numTileInstances = sortParams.Load(0);
+
+    if (idx >= numTileInstances)
     {
         return;
     }
 
-    uint currKey    = sortedTilePairs[idx].x;
-    uint currTileID = UnpackTileID(currKey);
+    // After two pass sort, pair.x is the tileID directly
+    uint currTileID = sortedTilePairs[idx].x;
 
     // Skip invalid entries (0xFFFFFFFF padding from unused buffer space)
     if (currTileID >= pc.numTiles)
@@ -37,8 +43,7 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
     }
     else
     {
-        uint prevKey    = sortedTilePairs[idx - 1].x;
-        uint prevTileID = UnpackTileID(prevKey);
+        uint prevTileID = sortedTilePairs[idx - 1].x;
 
         if (currTileID != prevTileID)
         {
@@ -54,7 +59,7 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
     }
 
     // Handle the last entry
-    if (idx == pc.numTileInstances - 1)
+    if (idx == numTileInstances - 1)
     {
         tileRanges[currTileID].y = int(idx + 1);
     }

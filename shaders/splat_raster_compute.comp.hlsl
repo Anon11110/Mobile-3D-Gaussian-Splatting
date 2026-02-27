@@ -6,6 +6,7 @@
 [[vk::binding(2, 0)]] StructuredBuffer<int2> tileRanges;
 [[vk::binding(3, 0)]] RWTexture2D<float4> outputImage;
 [[vk::binding(4, 0)]] RWStructuredBuffer<uint> transmittanceStats;  // [0]=totalEvals, [1]=actualEvals, [2]=earlyExitPixels
+[[vk::binding(5, 0)]] StructuredBuffer<uint> tileSplatIDs;         // Maps tile instance index to original splat index
 
 [[vk::push_constant]] RasterPC pc;
 
@@ -74,7 +75,8 @@ void main(uint3 localID : SV_GroupThreadID, uint3 groupID : SV_GroupID, uint3 gl
             int loadIdx = batchStart + lid;
             if (loadIdx < rangeEnd && lid < BATCH_SIZE)
             {
-                uint splatIdx = sortedTileValues[loadIdx];
+                uint tileInstIdx = sortedTileValues[loadIdx];
+                uint splatIdx = tileSplatIDs[tileInstIdx];
                 Gaussian2D g = geometryBuffer[splatIdx];
 
                 GaussianShared gs;

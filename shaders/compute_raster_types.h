@@ -87,6 +87,17 @@ uint EncodeDepth16(float linearDepth, float nearPlane, float farPlane)
     return uint(saturate(logDepth) * 65535.0);
 }
 
+// Convert float depth to sortable uint for ascending radix sort (near-to-far).
+// Preserves float ordering: smaller float -> smaller uint.
+// IEEE 754 floats: positive floats already sort correctly when reinterpreted as uint,
+// but negative floats sort inversely. This transform handles both cases.
+uint FloatToSortableUint(float val)
+{
+    uint u = asuint(val);
+    uint mask = (u & 0x80000000u) != 0u ? 0xFFFFFFFFu : 0x80000000u;
+    return u ^ mask;
+}
+
 // Float16 packing helpers for shared memory optimization in rasterizer
 uint PackFloat16x2(float2 v)
 {

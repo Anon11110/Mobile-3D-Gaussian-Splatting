@@ -2602,7 +2602,106 @@ void GpuSplatSorter::SortIndirect(rhi::IRHICommandList *cmdList, uint32_t indire
 	timingFrameIndex++;
 }
 
-void GpuSplatSorter::RecordRadixSortIntegratedIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex)
+void GpuSplatSorter::PackPairsIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex)
+{
+	if (!isInitialized || indirectArgsBufferPtrs.empty())
+	{
+		LOG_WARNING("GpuSplatSorter::PackPairsIndirect called before initialization");
+		return;
+	}
+
+	// Barrier: ensure external writes to splatDepths/splatIndicesOriginal are visible
+	{
+		rhi::BufferTransition preBarriers[2] = {};
+		preBarriers[0].buffer                = splatDepths.Get();
+		preBarriers[0].before                = rhi::ResourceState::ShaderReadWrite;
+		preBarriers[0].after                 = rhi::ResourceState::GeneralRead;
+
+		preBarriers[1].buffer = splatIndicesOriginal.Get();
+		preBarriers[1].before = rhi::ResourceState::ShaderReadWrite;
+		preBarriers[1].after  = rhi::ResourceState::GeneralRead;
+
+		cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {preBarriers, 2}, {}, {});
+	}
+
+	// Pack pairs using DispatchIndirect (offset 68 = pack/unpack dispatch)
+	constexpr uint32_t dispatchOffsetPackUnpack = 68;
+
+	cmdList->SetPipeline(packPairsPipeline.Get());
+	cmdList->BindDescriptorSet(0, packPairsDescriptorSet.Get());
+
+	uint32_t numElements = totalSplatCount;
+	cmdList->PushConstants(rhi::ShaderStageFlags::COMPUTE, 0,
+	                       {reinterpret_cast<const std::byte *>(&numElements), sizeof(uint32_t)});
+	cmdList->DispatchIndirect(indirectArgsBufferPtrs[indirectBufferIndex], dispatchOffsetPackUnpack);
+
+	// Barrier: sortPairsB written by pack
+	rhi::BufferTransition transition = {};
+	transition.buffer                = sortPairsB.Get();
+	transition.before                = rhi::ResourceState::ShaderWrite;
+	transition.after                 = rhi::ResourceState::GeneralRead;
+
+	cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {&transition, 1}, {}, {});
+}
+
+void GpuSplatSorter::SortPairsIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex, uint32_t numPasses)
+{
+	if (!isInitialized || indirectArgsBufferPtrs.empty())
+	{
+		LOG_WARNING("GpuSplatSorter::SortPairsIndirect called before initialization");
+		return;
+	}
+
+	// Radix sort without inline unpack, sorted pairs remain in sortPairsB
+	if (sortMethod == SortMethod::IntegratedScan)
+	{
+		RecordRadixSortIntegratedIndirect(cmdList, indirectBufferIndex, false, numPasses);
+	}
+	else
+	{
+		RecordRadixSortPrescanIndirect(cmdList, indirectBufferIndex, false, numPasses);
+	}
+}
+
+void GpuSplatSorter::UnpackPairsIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex)
+{
+	if (!isInitialized || indirectArgsBufferPtrs.empty())
+	{
+		LOG_WARNING("GpuSplatSorter::UnpackPairsIndirect called before initialization");
+		return;
+	}
+
+	constexpr uint32_t dispatchOffsetPackUnpack = 68;
+
+	cmdList->SetPipeline(unpackIndicesPipeline.Get());
+	cmdList->BindDescriptorSet(0, unpackIndicesDescriptorSets[activeOutputBufferIndex].Get());
+
+	uint32_t numElements = totalSplatCount;
+	cmdList->PushConstants(rhi::ShaderStageFlags::COMPUTE, 0,
+	                       {reinterpret_cast<const std::byte *>(&numElements), sizeof(uint32_t)});
+	cmdList->DispatchIndirect(indirectArgsBufferPtrs[indirectBufferIndex], dispatchOffsetPackUnpack);
+
+	// Barrier: output indices buffer written
+	rhi::BufferTransition transition = {};
+	transition.buffer                = outputBuffers[activeOutputBufferIndex].Get();
+	transition.before                = rhi::ResourceState::ShaderWrite;
+	transition.after                 = rhi::ResourceState::GeneralRead;
+
+	cmdList->Barrier(rhi::PipelineScope::Compute, rhi::PipelineScope::Compute, {&transition, 1}, {}, {});
+}
+
+void GpuSplatSorter::SortOnlyIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex)
+{
+#ifdef ENABLE_SORT_VERIFICATION
+	lastSortUsedInlineUnpack = false;
+#endif
+
+	PackPairsIndirect(cmdList, indirectBufferIndex);
+	SortPairsIndirect(cmdList, indirectBufferIndex, RadixPasses);
+	UnpackPairsIndirect(cmdList, indirectBufferIndex);
+}
+
+void GpuSplatSorter::RecordRadixSortIntegratedIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex, bool inlineUnpack, uint32_t numPasses)
 {
 	if (!histogramIndirectPipeline || !scatterPairsIndirectPipeline)
 	{
@@ -2625,7 +2724,7 @@ void GpuSplatSorter::RecordRadixSortIntegratedIndirect(rhi::IRHICommandList *cmd
 	constexpr uint32_t dispatchOffsetHistogramScatter = 32;
 
 	// 8 bits per radix pass
-	for (uint32_t pass = 0; pass < RadixPasses; ++pass)
+	for (uint32_t pass = 0; pass < numPasses; ++pass)
 	{
 		uint32_t shift = pass * 8;        // 0, 8, 16, 24
 
@@ -2654,9 +2753,9 @@ void GpuSplatSorter::RecordRadixSortIntegratedIndirect(rhi::IRHICommandList *cmd
 		    {});
 
 		// --- Pass 2: SCATTER with integrated prefix sum ---
-		bool isFinalPass = (pass == RadixPasses - 1);
+		bool isFinalPass = (pass == numPasses - 1);
 
-		if (isFinalPass)
+		if (isFinalPass && inlineUnpack)
 		{
 			// Final pass with inline unpack, writing indices directly to output buffer
 			cmdList->SetPipeline(scatterUnpackIndirectPipeline.Get());
@@ -2680,7 +2779,7 @@ void GpuSplatSorter::RecordRadixSortIntegratedIndirect(rhi::IRHICommandList *cmd
 		{
 			bool writeToA = (pass % 2 == 0);
 
-			if (isFinalPass)
+			if (isFinalPass && inlineUnpack)
 			{
 				// Final pass wrote to the output indices buffer
 				rhi::IRHIBuffer      *outputBuffer = outputBuffers[activeOutputBufferIndex].Get();
@@ -2721,7 +2820,7 @@ void GpuSplatSorter::RecordRadixSortIntegratedIndirect(rhi::IRHICommandList *cmd
 	}
 }
 
-void GpuSplatSorter::RecordRadixSortPrescanIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex)
+void GpuSplatSorter::RecordRadixSortPrescanIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex, bool inlineUnpack, uint32_t numPasses)
 {
 	if (!histogramIndirectPipeline || !radixPrefixScanIndirectPipeline || !scatterPairsPrescanIndirectPipeline)
 	{
@@ -2755,7 +2854,7 @@ void GpuSplatSorter::RecordRadixSortPrescanIndirect(rhi::IRHICommandList *cmdLis
 	constexpr uint32_t dispatchOffsetScanBlockSums    = 56;
 
 	// 8 bits per radix pass
-	for (uint32_t pass = 0; pass < RadixPasses; ++pass)
+	for (uint32_t pass = 0; pass < numPasses; ++pass)
 	{
 		uint32_t shift = pass * 8;        // 0, 8, 16, 24
 
@@ -2871,9 +2970,9 @@ void GpuSplatSorter::RecordRadixSortPrescanIndirect(rhi::IRHICommandList *cmdLis
 		}
 
 		// --- Pass 5: SCATTER ---
-		bool isFinalPass = (pass == RadixPasses - 1);
+		bool isFinalPass = (pass == numPasses - 1);
 
-		if (isFinalPass)
+		if (isFinalPass && inlineUnpack)
 		{
 			// Final pass with inline unpack, writing indices directly to output buffer
 			cmdList->SetPipeline(scatterUnpackPrescanIndirectPipeline.Get());
@@ -2897,7 +2996,7 @@ void GpuSplatSorter::RecordRadixSortPrescanIndirect(rhi::IRHICommandList *cmdLis
 		{
 			bool writeToA = (pass % 2 == 0);
 
-			if (isFinalPass)
+			if (isFinalPass && inlineUnpack)
 			{
 				// Final pass wrote to the output indices buffer
 				rhi::IRHIBuffer      *outputBuffer = outputBuffers[activeOutputBufferIndex].Get();

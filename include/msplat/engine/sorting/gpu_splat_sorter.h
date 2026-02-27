@@ -44,6 +44,22 @@ class GpuSplatSorter
 	// Sort using DispatchIndirect, indirectBufferIndex selects which K-buffered indirect args buffer to use
 	void SortIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex);
 
+	// Sort pre-written keys without depth calculation
+	void SortOnlyIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex);
+
+	// Composable sort building blocks for multi-pass sorting
+	// Pack keys+values from splatDepths/splatIndicesOriginal
+	void PackPairsIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex);
+	// Radix sort pairs only (no pack/unpack). Make numPasses even for now so result ends in sortPairsB
+	void SortPairsIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex, uint32_t numPasses = RadixPasses);
+	// Unpack sorted indices from sortPairsB into output buffer
+	void UnpackPairsIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex);
+
+	rhi::BufferHandle GetSortPairsB() const
+	{
+		return sortPairsB;
+	}
+
 	rhi::BufferHandle GetSortedIndices() const;
 
 	// Get an output buffer by index (0 = primary, 1..K-1 = alternates for pipelined async compute)
@@ -161,8 +177,8 @@ class GpuSplatSorter
 	void RecordRadixSortIntegrated(rhi::IRHICommandList *cmdList, bool inlineUnpack = false);
 	void CreateIndirectComputePipelines();
 	void CreateIndirectDescriptorSets();
-	void RecordRadixSortPrescanIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex);
-	void RecordRadixSortIntegratedIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex);
+	void RecordRadixSortPrescanIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex, bool inlineUnpack = true, uint32_t numPasses = RadixPasses);
+	void RecordRadixSortIntegratedIndirect(rhi::IRHICommandList *cmdList, uint32_t indirectBufferIndex, bool inlineUnpack = true, uint32_t numPasses = RadixPasses);
 
 	static constexpr uint32_t WorkgroupSize    = 256;
 	static constexpr uint32_t MaxWorkgroups    = 256;

@@ -30,6 +30,8 @@ static const half SH_C3_6 = half(-0.5900435899266435);
 [[vk::binding(8, 0)]] RWStructuredBuffer<uint> tileKeys;
 [[vk::binding(9, 0)]] RWStructuredBuffer<uint> tileValues;
 [[vk::binding(10, 0)]] globallycoherent RWByteAddressBuffer globalCounter;
+[[vk::binding(11, 0)]] RWStructuredBuffer<uint> tileTileIDs;
+[[vk::binding(12, 0)]] RWStructuredBuffer<uint> tileSplatIDs;
 
 [[vk::push_constant]] PreprocessPC pc;
 
@@ -307,8 +309,7 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupID : SV_Group
     // Emit tile-key pairs
     if (shouldEmit)
     {
-        // Encode depth using logarithmic scale for better precision
-        uint depth16 = EncodeDepth16(linearDepth, pc.nearPlane, pc.farPlane);
+        uint depthKey = FloatToSortableUint(linearDepth);
 
         uint localIdx = 0;
         for (int ty = minTileY; ty <= maxTileY; ty++)
@@ -320,9 +321,12 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupID : SV_Group
 
                 if (writeIdx < pc.maxTileInstances)
                 {
-                    // Pack key: (TileID << 16) | Depth16
-                    tileKeys[writeIdx] = PackTileKey(tileID, depth16);
-                    tileValues[writeIdx] = splatIndex;
+                    // Two-pass sort: keys = depth32, values = self-index
+                    // Separate buffers for tileID and splatIndex
+                    tileKeys[writeIdx] = depthKey;
+                    tileValues[writeIdx] = writeIdx;
+                    tileTileIDs[writeIdx] = tileID;
+                    tileSplatIDs[writeIdx] = splatIndex;
                 }
 
                 localIdx++;
