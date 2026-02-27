@@ -4246,10 +4246,10 @@ void HybridSplatRendererApp::CreateTransmCullingResources()
 	auto *device    = m_deviceManager->GetDevice();
 	auto *swapchain = m_deviceManager->GetSwapchain();
 
-	m_transmCullingFragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster_transm_culling.frag.spv", rhi::ShaderStage::FRAGMENT);
-	m_fullscreenVertexShader      = m_shaderFactory->getOrCreateShader("shaders/compiled/fullscreen.vert.spv", rhi::ShaderStage::VERTEX);
-	m_compositeFragmentShader     = m_shaderFactory->getOrCreateShader("shaders/compiled/composite.frag.spv", rhi::ShaderStage::FRAGMENT);
-	m_stencilUpdateFragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/transm_stencil_update.frag.spv", rhi::ShaderStage::FRAGMENT);
+	m_transmCullingFragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/splat_raster_transm_culling_fs", rhi::ShaderStage::FRAGMENT);
+	m_fullscreenVertexShader      = m_shaderFactory->getOrCreateShader("shaders/compiled/fullscreen_vs", rhi::ShaderStage::VERTEX);
+	m_compositeFragmentShader     = m_shaderFactory->getOrCreateShader("shaders/compiled/composite_fs", rhi::ShaderStage::FRAGMENT);
+	m_stencilUpdateFragmentShader = m_shaderFactory->getOrCreateShader("shaders/compiled/transm_stencil_update_fs", rhi::ShaderStage::FRAGMENT);
 
 	// Create per-frame accumulation and depth/stencil textures for multi-frame-in-flight
 	int fbWidth, fbHeight;
