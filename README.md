@@ -1,26 +1,130 @@
 # Mobile 3D Gaussian Splatting
 
-Cross-platform 3D Gaussian Splatting implementation with Vulkan/MoltenVK backend, targeting desktop and mobile platforms.
+![Garden scene rendered with Mobile 3D Gaussian Splatting](docs/screenshots/Garden.png)
 
-## Available Targets
+Real-time [3D Gaussian Splatting](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) renderer targeting mobile platforms (Android, iOS) with a Vulkan/MoltenVK RHI backend. Also builds on desktop (Windows, Linux, macOS) for development and profiling.
 
-The project provides several runnable targets and libraries:
+## Overview
 
-### Executable Targets
+3D Gaussian Splatting represents scenes as collections of 3D Gaussians, each with a position, covariance, opacity, and view-dependent color encoded via spherical harmonics. This project implements both **compute rasterization** pipeline and **hardware rasterization** pipeline, with a focus on making 3DGS performant on mobile GPUs through the hardware rasterization path.
 
-- **`triangle`** - Vulkan triangle example showcasing the RHI (Rendering Hardware Interface) and core library integration
-<p align="left">
-  <img src="docs/screenshots/example_triangle.png" alt="Triangle Example Screenshot" width="500"/>
-</p>
+### Compute Rasterization
 
-- **`particles`** - GPU-accelerated particle simulation demonstrating compute shader capabilities
-<p align="left">
-  <img src="docs/screenshots/example_particles.png" alt="Particles Example Screenshot" width="500"/>
-</p>
+Splats are binned into screen tiles and rasterized entirely in compute shaders. The output image is blitted to the swapchain.
 
-- **`splat-loader`** - 3D Gaussian Splatting PLY file loader and analyzer
-- **`unit-tests`** - Core library unit tests for platform utilities, memory allocators, and math functions
-- **`perf-tests`** - Performance benchmarks for memory allocation, vector operations, and core library components
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  PREPROCESS (compute shader)                                        │
+│                                                                     │
+│  For each Gaussian:                                                 │
+│    1. Frustum cull + alpha cull                                     │
+│    2. Project 3D covariance -> 2D conic + screen position           │
+│    3. Evaluate SH -> view-dependent color                           │
+│    4. Compute tile overlap bounding box                             │
+│    5. Emit (depth key, tile ID) pairs for each tile touched         │
+│                                                                     │
+│  Wave-Level Allocation                                              │
+│    • WaveActiveSum of tiles touched, 1 atomic per wave              │
+│    • Output is a flat array of tile-instance pairs                  │
+│                                                                     │
+├──────────────────────────┬──────────────────────────────────────────┤
+│           ▼              │                                          │
+│  GPU RADIX SORT          │  Two-pass sort via indirect dispatch:    │
+│  (DispatchIndirect)      │    1. Sort by depth (front-to-back)      │
+│                          │    2. Re-key by tile ID, sort again      │
+│                          │                                          │
+│                          │                                          │
+├──────────────────────────┴──────────────────────────────────────────┤
+│           ▼                                                         │
+│  IDENTIFY TILE RANGES (compute shader)                              │
+│  Detect tile boundaries in sorted array -> per-tile [start, end)    │
+│                                                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│           ▼                                                         │
+│  TILE RASTERIZE (compute shader, 16×16 threads per tile)            │
+│                                                                     │
+│  Per pixel: front-to-back alpha blending over tile's sorted splats  │
+│    • Batch 256 splats into shared memory per iteration              │
+│    • Early exit when transmittance < 1/255                          │
+│    • Output: RGBA32F image                                          │
+│                                                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│           ▼                                                         │
+│  BLIT TO SWAPCHAIN                                                  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Hardware Rasterization
+
+A compute precompute stage culls, projects, and stream-compacts visible Gaussians into a dense buffer of 2D screen ellipses. Each visible splat is then rendered as an instanced screen-aligned quad via the standard vertex/fragment pipeline, where the vertex shader reads the precomputed ellipse data to emit billboard vertices and the fragment shader evaluates the Gaussian falloff with alpha blending.
+
+The hardware rasterization pipeline is driven entirely from the GPU through a precompute stage that feeds into sorting, which feeds into rendering, with no CPU readback at any point:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  SPLAT PRECOMPUTE (compute shader)                                  │
+│                                                                     │
+│  For each Gaussian:                                                 │
+│    1. Frustum cull + alpha cull                                     │
+│    2. Project 3D covariance -> 2D screen ellipse (HWRasterSplat)    │
+│    3. Compute depth sort key                                        │
+│    4. Stream-compact into dense visible array                       │
+│                                                                     │
+│  Stream Compaction                                                  │
+│    • Wave intrinsics: 1 atomic per wave (not per splat)             │
+│    • Output is a dense array of visible splats only                 │
+│                                                                     │
+│  GPU-Driven Rendering                                               │
+│    • Last workgroup writes sort dispatch + draw args                │
+│    • Zero CPU readback, fully indirect pipeline                     │
+│                                                                     │
+├──────────────────────────┬──────────────────────────────────────────┤
+│           ▼              │                                          │
+│  GPU RADIX SORT          │  Sorts depth keys via indirect dispatch  │
+│  (DispatchIndirect)      │  using visible count from precompute     │
+│                          │                                          │
+├──────────────────────────┴──────────────────────────────────────────┤
+│           ▼                                                         │
+│  INSTANCED QUAD DRAW                                                │
+│  (DrawIndexedIndirect)     Reads precomputed HWRasterSplat data     │
+│                            + sorted indices                         │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Async Compute (optional)
+
+After profiling, we noticed that color blending takes almost half of the render pass time on mobile. While the ROP is busy blending, the GPU ALUs are mostly sitting idle. That gives us an opportunity to overlap the next frame's precompute + sort with the current frame's color blending on a dedicated compute queue.
+
+- K-buffered resources with Queue Family Ownership Transfer (QFOT) synchronization
+- Warmup phase (K frames with `WaitIdle`) then transitions to fully pipelined semaphore-based execution
+
+#### Chunked Transmittance Culling (optional)
+
+Native transmittance culling on hardware rasterization pipeline requires framebuffer fetch to read accumulated tile alpha mid-draw. The corresponding Vulkan extension (`VK_EXT_rasterization_order_attachment_access`) is poorly supported on mobile and would forfeit the hardware color blend unit. Instead, we design a chunked approach using early stencil test for transmittance culling:
+
+- Invert sorting to render the global splat array front-to-back (requires one additional composition pass)
+- Divide the sorted primitive stream into discrete, manageable chunks for incremental rendering
+- Use stencil buffer updates to mark pixels when accumulated transmittance drops below the termination threshold
+- Subsequent chunks use early-stencil testing, allowing the GPU to skip fragment shading and blending entirely for saturated pixels
+
+### Performance
+
+On last-generation flagship mobile GPUs (Snapdragon 8 Elite / Exynos 2500) at 3200x1440 resolution, the hardware rasterization pipeline achieves 60 FPS on small scenes like Flower (562K splats) and 25-30 FPS on large-scale scenes like Garden (4.38M splats), without LOD.
+
+### Key Features
+
+- Native 3DGS tile-based compute rasterization implemented entirely in Vulkan compute shaders
+- GPU-driven hardware rasterization pipeline with compute precompute, sorting, and instanced quad rendering
+- High-performance GPU radix sorter, plus a CPU sort backend as a correctness reference
+- Async compute to hide sorting latency, chunked transmittance culling to reduce fragment workload on hardware rasterization
+- Multi-frame-in-flight with per-frame resource arrays (UBOs, descriptor sets, command lists, fences, semaphores)
+- Dynamic multi-mesh scene management with per-mesh model transforms
+- Android surface pre-rotation handling to avoid compositor overhead
+- GPU timestamp profiling, pipeline statistics, and buffer memory tracking with VMA gap analysis
+- PLY and `.splat` file loading with coordinate system normalization
+- Configurable SH degree via specialization constants
 
 ### Libraries
 
@@ -32,9 +136,9 @@ The project provides several runnable targets and libraries:
 
 ### Dependencies
 
-- **CMake** v3.20+ (required by project)
-- **Visual Studio 2022** - Primary supported IDE and build tools
+- **CMake** v3.20+
 - **Vulkan SDK** - Download and install from [LunarG](https://vulkan.lunarg.com/) with default options
+  - Requires Vulkan 1.3+ or `VK_KHR_dynamic_rendering` extension support
   - Ensure the `VULKAN_SDK` environment variable is set automatically by the installer
 - **Python 3.7+** - Required for build configuration scripts
 
