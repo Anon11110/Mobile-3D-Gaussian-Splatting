@@ -52,7 +52,7 @@ class BuildConstants:
 
     # Fallback targets when discovery fails
     FALLBACK_TARGETS: List[str] = [
-        "triangle",
+        "3dgs-renderer",
         "unit-tests",
         "perf-tests",
         "core",

@@ -12,11 +12,13 @@ add_executable(unit-tests
     test_hash.cpp
     test_string.cpp
     test_async_buffer_upload.cpp
+    test_scene.cpp
 )
 
-# Link with core library and RHI
+# Link with core library, engine, and RHI
 target_link_libraries(unit-tests PRIVATE
     core
+    engine
     RHI
     Threads::Threads
 )
@@ -33,3 +35,7 @@ target_compile_features(unit-tests PRIVATE cxx_std_20)
 set_target_properties(unit-tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
+
+# Setup asset downloading and copying for scene tests
+include(${CMAKE_SOURCE_DIR}/cmake/copy_assets.cmake)
+setup_splat_assets(unit-tests)

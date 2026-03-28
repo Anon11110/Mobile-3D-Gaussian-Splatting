@@ -24,7 +24,7 @@
 #include <sys/stat.h>
 #include <unordered_map>
 
-#include "hybrid_splat_renderer_app.h"
+#include "3dgs_renderer_app.h"
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "MSplat", __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, "MSplat", __VA_ARGS__)
@@ -142,8 +142,8 @@ class AndroidPlatformAdapter : public app::IPlatformAdapter
 
 		// Forward input events to ImGui first
 		// If ImGui consumed the event, don't process it for camera control
-		auto *hybridApp = dynamic_cast<HybridSplatRendererApp *>(m_app);
-		if (hybridApp && hybridApp->HandleImGuiInput(event))
+		auto *gsApp = dynamic_cast<GaussianSplatRendererApp *>(m_app);
+		if (gsApp && gsApp->HandleImGuiInput(event))
 		{
 			return 1;
 		}
@@ -275,13 +275,13 @@ class AndroidPlatformAdapter : public app::IPlatformAdapter
 	bool   m_isPinching;
 };
 
-static AndroidPlatformAdapter *g_platformAdapter = nullptr;
-static HybridSplatRendererApp *g_app             = nullptr;
-static app::DeviceManager     *g_deviceManager   = nullptr;
-static bool                    g_initialized     = false;
-static timer::Timer            g_frameTimer;
-static std::string             g_internalDataPath;
-static AAssetManager          *g_assetManager = nullptr;
+static AndroidPlatformAdapter   *g_platformAdapter = nullptr;
+static GaussianSplatRendererApp *g_app             = nullptr;
+static app::DeviceManager       *g_deviceManager   = nullptr;
+static bool                      g_initialized     = false;
+static timer::Timer              g_frameTimer;
+static std::string               g_internalDataPath;
+static AAssetManager            *g_assetManager = nullptr;
 
 // Extracted model paths, maps asset path to internal storage path
 static std::unordered_map<std::string, std::string> g_extractedModelPaths;
@@ -403,11 +403,11 @@ static void HandleAppCmd(android_app *androidApp, int32_t cmd)
 				g_platformAdapter = new AndroidPlatformAdapter(androidApp);
 				g_platformAdapter->SetWindow(androidApp->window);
 
-				g_app = new HybridSplatRendererApp();
+				g_app = new GaussianSplatRendererApp();
 				g_app->SetImGuiWindow(androidApp->window);
 
 				// Extract default PLY file from assets to internal storage
-				const char *assetPath     = HybridSplatRendererApp::GetDefaultAssetPath();
+				const char *assetPath     = GaussianSplatRendererApp::GetDefaultAssetPath();
 				std::string plyOutputPath = GetExtractedModelPath(g_assetManager, assetPath);
 
 				if (plyOutputPath.empty())

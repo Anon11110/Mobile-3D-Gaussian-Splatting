@@ -84,6 +84,7 @@ class VulkanTexture final : public RefCounter<IRHITexture>
 	uint32_t      mipLevels;
 	uint32_t      arrayLayers;
 	TextureFormat format;
+	TextureType   type;
 	bool          ownedBySwapchain;
 
   public:
@@ -120,6 +121,10 @@ class VulkanTexture final : public RefCounter<IRHITexture>
 	TextureFormat GetFormat() const override
 	{
 		return format;
+	}
+	TextureType GetType() const override
+	{
+		return type;
 	}
 
 	[[nodiscard]] VkImage GetHandle() const noexcept

@@ -709,7 +709,7 @@ Tasks:
 - Performance pass, comprehensive tests/docs.
 
 Exit criteria:
-- `hybrid-splat-renderer` runs with expected functionality and no Vulkan-only assumptions.
+- `3dgs-renderer` runs with expected functionality and no Vulkan-only assumptions.
 
 ### 14. Testing Plan
 

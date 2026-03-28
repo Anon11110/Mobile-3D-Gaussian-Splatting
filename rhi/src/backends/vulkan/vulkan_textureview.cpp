@@ -30,11 +30,30 @@ VulkanTextureView::VulkanTextureView(VkDevice device, const TextureViewDesc &des
 	if (static_cast<uint32_t>(desc.aspectMask) & static_cast<uint32_t>(TextureAspect::STENCIL))
 		aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
 
+	// Derive view type from texture type
+	VkImageViewType vkViewType;
+	switch (texture->GetType())
+	{
+		case TextureType::TEXTURE_CUBE:
+			vkViewType = (desc.arrayLayerCount > 6) ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : VK_IMAGE_VIEW_TYPE_CUBE;
+			break;
+		case TextureType::TEXTURE_2D_ARRAY:
+			vkViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+			break;
+		case TextureType::TEXTURE_3D:
+			vkViewType = VK_IMAGE_VIEW_TYPE_3D;
+			break;
+		case TextureType::TEXTURE_2D:
+		default:
+			vkViewType = (desc.arrayLayerCount > 1) ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+			break;
+	}
+
 	// Create image view
 	VkImageViewCreateInfo viewInfo{};
 	viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	viewInfo.image                           = texture->GetHandle();
-	viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;        // TODO: Support other view types
+	viewInfo.viewType                        = vkViewType;
 	viewInfo.format                          = TextureFormatToVulkan(format);
 	viewInfo.subresourceRange.aspectMask     = aspectMask;
 	viewInfo.subresourceRange.baseMipLevel   = baseMipLevel;

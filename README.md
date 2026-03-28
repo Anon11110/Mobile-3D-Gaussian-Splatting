@@ -1,8 +1,10 @@
 # Mobile 3D Gaussian Splatting
 
-![Garden scene rendered with Mobile 3D Gaussian Splatting](docs/screenshots/Garden.png)
+![Garden scene rendered with Mobile 3D Gaussian Splatting](docs/figures/Garden.png)
 
-Real-time [3D Gaussian Splatting](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) renderer targeting mobile platforms (Android, iOS) with a Vulkan/MoltenVK RHI backend. Also builds on desktop (Windows, Linux, macOS) for development and profiling.
+![Kitchen](docs/figures/Kitchen.png)
+
+Real-time high performance [3D Gaussian Splatting](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) renderer targeting mobile platforms (Android, iOS) with a Vulkan/MoltenVK RHI backend. Can also build and run on desktop (Windows, Linux, macOS).
 
 ## Overview
 
@@ -95,28 +97,41 @@ The hardware rasterization pipeline is driven entirely from the GPU through a pr
 
 #### Async Compute (optional)
 
+![Async Compute 2 Frames in Flight](docs\figures\Async_Compute_2_Frames_in_Flight.png)
+
 After profiling, we noticed that color blending takes almost half of the render pass time on mobile. While the ROP is busy blending, the GPU ALUs are mostly sitting idle. That gives us an opportunity to overlap the next frame's precompute + sort with the current frame's color blending on a dedicated compute queue.
 
-- K-buffered resources with Queue Family Ownership Transfer (QFOT) synchronization
+- K-buffered resources with QFOT synchronization
 - Warmup phase (K frames with `WaitIdle`) then transitions to fully pipelined semaphore-based execution
 
 #### Chunked Transmittance Culling (optional)
 
-Native transmittance culling on hardware rasterization pipeline requires framebuffer fetch to read accumulated tile alpha mid-draw. The corresponding Vulkan extension (`VK_EXT_rasterization_order_attachment_access`) is poorly supported on mobile and would forfeit the hardware color blend unit. Instead, we design a chunked approach using early stencil test for transmittance culling:
+Native transmittance culling on hardware rasterization pipeline requires framebuffer fetch to read accumulated tile alpha mid-draw. On mobile tile-based GPUs, this is relatively efficient because the shader processor can read the pixel value directly from the tile buffer. In contrast, IMR GPUs have to flush the ROP cache back to GL2 and then reload the texture value through TCP.
+
+The main issue with mid-draw framebuffer fetch is that GPU threads have to be serialized according to primitive order. A later thread cannot start until the previous one has finished writing the current pixel, because the scoreboard must preserve API ordering. This turns the shader execution into a critical section, which can significantly hurt performance. And another problem is the corresponding Vulkan extension (`VK_EXT_rasterization_order_attachment_access`) is poorly supported on mobile.
+
+Thus, we design a chunked approach using early stencil test for transmittance culling, the RAW dependency only exists at chunk (subpass) boundaries:
 
 - Invert sorting to render the global splat array front-to-back (requires one additional composition pass)
 - Divide the sorted primitive stream into discrete, manageable chunks for incremental rendering
 - Use stencil buffer updates to mark pixels when accumulated transmittance drops below the termination threshold
 - Subsequent chunks use early-stencil testing, allowing the GPU to skip fragment shading and blending entirely for saturated pixels
 
+![Chunked Transmittance Culling](docs\figures\Chunked_Transmittance_Culling.png)
+
+Heatmap visualizing the savings from transmittance culling:
+
+![Chunked Transmittance Culling Saving](docs\figures\Chunked_Transmittance_Culling_Saving.png)
+
 ### Performance
 
-On last-generation flagship mobile GPUs (Snapdragon 8 Elite / Exynos 2500) at 3200x1440 resolution, the hardware rasterization pipeline achieves 60 FPS on small scenes like Flower (562K splats) and 25-30 FPS on large-scale scenes like Garden (4.38M splats), without LOD.
+On last-generation flagship mobile GPUs (Snapdragon 8 Elite / Exynos 2500) at 3200x1440 resolution, the hardware rasterization pipeline achieves 60 FPS on small scenes like Flower (562K splats) and 30 FPS on large-scale scenes like Garden (4.38M splats).
 
 ### Key Features
 
 - Native 3DGS tile-based compute rasterization implemented entirely in Vulkan compute shaders
-- GPU-driven hardware rasterization pipeline with compute precompute, sorting, and instanced quad rendering
+- Fully GPU-driven hardware rasterization pipeline: compute precompute with wave-level stream compaction writes indirect dispatch and draw arguments directly to GPU buffers
+- Float16 packed colors and SH coefficients for bandwidth reduction
 - High-performance GPU radix sorter, plus a CPU sort backend as a correctness reference
 - Async compute to hide sorting latency, chunked transmittance culling to reduce fragment workload on hardware rasterization
 - Multi-frame-in-flight with per-frame resource arrays (UBOs, descriptor sets, command lists, fences, semaphores)
@@ -155,9 +170,9 @@ cd Mobile-3D-Gaussian-Splatting
 python scripts/configure.py
 ```
 
-**Step 3.** Build and run the triangle example:
+**Step 3.** Build and run the 3DGS renderer:
 ```bash
-python scripts/configure.py build --target triangle --run
+python scripts/configure.py build --target 3dgs-renderer --run
 ```
 
 **Step 4.** (Optional) Build and run tests:
@@ -168,7 +183,7 @@ python scripts/configure.py build --tests --run
 For Debug builds with validation layers:
 ```bash
 python scripts/configure.py --clean --build-type Debug --validation
-python scripts/configure.py build --target triangle --run
+python scripts/configure.py build --target 3dgs-renderer --run
 ```
 
 ### Using Visual Studio (Alternative)
@@ -186,9 +201,9 @@ python scripts/configure.py --build-type Debug --validation
 start build/Mobile-3D-Gaussian-Splatting.sln
 ```
 
-**Step 3.** Set the startup project to `triangle` and build/run directly from the IDE.
+**Step 3.** Set the startup project to `3dgs-renderer` and build/run directly from the IDE.
 
-The configure script automatically sets `triangle` as the startup project for Visual Studio.
+The configure script automatically sets `3dgs-renderer` as the startup project for Visual Studio.
 
 ## Linux
 
@@ -224,9 +239,9 @@ sudo dnf install gcc-c++ cmake vulkan-devel vulkan-tools vulkan-validation-layer
 python3 scripts/configure.py
 ```
 
-**Step 3.** Build and run the triangle example:
+**Step 3.** Build and run the 3DGS renderer:
 ```bash
-python3 scripts/configure.py build --target triangle --run
+python3 scripts/configure.py build --target 3dgs-renderer --run
 ```
 
 **Step 4.** (Optional) Build and run tests:
@@ -237,7 +252,7 @@ python3 scripts/configure.py build --tests --run
 For Debug builds with validation:
 ```bash
 python3 scripts/configure.py --clean --build-type Debug --validation
-python3 scripts/configure.py build --target triangle --run
+python3 scripts/configure.py build --target 3dgs-renderer --run
 ```
 
 ## macOS
@@ -271,9 +286,9 @@ cd Mobile-3D-Gaussian-Splatting
 python3 scripts/configure.py
 ```
 
-**Step 3.** Build and run the triangle example:
+**Step 3.** Build and run the 3DGS renderer:
 ```bash
-python3 scripts/configure.py build --target triangle --run
+python3 scripts/configure.py build --target 3dgs-renderer --run
 ```
 
 **Step 4.** (Optional) Build and run tests:
@@ -284,7 +299,7 @@ python3 scripts/configure.py build --tests --run
 For Debug builds with validation layers:
 ```bash
 python3 scripts/configure.py --clean --build-type Debug --validation
-python3 scripts/configure.py build --target triangle --run
+python3 scripts/configure.py build --target 3dgs-renderer --run
 ```
 
 **Note**: For Debug builds, the script automatically generates `compile_commands.json` for IDE integration when using Unix Makefiles or Ninja generators.
@@ -304,7 +319,7 @@ python3 scripts/configure.py --generator "Xcode" --build-type Debug --validation
 open build/Mobile-3D-Gaussian-Splatting.xcodeproj
 ```
 
-**Step 3.** Select the `triangle` scheme and build/run directly from Xcode.
+**Step 3.** Select the `3dgs-renderer` scheme and build/run directly from Xcode.
 
 **Alternative IDEs:**
 - **VS Code**: Use `--generator "Unix Makefiles"` and open with `code .`
@@ -433,23 +448,20 @@ The build system automatically validates that requested targets exist before att
 ### Examples
 
 ```bash
-# Quick start with triangle example
+# Quick start with 3DGS renderer
 python3 scripts/configure.py
-python3 scripts/configure.py build --target triangle --run
-
-# Run particle simulation
-python3 scripts/configure.py build --target particles --run
+python3 scripts/configure.py build --target 3dgs-renderer --run
 
 # Load and analyze a 3D Gaussian Splatting file
 python3 scripts/configure.py build --target splat-loader --run
 
 # Debug build with validation
 python3 scripts/configure.py --clean --build-type Debug --validation
-python3 scripts/configure.py build --target triangle --run
+python3 scripts/configure.py build --target 3dgs-renderer --run
 
 # RelWithDebInfo build (Release optimization + debug symbols)
 python3 scripts/configure.py --clean --build-type RelWithDebInfo
-python3 scripts/configure.py build --target triangle --run
+python3 scripts/configure.py build --target 3dgs-renderer --run
 
 # Build all executable targets and RHI library
 # Note: This builds executables from examples/ plus RHI, not static libraries or shader targets
@@ -460,7 +472,7 @@ python3 scripts/configure.py build --tests --run --verbose
 
 # Use Ninja generator for faster builds
 python3 scripts/configure.py --generator "Ninja" --build-type Debug
-python3 scripts/configure.py build --target triangle --parallel 8
+python3 scripts/configure.py build --target 3dgs-renderer --parallel 8
 ```
 
 ## Alternative Build Methods
@@ -476,13 +488,13 @@ For users familiar with CMake who prefer direct control:
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DENABLE_VULKAN_VALIDATION=ON
 
 # Build specific targets
-cmake --build build --target triangle --parallel
+cmake --build build --target 3dgs-renderer --parallel
 
 # Build all targets
 cmake --build build --parallel
 
 # Run (requires proper working directory)
-cd build/bin/Debug && ./triangle
+cd build/bin/Debug && ./3dgs-renderer
 ```
 
 ### IDE Project Generation

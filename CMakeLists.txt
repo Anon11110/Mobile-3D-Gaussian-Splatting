@@ -56,5 +56,5 @@ add_subdirectory(examples)
 
 # Set startup project for Visual Studio
 if(WIN32 AND CMAKE_GENERATOR MATCHES "Visual Studio")
-    set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT triangle)
+    set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT 3dgs-renderer)
 endif()

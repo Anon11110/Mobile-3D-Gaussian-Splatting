@@ -144,6 +144,7 @@ class IRHITexture : public IRefCounted
 	[[nodiscard]] virtual uint32_t      GetMipLevels() const   = 0;
 	[[nodiscard]] virtual uint32_t      GetArrayLayers() const = 0;
 	[[nodiscard]] virtual TextureFormat GetFormat() const      = 0;
+	[[nodiscard]] virtual TextureType   GetType() const        = 0;
 };
 
 typedef RefCntPtr<IRHITexture> TextureHandle;

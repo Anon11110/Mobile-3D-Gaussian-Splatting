@@ -43,7 +43,7 @@ find_library(android-lib android)
 # Build the main Android shared library
 add_library(msplat_android SHARED
     app/src/main/cpp/android_main.cpp
-    ${MSPLAT_ROOT}/examples/hybrid-splat-renderer/hybrid_splat_renderer_app.cpp
+    ${MSPLAT_ROOT}/examples/3dgs-renderer/3dgs_renderer_app.cpp
 )
 
 # Include android_native_app_glue
@@ -59,7 +59,7 @@ target_include_directories(native_app_glue PUBLIC
 
 target_include_directories(msplat_android PRIVATE
     ${MSPLAT_ROOT}/include
-    ${MSPLAT_ROOT}/examples/hybrid-splat-renderer
+    ${MSPLAT_ROOT}/examples/3dgs-renderer
     ${CMAKE_CURRENT_SOURCE_DIR}/app/src/main/cpp
     ${NATIVE_APP_GLUE_DIR}
     ${MSPLAT_ROOT}/shaders  # For shaderio.h

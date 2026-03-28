@@ -398,7 +398,7 @@ Examples:
   python scripts/configure.py                    # Configure with defaults
   python scripts/configure.py --clean --debug   # Clean configure for Debug
   python scripts/configure.py --backend metal3  # Configure with Metal3 backend
-  python scripts/configure.py build --target triangle  # Build triangle target
+  python scripts/configure.py build --target 3dgs-renderer  # Build 3DGS renderer
   python scripts/configure.py build --target all       # Build all targets
   python scripts/configure.py build --tests --run      # Build and run tests
   python scripts/configure.py build --list-targets     # Show available targets

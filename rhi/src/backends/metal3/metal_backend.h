@@ -62,9 +62,9 @@ class MetalTexture final : public RefCounter<IRHITexture>
 	uint32_t      GetMipLevels() const override;
 	uint32_t      GetArrayLayers() const override;
 	TextureFormat GetFormat() const override;
+	TextureType   GetType() const override;
 
 	[[nodiscard]] MTL::Texture *GetHandle() const;
-	[[nodiscard]] TextureType   GetType() const;
 
   private:
 	MTL::Texture *texture_     = nullptr;

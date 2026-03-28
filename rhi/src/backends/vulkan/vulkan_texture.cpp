@@ -49,7 +49,7 @@ VkImageCreateFlags GetImageCreateFlags(TextureType type, bool isCubeMap)
 
 VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, VkImage image, VkFormat format, uint32_t width,
                              uint32_t height, bool ownedBySwapchain) :
-    device(device), allocator(allocator), image(image), imageView(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), width(width), height(height), depth(1), mipLevels(1), arrayLayers(1), format(VulkanFormatToTexture(format)), ownedBySwapchain(ownedBySwapchain)
+    device(device), allocator(allocator), image(image), imageView(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), width(width), height(height), depth(1), mipLevels(1), arrayLayers(1), format(VulkanFormatToTexture(format)), type(TextureType::TEXTURE_2D), ownedBySwapchain(ownedBySwapchain)
 {
 	// Create image view
 	VkImageViewCreateInfo createInfo{};
@@ -78,7 +78,7 @@ VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, VkImage im
 }
 
 VulkanTexture::VulkanTexture(VkDevice device, VmaAllocator allocator, const TextureDesc &desc) :
-    device(device), allocator(allocator), image(VK_NULL_HANDLE), imageView(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), width(desc.width), height(desc.height), depth(desc.depth), mipLevels(desc.mipLevels), arrayLayers(desc.arrayLayers), format(desc.format), ownedBySwapchain(false)
+    device(device), allocator(allocator), image(VK_NULL_HANDLE), imageView(VK_NULL_HANDLE), allocation(VK_NULL_HANDLE), width(desc.width), height(desc.height), depth(desc.depth), mipLevels(desc.mipLevels), arrayLayers(desc.arrayLayers), format(desc.format), type(desc.type), ownedBySwapchain(false)
 {
 	// Create image info
 	VkImageCreateInfo imageInfo{};
@@ -240,6 +240,7 @@ VulkanTexture::VulkanTexture(VulkanTexture &&other) noexcept :
     mipLevels(other.mipLevels),
     arrayLayers(other.arrayLayers),
     format(other.format),
+    type(other.type),
     ownedBySwapchain(other.ownedBySwapchain)
 {
 	other.device           = VK_NULL_HANDLE;
@@ -253,6 +254,7 @@ VulkanTexture::VulkanTexture(VulkanTexture &&other) noexcept :
 	other.mipLevels        = 0;
 	other.arrayLayers      = 0;
 	other.format           = TextureFormat::UNDEFINED;
+	other.type             = TextureType::TEXTURE_2D;
 	other.ownedBySwapchain = false;
 }
 
@@ -280,6 +282,7 @@ VulkanTexture &VulkanTexture::operator=(VulkanTexture &&other) noexcept
 		mipLevels        = other.mipLevels;
 		arrayLayers      = other.arrayLayers;
 		format           = other.format;
+		type             = other.type;
 		ownedBySwapchain = other.ownedBySwapchain;
 
 		other.device           = VK_NULL_HANDLE;
@@ -293,6 +296,7 @@ VulkanTexture &VulkanTexture::operator=(VulkanTexture &&other) noexcept
 		other.mipLevels        = 0;
 		other.arrayLayers      = 0;
 		other.format           = TextureFormat::UNDEFINED;
+		other.type             = TextureType::TEXTURE_2D;
 		other.ownedBySwapchain = false;
 	}
 	return *this;

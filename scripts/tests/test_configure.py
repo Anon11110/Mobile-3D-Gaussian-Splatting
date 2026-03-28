@@ -505,18 +505,18 @@ class TestCreateArgumentParser(unittest.TestCase):
 
     def test_build_command_basic(self):
         """Test basic build command parsing."""
-        args = self.parser.parse_args(["build", "--target", "triangle"])
+        args = self.parser.parse_args(["build", "--target", "3dgs-renderer"])
         self.assertEqual(args.command, "build")
-        self.assertEqual(args.targets, ["triangle"])
+        self.assertEqual(args.targets, ["3dgs-renderer"])
         self.assertFalse(args.tests)
         self.assertFalse(args.run)
 
     def test_build_command_multiple_targets(self):
         """Test build command with multiple targets."""
         args = self.parser.parse_args(
-            ["build", "--target", "triangle", "--target", "unit-tests"]
+            ["build", "--target", "3dgs-renderer", "--target", "unit-tests"]
         )
-        self.assertEqual(args.targets, ["triangle", "unit-tests"])
+        self.assertEqual(args.targets, ["3dgs-renderer", "unit-tests"])
 
     def test_build_command_tests(self):
         """Test build command with tests flag."""
@@ -756,7 +756,7 @@ class TestBuildCommand(unittest.TestCase):
 
     def test_validation_conflicting_options(self):
         """Test validation with conflicting target options."""
-        self.mock_args.targets = ["triangle"]
+        self.mock_args.targets = ["3dgs-renderer"]
         self.mock_args.tests = True
 
         command = BuildCommand(self.mock_args, self.source_dir, self.build_dir)
@@ -777,7 +777,7 @@ class TestBuildCommand(unittest.TestCase):
 
     def test_validation_run_multiple_targets(self):
         """Test validation with run flag and multiple targets."""
-        self.mock_args.targets = ["triangle", "unit-tests"]
+        self.mock_args.targets = ["3dgs-renderer", "unit-tests"]
         self.mock_args.run = True
 
         command = BuildCommand(self.mock_args, self.source_dir, self.build_dir)
@@ -795,7 +795,7 @@ class TestBuildCommand(unittest.TestCase):
 
         with patch("configure.discover_cmake_targets") as mock_discover_targets:
             mock_discover_targets.return_value = [
-                "triangle",
+                "3dgs-renderer",
                 "unit-tests",
                 "perf-tests",
             ]
@@ -805,7 +805,7 @@ class TestBuildCommand(unittest.TestCase):
 
             self.assertTrue(result.success)
             # The result should match what discover_cmake_targets returns
-            self.assertEqual(result.value, ["triangle", "unit-tests", "perf-tests"])
+            self.assertEqual(result.value, ["3dgs-renderer", "unit-tests", "perf-tests"])
             mock_discover_targets.assert_called_once_with(
                 self.source_dir, self.build_dir
             )
@@ -822,26 +822,26 @@ class TestBuildCommand(unittest.TestCase):
 
     def test_determine_targets_specific(self):
         """Test determining specific targets."""
-        self.mock_args.targets = ["triangle", "vulkan_rhi"]
+        self.mock_args.targets = ["3dgs-renderer", "vulkan_rhi"]
 
         command = BuildCommand(self.mock_args, self.source_dir, self.build_dir)
         result = command._determine_targets()
 
         self.assertTrue(result.success)
-        self.assertEqual(result.value, ["triangle", "vulkan_rhi"])
+        self.assertEqual(result.value, ["3dgs-renderer", "vulkan_rhi"])
 
     def test_determine_targets_all_with_warning(self):
         """Test determining targets with 'all' plus other targets (shows warning)."""
-        self.mock_args.targets = ["all", "triangle", "other"]
+        self.mock_args.targets = ["all", "3dgs-renderer", "other"]
 
         with patch("configure.discover_cmake_targets") as mock_discover_targets:
-            mock_discover_targets.return_value = ["triangle", "unit-tests"]
+            mock_discover_targets.return_value = ["3dgs-renderer", "unit-tests"]
             with patch("utils.term.warn") as mock_warn:
                 command = BuildCommand(self.mock_args, self.source_dir, self.build_dir)
                 result = command._determine_targets()
 
                 self.assertTrue(result.success)
-                self.assertEqual(result.value, ["triangle", "unit-tests"])
+                self.assertEqual(result.value, ["3dgs-renderer", "unit-tests"])
                 mock_warn.assert_called_once_with(
                     "When using 'all' target, other targets are ignored."
                 )
@@ -911,7 +911,7 @@ class TestOutputFiltering(unittest.TestCase):
     def test_filter_build_output_with_errors(self):
         """Test filtering build output with error patterns."""
         stdout = """
-Building target triangle
+Building target 3dgs-renderer
 This is an error message
 This is a regular line
 Another failed operation occurred
@@ -985,13 +985,13 @@ class TestTargetDiscovery(unittest.TestCase):
         # Mock successful cmake help output
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "triangle\nunit-tests\nperf-tests\nmsplat_core"
+        mock_result.stdout = "3dgs-renderer\nunit-tests\nperf-tests\nmsplat_core"
         mock_run.return_value = mock_result
 
         targets = discover_cmake_targets(self.source_dir, self.build_dir)
 
         self.assertEqual(
-            targets, ["triangle", "unit-tests", "perf-tests", "msplat_core"]
+            targets, ["3dgs-renderer", "unit-tests", "perf-tests", "msplat_core"]
         )
         mock_run.assert_called_once()
 
@@ -1006,14 +1006,14 @@ class TestTargetDiscovery(unittest.TestCase):
         cmake_file.write_text(
             """
 project(TestProject)
-add_executable(triangle main.cpp)
+add_executable(3dgs-renderer main.cpp)
 add_library(core src/core.cpp)
 """
         )
 
         targets = discover_cmake_targets(self.source_dir, self.build_dir)
 
-        self.assertIn("triangle", targets)
+        self.assertIn("3dgs-renderer", targets)
         self.assertIn("core", targets)
 
     def test_discover_cmake_targets_no_build_dir(self):
@@ -1041,7 +1041,7 @@ add_library(my_lib STATIC src/lib.cpp)
         targets = discover_cmake_targets(self.source_dir, self.build_dir)
 
         # Should contain fallback targets
-        expected_fallbacks = ["triangle", "unit-tests", "perf-tests"]
+        expected_fallbacks = ["3dgs-renderer", "unit-tests", "perf-tests"]
         for target in expected_fallbacks:
             self.assertIn(target, targets)
 

@@ -549,7 +549,7 @@ def print_success_instructions(args, source_dir: Path, build_dir: Path) -> None:
 
     # Print build command suggestions
     term.info("Build with the new build command:")
-    print(f"  python scripts/configure.py build --target triangle")
+    print(f"  python scripts/configure.py build --target 3dgs-renderer")
     print(f"  python scripts/configure.py build --tests --run")
     print(f"  python scripts/configure.py build --target all")
     print(f"  python scripts/configure.py build --list-targets")
