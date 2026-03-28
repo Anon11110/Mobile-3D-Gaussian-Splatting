@@ -1,5 +1,7 @@
 # Mobile 3D Gaussian Splatting
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 ![Garden scene rendered with Mobile 3D Gaussian Splatting](docs/figures/Garden.png)
 
 ![Kitchen](docs/figures/Kitchen.png)
