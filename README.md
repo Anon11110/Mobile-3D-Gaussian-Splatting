@@ -99,7 +99,7 @@ The hardware rasterization pipeline is driven entirely from the GPU through a pr
 
 #### Async Compute (optional)
 
-![Async Compute 2 Frames in Flight](docs\figures\Async_Compute_2_Frames_in_Flight.png)
+![Async Compute 2 Frames in Flight](docs/figures/Async_Compute_2_Frames_in_Flight.png)
 
 After profiling, we noticed that color blending takes almost half of the render pass time on mobile. While the ROP is busy blending, the GPU ALUs are mostly sitting idle. That gives us an opportunity to overlap the next frame's precompute + sort with the current frame's color blending on a dedicated compute queue.
 
@@ -119,11 +119,11 @@ Thus, we design a chunked approach using early stencil test for transmittance cu
 - Use stencil buffer updates to mark pixels when accumulated transmittance drops below the termination threshold
 - Subsequent chunks use early-stencil testing, allowing the GPU to skip fragment shading and blending entirely for saturated pixels
 
-![Chunked Transmittance Culling](docs\figures\Chunked_Transmittance_Culling.png)
+![Chunked Transmittance Culling](docs/figures/Chunked_Transmittance_Culling.png)
 
 Heatmap visualizing the savings from transmittance culling:
 
-![Chunked Transmittance Culling Saving](docs\figures\Chunked_Transmittance_Culling_Saving.png)
+![Chunked Transmittance Culling Saving](docs/figures/Chunked_Transmittance_Culling_Saving.png)
 
 ### Performance
 
