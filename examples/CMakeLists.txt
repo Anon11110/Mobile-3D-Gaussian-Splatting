@@ -1,8 +1,5 @@
 # Examples directory
 
-# Add splat loader example
-add_subdirectory(splat-loader)
-
 # Add unit tests
 add_subdirectory(unit-tests)
 

@@ -46,7 +46,6 @@ FORMAT_DIRS = [
     "examples/3dgs-renderer/",
     "examples/unit-tests/",
     "examples/perf-tests/",
-    "examples/splat-loader/",
     "include/msplat/app",
     "include/msplat/core",
     "include/msplat/engine",

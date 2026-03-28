@@ -13,6 +13,7 @@ add_executable(unit-tests
     test_string.cpp
     test_async_buffer_upload.cpp
     test_scene.cpp
+    test_splat_loader.cpp
 )
 
 # Link with core library, engine, and RHI

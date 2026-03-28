@@ -452,9 +452,6 @@ The build system automatically validates that requested targets exist before att
 python3 scripts/configure.py
 python3 scripts/configure.py build --target 3dgs-renderer --run
 
-# Load and analyze a 3D Gaussian Splatting file
-python3 scripts/configure.py build --target splat-loader --run
-
 # Debug build with validation
 python3 scripts/configure.py --clean --build-type Debug --validation
 python3 scripts/configure.py build --target 3dgs-renderer --run
